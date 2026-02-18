@@ -14,13 +14,17 @@ set(xb_INSTALL_CONFDIR ${xb_INSTALL_LIBDIR}/cmake/xb-${PROJECT_VERSION})
 list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake)
 include(xb_deps)
 
-add_subdirectory(xb)
+add_subdirectory(src)
 
 if(xb_BUILD_TESTING)
   include(CTest)
   if(BUILD_TESTING)
-    add_subdirectory(xb_testing)
+    add_subdirectory(test)
   endif()
+endif()
+
+if(xb_BUILD_EXAMPLES)
+
 endif()
 
 install(EXPORT xb_EXPORTS

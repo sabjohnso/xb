@@ -7,79 +7,17 @@
     },
     "configurePresets": [
 	{
-	    "name": "base",
-	    "hidden" : true,
+	    "name": "default",
+            "hidden" : true,
 	    "generator" : "Ninja Multi-Config",
 	    "cacheVariables" : {
-		"CMAKE_CXX_FLAGS" : {
-		    "type" : "STRING",
-		    "value" : "-Wall -Wextra -pedantic -Werror"
-		},
-		"CMAKE_CXX_FLAGS_RELWITHDEBINFO" : {
-		    "type" : "STRING",
-		    "value" : "-g -O3"
-		},
-		"CMAKE_EXPORT_COMPILE_COMMANDS" : {
-		    "type" : "BOOL",
-		    "value" : "ON"
-		}
-	    }
-	},
-	{
-	    "name" : "default",
-	    "inherits" : "base",
-	    "generator" : "Unix Makefiles",
-	    "binaryDir" : "${sourceDir}/build"
-	},
-	{
-	    "name": "multi",
-	    "inherits" : "base",
-	    "binaryDir" : "${sourceDir}/build-multi/default"
-	},
-        {
-            "name": "sanitary",
-            "inherits" : "default",
-            "cacheVariables" : {
-                "CMAKE_CXX_FLAGS" : {
-                    "type" : "STRING",
-                    "value" : "-Wall -Wextra -pedantic -Werror -fsanitize=address,undefined"
-                },
-                "CMAKE_CXX_FLAGS_RELEASE" : {
-                    "type" : "STRING",
-                    "value" : "-g -O3"
-                }
-            }
-        }
-    ],
-    "buildPresets" : [
-	{
-	    "name" : "default",
-	    "configurePreset" : "default"
-	},
-        {
-	    "name" : "sanitary",
-	    "configurePreset" : "sanitary"
+		"CMAKE_CXX_FLAGS" : "-Wall -Wextra -pedantic -Werror",
+                "CMAKE_CXX_FLAGS_RELEASE" : "-g -DNDEBUG -O3",
+		"CMAKE_CXX_FLAGS_RELWITHDEBINFO" : "-fsanitize=undefined -fsanitize=address -g -O3",
+		"CMAKE_EXPORT_COMPILE_COMMANDS" : "ON",
+                "xb_BUILD_EXAMPLES" : "ONE"
+	    },
+            "binaryDir" : "${sourceDir}/build"
 	}
-    ],
-    "testPresets" : [
-	{
-	    "name": "default",
-	    "configurePreset" : "default",
-	    "output" : {
-		"outputOnFailure" : true
-	    }
-	},
-        {
-	    "name": "sanitary",
-	    "configurePreset" : "sanitary",
-	    "output" : {
-		"outputOnFailure" : true
-	    }
-	}
-    ],
-    "packagePresets" : [
-    ],
-    "workflowPresets" : [
-
     ]
 }
