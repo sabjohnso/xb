@@ -1,0 +1,11 @@
+---
+BasedOnStyle: LLVM
+---
+NamespaceIndentation: All
+Language:        Cpp
+BinPackArguments: false
+BinPackParameters: false
+AlwaysBreakTemplateDeclarations: Yes
+ColumnLimit:     100
+AlwaysBreakAfterDefinitionReturnType: All
+AlwaysBreakAfterReturnType: All
