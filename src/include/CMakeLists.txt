@@ -16,4 +16,5 @@ install(TARGETS xb_header
 
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/config.hpp
+  xb/qname.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)
