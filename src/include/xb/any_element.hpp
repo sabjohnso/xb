@@ -1,8 +1,8 @@
 #pragma once
 
 #include <xb/any_attribute.hpp>
+#include <xb/xml_escape.hpp>
 
-#include <compare>
 #include <ostream>
 #include <string>
 #include <variant>
@@ -10,37 +10,81 @@
 
 namespace xb {
 
-struct any_element {
-  qname name;
-  std::vector<any_attribute> attributes;
-  std::vector<std::variant<std::string, any_element>> children;
+  class xml_reader;
+  class xml_writer;
 
-  auto operator<=>(const any_element&) const = default;
-  bool operator==(const any_element&) const = default;
+  class any_element {
+    qname name_;
+    std::vector<any_attribute> attributes_;
+    std::vector<std::variant<std::string, any_element>> children_;
 
-  friend std::ostream& operator<<(std::ostream& os, const any_element& e) {
-    os << '<' << e.name;
-    for (const auto& attr : e.attributes) {
-      os << ' ' << attr;
+  public:
+    using child = std::variant<std::string, any_element>;
+
+    any_element() = default;
+
+    any_element(qname name, std::vector<any_attribute> attributes,
+                std::vector<child> children)
+        : name_(std::move(name)), attributes_(std::move(attributes)),
+          children_(std::move(children)) {}
+
+    explicit any_element(xml_reader& reader);
+
+    void
+    write(xml_writer& writer) const;
+
+    const qname&
+    name() const {
+      return name_;
     }
-    if (e.children.empty()) {
-      return os << "/>";
+
+    const std::vector<any_attribute>&
+    attributes() const {
+      return attributes_;
     }
-    os << '>';
-    for (const auto& child : e.children) {
-      std::visit(
-          [&os](const auto& v) {
-            using T = std::decay_t<decltype(v)>;
-            if constexpr (std::is_same_v<T, std::string>) {
-              os << v;
-            } else {
-              os << v;
-            }
-          },
-          child);
+
+    const std::vector<child>&
+    children() const {
+      return children_;
     }
-    return os << "</" << e.name << '>';
+
+    // Declared here, defaulted out-of-line after the class is complete.
+    // Ordering (operator<=>) is intentionally omitted: three-way comparison
+    // of std::variant<std::string, any_element> is broken on clang with
+    // libstdc++ due to the recursive type, and ordering a tree is not useful.
+    bool
+    operator==(const any_element&) const;
+
+    friend std::ostream&
+    operator<<(std::ostream& os, const any_element& e) {
+      os << '<' << e.name_;
+      for (const auto& attr : e.attributes_) {
+        os << ' ' << attr;
+      }
+      if (e.children_.empty()) { return os << "/>"; }
+      os << '>';
+      for (const auto& child : e.children_) {
+        std::visit(
+            [&os](const auto& v) {
+              using T = std::decay_t<decltype(v)>;
+              if constexpr (std::is_same_v<T, std::string>) {
+                escape_text(os, v);
+              } else {
+                os << v;
+              }
+            },
+            child);
+      }
+      return os << "</" << e.name_ << '>';
+    }
+  };
+
+  // Defined out-of-line: any_element must be complete before the compiler
+  // instantiates equality comparison of std::variant<std::string, any_element>.
+  inline bool
+  any_element::operator==(const any_element& other) const {
+    return name_ == other.name_ && attributes_ == other.attributes_ &&
+           children_ == other.children_;
   }
-};
 
 } // namespace xb

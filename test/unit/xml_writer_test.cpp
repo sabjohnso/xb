@@ -64,7 +64,8 @@ TEST_CASE("writer: escape special characters in text", "[xml_writer]") {
   CHECK(os.str() == "<e>a&lt;b&gt;c&amp;d</e>");
 }
 
-TEST_CASE("writer: escape special characters in attribute values", "[xml_writer]") {
+TEST_CASE("writer: escape special characters in attribute values",
+          "[xml_writer]") {
   std::ostringstream os;
   ostream_writer writer(os);
 
@@ -107,7 +108,8 @@ TEST_CASE("writer: prefixed child elements", "[xml_writer]") {
   writer.end_element();
   writer.end_element();
 
-  CHECK(os.str() == R"(<ns:root xmlns:ns="http://example.org"><ns:child/></ns:root>)");
+  CHECK(os.str() ==
+        R"(<ns:root xmlns:ns="http://example.org"><ns:child/></ns:root>)");
 }
 
 TEST_CASE("writer: element with children is not self-closing", "[xml_writer]") {
@@ -140,12 +142,15 @@ TEST_CASE("writer: namespaced attributes", "[xml_writer]") {
   ostream_writer writer(os);
 
   writer.start_element({"", "root"});
-  writer.namespace_declaration("xsi", "http://www.w3.org/2001/XMLSchema-instance");
-  writer.attribute({"http://www.w3.org/2001/XMLSchema-instance", "type"}, "myType");
+  writer.namespace_declaration("xsi",
+                               "http://www.w3.org/2001/XMLSchema-instance");
+  writer.attribute({"http://www.w3.org/2001/XMLSchema-instance", "type"},
+                   "myType");
   writer.end_element();
 
-  CHECK(os.str() ==
-        R"(<root xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="myType"/>)");
+  CHECK(
+      os.str() ==
+      R"(<root xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="myType"/>)");
 }
 
 TEST_CASE("writer: multiple namespace declarations", "[xml_writer]") {
@@ -159,6 +164,32 @@ TEST_CASE("writer: multiple namespace declarations", "[xml_writer]") {
   writer.end_element();
   writer.end_element();
 
-  CHECK(os.str() ==
-        R"(<a:root xmlns:a="http://a.example" xmlns:b="http://b.example"><b:child/></a:root>)");
+  CHECK(
+      os.str() ==
+      R"(<a:root xmlns:a="http://a.example" xmlns:b="http://b.example"><b:child/></a:root>)");
+}
+
+TEST_CASE("writer: namespace bindings are scoped to elements", "[xml_writer]") {
+  std::ostringstream os;
+  ostream_writer writer(os);
+
+  // Parent declares ns="http://foo"
+  writer.start_element({"http://foo", "root"});
+  writer.namespace_declaration("x", "http://foo");
+
+  // Child redeclares the same URI with a different prefix
+  writer.start_element({"http://foo", "child"});
+  writer.namespace_declaration("y", "http://foo");
+  writer.end_element();
+
+  // After the child ends, the parent's binding (x -> http://foo) should
+  // be restored. A sibling element using http://foo should use prefix "x".
+  writer.start_element({"http://foo", "sibling"});
+  writer.end_element();
+
+  writer.end_element();
+
+  CHECK(
+      os.str() ==
+      R"(<x:root xmlns:x="http://foo"><y:child xmlns:y="http://foo"/><x:sibling/></x:root>)");
 }
