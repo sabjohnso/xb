@@ -2,3 +2,13 @@ add_executable(xb_qname_test qname_test.cpp)
 target_link_libraries(xb_qname_test PRIVATE Catch2::Catch2WithMain xb_header)
 target_compile_features(xb_qname_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_qname_test COMMAND xb_qname_test)
+
+add_executable(xb_xml_reader_test xml_reader_test.cpp)
+target_link_libraries(xb_xml_reader_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_xml_reader_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xml_reader_test COMMAND xb_xml_reader_test)
+
+add_executable(xb_xml_writer_test xml_writer_test.cpp)
+target_link_libraries(xb_xml_writer_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_xml_writer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xml_writer_test COMMAND xb_xml_writer_test)

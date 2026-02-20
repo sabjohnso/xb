@@ -17,4 +17,8 @@ install(TARGETS xb_header
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/config.hpp
   xb/qname.hpp
+  xb/xml_reader.hpp
+  xb/xml_writer.hpp
+  xb/expat_reader.hpp
+  xb/ostream_writer.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)
