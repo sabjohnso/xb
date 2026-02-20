@@ -29,10 +29,8 @@ namespace xb {
     qname
     parse_expat_name(const char* expat_name) {
       const char* sep = std::strchr(expat_name, '\n');
-      if (sep == nullptr) {
-        return qname{"", std::string(expat_name)};
-      }
-      return qname{std::string(expat_name, sep), std::string(sep + 1)};
+      if (sep == nullptr) { return qname("", std::string(expat_name)); }
+      return qname(std::string(expat_name, sep), std::string(sep + 1));
     }
 
   } // namespace
@@ -91,7 +89,8 @@ namespace xb {
     }
   };
 
-  expat_reader::expat_reader(std::string_view xml) : impl_(std::make_unique<impl>()) {
+  expat_reader::expat_reader(std::string_view xml)
+      : impl_(std::make_unique<impl>()) {
     // '\n' as the namespace separator
     XML_Parser parser = XML_ParserCreateNS(nullptr, '\n');
     if (parser == nullptr) {
@@ -123,13 +122,12 @@ namespace xb {
 
   expat_reader::~expat_reader() = default;
   expat_reader::expat_reader(expat_reader&&) noexcept = default;
-  expat_reader& expat_reader::operator=(expat_reader&&) noexcept = default;
+  expat_reader&
+  expat_reader::operator=(expat_reader&&) noexcept = default;
 
   bool
   expat_reader::read() {
-    if (impl_->cursor >= impl_->events.size()) {
-      return false;
-    }
+    if (impl_->cursor >= impl_->events.size()) { return false; }
     impl_->cursor++;
     return impl_->cursor <= impl_->events.size();
   }
@@ -163,9 +161,7 @@ namespace xb {
   expat_reader::attribute_value(const qname& attr_name) const {
     const auto& attrs = impl_->events[impl_->cursor - 1].attributes;
     for (const auto& attr : attrs) {
-      if (attr.name == attr_name) {
-        return attr.value;
-      }
+      if (attr.name == attr_name) { return attr.value; }
     }
     return {};
   }

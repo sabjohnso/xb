@@ -1,4 +1,5 @@
 add_library(xb STATIC
+  any_element.cpp
   expat_reader.cpp
   ostream_writer.cpp)
 

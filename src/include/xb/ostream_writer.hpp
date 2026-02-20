@@ -13,15 +13,27 @@ namespace xb {
     ~ostream_writer() override;
 
     ostream_writer(const ostream_writer&) = delete;
-    ostream_writer& operator=(const ostream_writer&) = delete;
+    ostream_writer&
+    operator=(const ostream_writer&) = delete;
     ostream_writer(ostream_writer&&) noexcept;
-    ostream_writer& operator=(ostream_writer&&) noexcept;
+    ostream_writer&
+    operator=(ostream_writer&&) noexcept;
 
-    void start_element(const qname& name) override;
-    void end_element() override;
-    void attribute(const qname& name, std::string_view value) override;
-    void characters(std::string_view text) override;
-    void namespace_declaration(std::string_view prefix, std::string_view uri) override;
+    void
+    start_element(const qname& name) override;
+
+    void
+    end_element() override;
+
+    void
+    attribute(const qname& name, std::string_view value) override;
+
+    void
+    characters(std::string_view text) override;
+
+    void
+    namespace_declaration(std::string_view prefix,
+                          std::string_view uri) override;
 
   private:
     struct impl;

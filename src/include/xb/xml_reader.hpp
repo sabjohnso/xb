@@ -17,19 +17,32 @@ namespace xb {
   public:
     virtual ~xml_reader() = default;
 
-    virtual bool read() = 0;
-    virtual xml_node_type node_type() const = 0;
+    virtual bool
+    read() = 0;
 
-    virtual const qname& name() const = 0;
+    virtual xml_node_type
+    node_type() const = 0;
 
-    virtual std::size_t attribute_count() const = 0;
-    virtual const qname& attribute_name(std::size_t index) const = 0;
-    virtual std::string_view attribute_value(std::size_t index) const = 0;
-    virtual std::string_view attribute_value(const qname& name) const = 0;
+    virtual const qname&
+    name() const = 0;
 
-    virtual std::string_view text() const = 0;
+    virtual std::size_t
+    attribute_count() const = 0;
 
-    virtual std::size_t depth() const = 0;
+    virtual const qname&
+    attribute_name(std::size_t index) const = 0;
+
+    virtual std::string_view
+    attribute_value(std::size_t index) const = 0;
+
+    virtual std::string_view
+    attribute_value(const qname& name) const = 0;
+
+    virtual std::string_view
+    text() const = 0;
+
+    virtual std::size_t
+    depth() const = 0;
   };
 
 } // namespace xb
