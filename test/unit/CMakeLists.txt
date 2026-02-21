@@ -22,3 +22,13 @@ add_executable(xb_xml_writer_test xml_writer_test.cpp)
 target_link_libraries(xb_xml_writer_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_xml_writer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xml_writer_test COMMAND xb_xml_writer_test)
+
+add_executable(xb_integer_test integer_test.cpp)
+target_link_libraries(xb_integer_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_integer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_integer_test COMMAND xb_integer_test)
+
+add_executable(xb_decimal_test decimal_test.cpp)
+target_link_libraries(xb_decimal_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_decimal_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_decimal_test COMMAND xb_decimal_test)

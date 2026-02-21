@@ -19,6 +19,8 @@ install(FILES
   xb/qname.hpp
   xb/any_attribute.hpp
   xb/any_element.hpp
+  xb/integer.hpp
+  xb/decimal.hpp
   xb/xml_reader.hpp
   xb/xml_writer.hpp
   xb/expat_reader.hpp

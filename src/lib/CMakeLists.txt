@@ -1,6 +1,8 @@
 add_library(xb STATIC
   any_element.cpp
+  decimal.cpp
   expat_reader.cpp
+  integer.cpp
   ostream_writer.cpp)
 
 target_link_libraries(xb
