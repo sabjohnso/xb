@@ -27,6 +27,9 @@ if(xb_BUILD_EXAMPLES)
 
 endif()
 
+install(FILES schema/xb-typemap.xsd
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/xb/schema)
+
 install(EXPORT xb_EXPORTS
   NAMESPACE xb::
   FILE xb-exports.cmake

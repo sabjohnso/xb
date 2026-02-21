@@ -62,3 +62,10 @@ add_executable(xb_date_time_test date_time_test.cpp)
 target_link_libraries(xb_date_time_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_date_time_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_date_time_test COMMAND xb_date_time_test)
+
+add_executable(xb_typemap_schema_test typemap_schema_test.cpp)
+target_link_libraries(xb_typemap_schema_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_typemap_schema_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+target_compile_definitions(xb_typemap_schema_test PRIVATE
+  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
+add_test(NAME xb_typemap_schema_test COMMAND xb_typemap_schema_test)

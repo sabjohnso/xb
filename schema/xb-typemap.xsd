@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:xb="http://xb.dev/typemap"
+           targetNamespace="http://xb.dev/typemap"
+           elementFormDefault="qualified">
+
+  <xs:element name="typemap" type="xb:typemapType"/>
+
+  <xs:complexType name="typemapType">
+    <xs:sequence>
+      <xs:element name="mapping" type="xb:mappingType"
+                  minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="xsdBuiltinType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="string"/>
+      <xs:enumeration value="normalizedString"/>
+      <xs:enumeration value="token"/>
+      <xs:enumeration value="boolean"/>
+      <xs:enumeration value="float"/>
+      <xs:enumeration value="double"/>
+      <xs:enumeration value="decimal"/>
+      <xs:enumeration value="integer"/>
+      <xs:enumeration value="nonPositiveInteger"/>
+      <xs:enumeration value="negativeInteger"/>
+      <xs:enumeration value="nonNegativeInteger"/>
+      <xs:enumeration value="positiveInteger"/>
+      <xs:enumeration value="long"/>
+      <xs:enumeration value="int"/>
+      <xs:enumeration value="short"/>
+      <xs:enumeration value="byte"/>
+      <xs:enumeration value="unsignedLong"/>
+      <xs:enumeration value="unsignedInt"/>
+      <xs:enumeration value="unsignedShort"/>
+      <xs:enumeration value="unsignedByte"/>
+      <xs:enumeration value="dateTime"/>
+      <xs:enumeration value="date"/>
+      <xs:enumeration value="time"/>
+      <xs:enumeration value="duration"/>
+      <xs:enumeration value="hexBinary"/>
+      <xs:enumeration value="base64Binary"/>
+      <xs:enumeration value="anyURI"/>
+      <xs:enumeration value="QName"/>
+      <xs:enumeration value="ID"/>
+      <xs:enumeration value="IDREF"/>
+      <xs:enumeration value="NMTOKEN"/>
+      <xs:enumeration value="language"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="mappingType">
+    <xs:attribute name="xsd-type" type="xb:xsdBuiltinType" use="required"/>
+    <xs:attribute name="cpp-type" type="xs:string" use="required"/>
+    <xs:attribute name="cpp-header" type="xs:string" use="required"/>
+  </xs:complexType>
+
+</xs:schema>
