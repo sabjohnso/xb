@@ -3,7 +3,13 @@ add_library(xb STATIC
   decimal.cpp
   expat_reader.cpp
   integer.cpp
-  ostream_writer.cpp)
+  ostream_writer.cpp
+  year_month_duration.cpp
+  day_time_duration.cpp
+  duration.cpp
+  date.cpp
+  time.cpp
+  date_time.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

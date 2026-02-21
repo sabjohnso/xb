@@ -32,3 +32,33 @@ add_executable(xb_decimal_test decimal_test.cpp)
 target_link_libraries(xb_decimal_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_decimal_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_decimal_test COMMAND xb_decimal_test)
+
+add_executable(xb_year_month_duration_test year_month_duration_test.cpp)
+target_link_libraries(xb_year_month_duration_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_year_month_duration_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_year_month_duration_test COMMAND xb_year_month_duration_test)
+
+add_executable(xb_day_time_duration_test day_time_duration_test.cpp)
+target_link_libraries(xb_day_time_duration_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_day_time_duration_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_day_time_duration_test COMMAND xb_day_time_duration_test)
+
+add_executable(xb_duration_test duration_test.cpp)
+target_link_libraries(xb_duration_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_duration_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_duration_test COMMAND xb_duration_test)
+
+add_executable(xb_date_test date_test.cpp)
+target_link_libraries(xb_date_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_date_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_date_test COMMAND xb_date_test)
+
+add_executable(xb_time_test time_test.cpp)
+target_link_libraries(xb_time_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_time_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_time_test COMMAND xb_time_test)
+
+add_executable(xb_date_time_test date_time_test.cpp)
+target_link_libraries(xb_date_time_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_date_time_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_date_time_test COMMAND xb_date_time_test)

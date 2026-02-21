@@ -21,6 +21,12 @@ install(FILES
   xb/any_element.hpp
   xb/integer.hpp
   xb/decimal.hpp
+  xb/year_month_duration.hpp
+  xb/day_time_duration.hpp
+  xb/duration.hpp
+  xb/date.hpp
+  xb/time.hpp
+  xb/date_time.hpp
   xb/xml_reader.hpp
   xb/xml_writer.hpp
   xb/expat_reader.hpp
