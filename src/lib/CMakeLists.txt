@@ -9,7 +9,8 @@ add_library(xb STATIC
   duration.cpp
   date.cpp
   time.cpp
-  date_time.cpp)
+  date_time.cpp
+  type_map.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

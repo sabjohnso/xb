@@ -31,4 +31,5 @@ install(FILES
   xb/xml_writer.hpp
   xb/expat_reader.hpp
   xb/ostream_writer.hpp
+  xb/type_map.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)
