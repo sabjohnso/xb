@@ -90,6 +90,21 @@ target_compile_definitions(xb_schema_parser_test PRIVATE
   XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
 add_test(NAME xb_schema_parser_test COMMAND xb_schema_parser_test)
 
+add_executable(xb_codegen_test codegen_test.cpp)
+target_link_libraries(xb_codegen_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_codegen_test COMMAND xb_codegen_test)
+
+add_executable(xb_naming_test naming_test.cpp)
+target_link_libraries(xb_naming_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_naming_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_naming_test COMMAND xb_naming_test)
+
+add_executable(xb_cpp_code_test cpp_code_test.cpp)
+target_link_libraries(xb_cpp_code_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_cpp_code_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_cpp_code_test COMMAND xb_cpp_code_test)
+
 add_executable(xb_typemap_schema_test typemap_schema_test.cpp)
 target_link_libraries(xb_typemap_schema_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_typemap_schema_test PRIVATE cxx_std_${xb_CXX_STANDARD})

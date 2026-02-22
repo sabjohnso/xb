@@ -13,7 +13,10 @@ add_library(xb STATIC
   type_map.cpp
   model_group.cpp
   schema_parser.cpp
-  schema_set.cpp)
+  schema_set.cpp
+  cpp_writer.cpp
+  naming.cpp
+  codegen.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

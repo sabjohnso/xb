@@ -47,4 +47,8 @@ install(FILES
   xb/schema.hpp
   xb/schema_parser.hpp
   xb/schema_set.hpp
+  xb/cpp_code.hpp
+  xb/cpp_writer.hpp
+  xb/naming.hpp
+  xb/codegen.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)
