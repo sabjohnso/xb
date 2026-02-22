@@ -46,6 +46,9 @@ namespace xb {
     std::size_t
     depth() const override;
 
+    std::string_view
+    namespace_uri_for_prefix(std::string_view prefix) const override;
+
   private:
     struct impl;
     std::unique_ptr<impl> impl_;

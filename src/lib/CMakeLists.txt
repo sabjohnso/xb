@@ -10,7 +10,10 @@ add_library(xb STATIC
   date.cpp
   time.cpp
   date_time.cpp
-  type_map.cpp)
+  type_map.cpp
+  model_group.cpp
+  schema_parser.cpp
+  schema_set.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

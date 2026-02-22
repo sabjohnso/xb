@@ -17,11 +17,17 @@ namespace xb {
       std::string value;
     };
 
+    struct ns_decl {
+      std::string prefix;
+      std::string uri;
+    };
+
     struct event {
       xml_node_type type;
       qname name;
       std::string text;
       std::vector<attribute> attributes;
+      std::vector<ns_decl> ns_decls;
       std::size_t depth;
     };
 
@@ -39,6 +45,14 @@ namespace xb {
     std::vector<event> events;
     std::size_t cursor = 0;
     std::size_t current_depth = 0;
+    std::vector<ns_decl> pending_ns_decls;
+
+    static void XMLCALL
+    on_start_ns_decl(void* user_data, const char* prefix, const char* uri) {
+      auto* self = static_cast<impl*>(user_data);
+      self->pending_ns_decls.push_back(
+          {prefix ? std::string(prefix) : "", uri ? std::string(uri) : ""});
+    }
 
     static void XMLCALL
     on_start_element(void* user_data, const char* name, const char** atts) {
@@ -49,6 +63,8 @@ namespace xb {
       ev.type = xml_node_type::start_element;
       ev.name = parse_expat_name(name);
       ev.depth = self->current_depth;
+      ev.ns_decls = std::move(self->pending_ns_decls);
+      self->pending_ns_decls.clear();
 
       for (const char** p = atts; *p != nullptr; p += 2) {
         ev.attributes.push_back({parse_expat_name(p[0]), std::string(p[1])});
@@ -100,6 +116,7 @@ namespace xb {
     XML_SetUserData(parser, impl_.get());
     XML_SetElementHandler(parser, impl::on_start_element, impl::on_end_element);
     XML_SetCharacterDataHandler(parser, impl::on_character_data);
+    XML_SetNamespaceDeclHandler(parser, impl::on_start_ns_decl, nullptr);
 
     XML_Status status =
         XML_Parse(parser, xml.data(), static_cast<int>(xml.size()), XML_TRUE);
@@ -174,6 +191,25 @@ namespace xb {
   std::size_t
   expat_reader::depth() const {
     return impl_->events[impl_->cursor - 1].depth;
+  }
+
+  std::string_view
+  expat_reader::namespace_uri_for_prefix(std::string_view prefix) const {
+    // Search backwards from the current event to find the most recent
+    // start_element that declares this prefix (respecting XML scope)
+    std::size_t current = impl_->cursor - 1;
+    std::size_t current_depth = impl_->events[current].depth;
+
+    for (std::size_t i = current + 1; i > 0; --i) {
+      const auto& ev = impl_->events[i - 1];
+      if (ev.type != xml_node_type::start_element) continue;
+      // Only consider events at or above our depth (in scope)
+      if (ev.depth > current_depth) continue;
+      for (const auto& decl : ev.ns_decls) {
+        if (decl.prefix == prefix) { return decl.uri; }
+      }
+    }
+    return {};
   }
 
 } // namespace xb

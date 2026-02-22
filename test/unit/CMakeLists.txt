@@ -68,6 +68,28 @@ target_link_libraries(xb_type_map_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_type_map_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_type_map_test COMMAND xb_type_map_test)
 
+add_executable(xb_schema_model_test schema_model_test.cpp)
+target_link_libraries(xb_schema_model_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_schema_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_schema_model_test COMMAND xb_schema_model_test)
+
+add_executable(xb_schema_test schema_test.cpp)
+target_link_libraries(xb_schema_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_schema_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_schema_test COMMAND xb_schema_test)
+
+add_executable(xb_schema_set_test schema_set_test.cpp)
+target_link_libraries(xb_schema_set_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_schema_set_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_schema_set_test COMMAND xb_schema_set_test)
+
+add_executable(xb_schema_parser_test schema_parser_test.cpp)
+target_link_libraries(xb_schema_parser_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_schema_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+target_compile_definitions(xb_schema_parser_test PRIVATE
+  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
+add_test(NAME xb_schema_parser_test COMMAND xb_schema_parser_test)
+
 add_executable(xb_typemap_schema_test typemap_schema_test.cpp)
 target_link_libraries(xb_typemap_schema_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_typemap_schema_test PRIVATE cxx_std_${xb_CXX_STANDARD})

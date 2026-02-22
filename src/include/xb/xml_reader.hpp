@@ -43,6 +43,9 @@ namespace xb {
 
     virtual std::size_t
     depth() const = 0;
+
+    virtual std::string_view
+    namespace_uri_for_prefix(std::string_view prefix) const = 0;
   };
 
 } // namespace xb

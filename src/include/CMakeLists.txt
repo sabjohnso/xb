@@ -32,4 +32,19 @@ install(FILES
   xb/expat_reader.hpp
   xb/ostream_writer.hpp
   xb/type_map.hpp
+  xb/schema_fwd.hpp
+  xb/occurrence.hpp
+  xb/facet_set.hpp
+  xb/wildcard.hpp
+  xb/simple_type.hpp
+  xb/element_decl.hpp
+  xb/attribute_decl.hpp
+  xb/model_group.hpp
+  xb/content_type.hpp
+  xb/complex_type.hpp
+  xb/model_group_def.hpp
+  xb/attribute_group_def.hpp
+  xb/schema.hpp
+  xb/schema_parser.hpp
+  xb/schema_set.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)

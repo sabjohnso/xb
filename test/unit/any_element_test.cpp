@@ -71,6 +71,11 @@ namespace {
     depth() const override {
       return 1;
     }
+
+    std::string_view
+    namespace_uri_for_prefix(std::string_view /*prefix*/) const override {
+      return {};
+    }
   };
 
 } // namespace
