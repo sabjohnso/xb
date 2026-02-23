@@ -102,6 +102,61 @@ namespace xb {
       return members;
     }
 
+    // Translate a CTA XPath test to a C++ condition.
+    // Supports: @attr = 'value', @attr != 'value'
+    // Returns {attr_name, op, value} or empty strings if unsupported.
+    struct cta_condition {
+      std::string attr_name;
+      std::string op;
+      std::string value;
+    };
+
+    cta_condition
+    parse_cta_test(const std::string& xpath) {
+      // Pattern: @attr = 'value' or @attr != 'value'
+      // Trim whitespace
+      auto trim = [](std::string_view sv) {
+        while (!sv.empty() && sv.front() == ' ')
+          sv.remove_prefix(1);
+        while (!sv.empty() && sv.back() == ' ')
+          sv.remove_suffix(1);
+        return sv;
+      };
+
+      std::string_view sv = trim(xpath);
+
+      // Must start with @
+      if (sv.empty() || sv.front() != '@') return {};
+      sv.remove_prefix(1);
+
+      // Find operator (= or !=)
+      auto eq_pos = sv.find("!=");
+      std::string op;
+      std::string_view attr_part;
+      std::string_view value_part;
+
+      if (eq_pos != std::string_view::npos) {
+        op = "!=";
+        attr_part = trim(sv.substr(0, eq_pos));
+        value_part = trim(sv.substr(eq_pos + 2));
+      } else {
+        eq_pos = sv.find('=');
+        if (eq_pos == std::string_view::npos) return {};
+        op = "==";
+        attr_part = trim(sv.substr(0, eq_pos));
+        value_part = trim(sv.substr(eq_pos + 1));
+      }
+
+      // Value must be quoted with ' or "
+      if (value_part.size() < 2) return {};
+      char quote = value_part.front();
+      if ((quote != '\'' && quote != '"') || value_part.back() != quote)
+        return {};
+      value_part = value_part.substr(1, value_part.size() - 2);
+
+      return {std::string(attr_part), op, std::string(value_part)};
+    }
+
     std::string
     field_type_for_element(const element_decl& elem, const occurrence& occurs,
                            const type_resolver& resolver,
@@ -150,10 +205,35 @@ namespace xb {
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
-              fields.push_back({field_type_for_element(term, p.occurs, resolver,
-                                                       containing_type_name),
-                                to_cpp_identifier(term.name().local_name()),
-                                default_value_for_element(term)});
+              // Check for conditional type assignment (CTA)
+              if (!term.type_alternatives().empty()) {
+                std::string variant = "std::variant<";
+                std::set<std::string> seen;
+                bool first = true;
+                for (const auto& alt : term.type_alternatives()) {
+                  std::string t = resolver.resolve(alt.type_name);
+                  if (!seen.insert(t).second) continue;
+                  if (!first) variant += ", ";
+                  variant += t;
+                  first = false;
+                }
+                variant += ">";
+
+                std::string type = variant;
+                if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                  type = "std::vector<" + type + ">";
+                else if (p.occurs.min_occurs == 0)
+                  type = "std::optional<" + type + ">";
+
+                fields.push_back(
+                    {type, to_cpp_identifier(term.name().local_name()), ""});
+              } else {
+                fields.push_back(
+                    {field_type_for_element(term, p.occurs, resolver,
+                                            containing_type_name),
+                     to_cpp_identifier(term.name().local_name()),
+                     default_value_for_element(term)});
+              }
             } else if constexpr (std::is_same_v<T, element_ref>) {
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
@@ -896,12 +976,60 @@ namespace xb {
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
-              bool is_recursive = (term.type_name() == containing_type_name);
-              emit_write_element(body,
-                                 {to_cpp_identifier(term.name().local_name()),
-                                  term.name(), term.type_name(), p.occurs,
-                                  term.nillable(), is_recursive},
-                                 resolver.schemas, resolver);
+              if (!term.type_alternatives().empty()) {
+                // CTA: std::visit dispatch over variant alternatives
+                std::string field =
+                    "value." + to_cpp_identifier(term.name().local_name());
+                std::string qn = "xb::qname{\"" + term.name().namespace_uri() +
+                                 "\", \"" + term.name().local_name() + "\"}";
+
+                auto emit_visit = [&](const std::string& val_expr) {
+                  body += "  std::visit([&](const auto& v) {\n";
+                  body += "    using VT = std::decay_t<decltype(v)>;\n";
+                  std::set<std::string> seen;
+                  bool first = true;
+                  for (const auto& alt : term.type_alternatives()) {
+                    std::string cpp_type = resolver.resolve(alt.type_name);
+                    if (!seen.insert(cpp_type).second) continue;
+                    std::string kw = first ? "if" : "else if";
+                    body += "    " + kw + " constexpr (std::is_same_v<VT, " +
+                            cpp_type + ">) {\n";
+                    body += "      writer.start_element(" + qn + ");\n";
+                    if (is_complex_type(resolver.schemas, alt.type_name)) {
+                      std::string write_fn =
+                          "write_" +
+                          to_cpp_identifier(alt.type_name.local_name());
+                      body += "      " + write_fn + "(v, writer);\n";
+                    } else {
+                      body +=
+                          "      xb::write_simple(writer, " + qn + ", v);\n";
+                    }
+                    body += "      writer.end_element();\n";
+                    body += "    }\n";
+                    first = false;
+                  }
+                  body += "  }, " + val_expr + ");\n";
+                };
+
+                if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
+                  body += "  for (const auto& item : " + field + ") {\n";
+                  emit_visit("item");
+                  body += "  }\n";
+                } else if (p.occurs.min_occurs == 0) {
+                  body += "  if (" + field + ") {\n";
+                  emit_visit("*" + field);
+                  body += "  }\n";
+                } else {
+                  emit_visit(field);
+                }
+              } else {
+                bool is_recursive = (term.type_name() == containing_type_name);
+                emit_write_element(body,
+                                   {to_cpp_identifier(term.name().local_name()),
+                                    term.name(), term.type_name(), p.occurs,
+                                    term.nillable(), is_recursive},
+                                   resolver.schemas, resolver);
+              }
             } else if constexpr (std::is_same_v<T, element_ref>) {
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
@@ -1239,15 +1367,72 @@ namespace xb {
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
-              bool is_recursive = (term.type_name() == containing_type_name);
               std::string qn = "xb::qname{\"" + term.name().namespace_uri() +
                                "\", \"" + term.name().local_name() + "\"}";
               std::string kw = first_branch ? "if" : "else if";
               body += "    " + kw + " (name == " + qn + ") {\n";
-              body += emit_read_element(
-                  {to_cpp_identifier(term.name().local_name()), term.name(),
-                   term.type_name(), p.occurs, term.nillable(), is_recursive},
-                  resolver.schemas, resolver);
+
+              if (!term.type_alternatives().empty()) {
+                // CTA: dispatch based on attribute values
+                std::string field =
+                    "result." + to_cpp_identifier(term.name().local_name());
+
+                auto emit_read_alt = [&](const type_alternative& alt) {
+                  bool is_complex =
+                      is_complex_type(resolver.schemas, alt.type_name);
+                  if (is_complex) {
+                    std::string read_fn =
+                        "read_" + to_cpp_identifier(alt.type_name.local_name());
+                    if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                      body += "        " + field + ".push_back(" + read_fn +
+                              "(reader));\n";
+                    else
+                      body +=
+                          "        " + field + " = " + read_fn + "(reader);\n";
+                  } else {
+                    std::string cpp_type = resolver.resolve(alt.type_name);
+                    if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                      body += "        " + field +
+                              ".push_back(xb::read_simple<" + cpp_type +
+                              ">(reader));\n";
+                    else
+                      body += "        " + field + " = xb::read_simple<" +
+                              cpp_type + ">(reader);\n";
+                  }
+                };
+
+                bool first_alt = true;
+                const type_alternative* default_alt = nullptr;
+                for (const auto& alt : term.type_alternatives()) {
+                  if (!alt.test.has_value()) {
+                    default_alt = &alt;
+                    continue;
+                  }
+                  auto cond = parse_cta_test(alt.test.value());
+                  if (cond.attr_name.empty()) continue; // unsupported XPath
+
+                  std::string akw = first_alt ? "if" : "else if";
+                  body += "      " + akw +
+                          " (reader.attribute_value(xb::qname{\"\", \"" +
+                          cond.attr_name + "\"}) " + cond.op + " \"" +
+                          cond.value + "\") {\n";
+                  emit_read_alt(alt);
+                  body += "      }\n";
+                  first_alt = false;
+                }
+                if (default_alt) {
+                  body += "      else {\n";
+                  emit_read_alt(*default_alt);
+                  body += "      }\n";
+                }
+              } else {
+                bool is_recursive = (term.type_name() == containing_type_name);
+                body += emit_read_element(
+                    {to_cpp_identifier(term.name().local_name()), term.name(),
+                     term.type_name(), p.occurs, term.nillable(), is_recursive},
+                    resolver.schemas, resolver);
+              }
+
               body += "    }\n";
               first_branch = false;
             } else if constexpr (std::is_same_v<T, element_ref>) {

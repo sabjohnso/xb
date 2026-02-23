@@ -363,6 +363,73 @@ TEST_CASE("compile: complex type with open content",
   CHECK(compile_generated_files(files, "open_content"));
 }
 
+TEST_CASE("generate from CTA element compiles", "[codegen][compile][cta]") {
+  schema s;
+  s.set_target_namespace("http://example.com/cta");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  // Alternative types (each with a "kind" attribute for CTA dispatch)
+  std::vector<attribute_use> car_attrs;
+  car_attrs.push_back({qname{"", "kind"}, qname{xs, "string"}, true, {}, {}});
+  std::vector<particle> car_particles;
+  car_particles.emplace_back(
+      element_decl(qname{"http://example.com/cta", "doors"}, qname{xs, "int"}));
+  model_group car_seq(compositor_kind::sequence, std::move(car_particles));
+  content_type car_ct(content_kind::element_only,
+                      complex_content(qname{}, derivation_method::restriction,
+                                      std::move(car_seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/cta", "CarType"},
+                                  false, false, std::move(car_ct),
+                                  std::move(car_attrs)));
+
+  std::vector<attribute_use> truck_attrs;
+  truck_attrs.push_back({qname{"", "kind"}, qname{xs, "string"}, true, {}, {}});
+  std::vector<particle> truck_particles;
+  truck_particles.emplace_back(element_decl(
+      qname{"http://example.com/cta", "payload"}, qname{xs, "double"}));
+  model_group truck_seq(compositor_kind::sequence, std::move(truck_particles));
+  content_type truck_ct(content_kind::element_only,
+                        complex_content(qname{}, derivation_method::restriction,
+                                        std::move(truck_seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/cta", "TruckType"},
+                                  false, false, std::move(truck_ct),
+                                  std::move(truck_attrs)));
+
+  // Container type with CTA element
+  std::vector<type_alternative> alts = {
+      {std::string("@kind = 'car'"),
+       qname{"http://example.com/cta", "CarType"}},
+      {std::string("@kind = 'truck'"),
+       qname{"http://example.com/cta", "TruckType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/cta", "vehicle"},
+                   qname{"http://example.com/cta", "CarType"}, false, false,
+                   std::nullopt, std::nullopt, std::nullopt, std::move(alts)));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/cta", "GarageType"},
+                                  false, false, std::move(ct)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "cta_element"));
+}
+
 TEST_CASE("split mode: xb-typemap.xsd compiles", "[codegen][compile][split]") {
   std::string schema_path =
       std::string(STRINGIFY(XB_SCHEMA_DIR)) + "/xb-typemap.xsd";

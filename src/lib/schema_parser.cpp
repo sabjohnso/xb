@@ -1,6 +1,7 @@
 #include <xb/schema_parser.hpp>
 
 #include <xb/open_content.hpp>
+#include <xb/type_alternative.hpp>
 
 #include <algorithm>
 #include <memory>
@@ -254,6 +255,38 @@ namespace xb {
                          std::move(member_types));
     }
 
+    // Parse xs:alternative children of an element declaration.
+    // The reader must be positioned on the xs:element start tag.
+    // Reads children and returns any xs:alternative elements found.
+    std::vector<type_alternative>
+    parse_alternatives(xml_reader& reader, std::size_t elem_depth) {
+      std::vector<type_alternative> alts;
+      while (read_skip_ws(reader)) {
+        if (reader.node_type() == xml_node_type::end_element &&
+            reader.depth() == elem_depth) {
+          break;
+        }
+        if (reader.node_type() != xml_node_type::start_element) continue;
+        if (reader.name().namespace_uri() != xs_ns) {
+          skip_element(reader);
+          continue;
+        }
+        if (reader.name().local_name() == "alternative") {
+          auto test = opt_attr(reader, "test");
+          auto type_str = opt_attr(reader, "type");
+          qname type_name;
+          if (type_str.has_value()) {
+            type_name = resolve_qname(reader, type_str.value());
+          }
+          skip_element(reader);
+          alts.push_back({test, type_name});
+        } else {
+          skip_element(reader);
+        }
+      }
+      return alts;
+    }
+
     // Parse a particle's term (element, element ref, group ref, nested
     // compositor, or wildcard) from inside a compositor
     particle
@@ -320,9 +353,11 @@ namespace xb {
         auto type_str = opt_attr(reader, "type");
         qname type_name;
 
+        std::vector<type_alternative> alts;
+
         if (type_str.has_value()) {
           type_name = resolve_qname(reader, type_str.value());
-          skip_element(reader);
+          alts = parse_alternatives(reader, reader.depth());
         } else {
           // May have anonymous type child
           std::string synth_name = elem_name + "_type";
@@ -363,6 +398,15 @@ namespace xb {
                   std::move(ct_attrs), std::move(ct_agrefs),
                   std::move(ct_awild), std::move(ct_oc)));
               found_anon = true;
+            } else if (reader.name().local_name() == "alternative") {
+              auto test = opt_attr(reader, "test");
+              auto alt_type_str = opt_attr(reader, "type");
+              qname alt_type_name;
+              if (alt_type_str.has_value()) {
+                alt_type_name = resolve_qname(reader, alt_type_str.value());
+              }
+              skip_element(reader);
+              alts.push_back({test, alt_type_name});
             } else {
               skip_element(reader);
             }
@@ -377,7 +421,9 @@ namespace xb {
         auto nillable = opt_attr(reader, "nillable").value_or("") == "true";
         auto abstract = opt_attr(reader, "abstract").value_or("") == "true";
 
-        element_decl ed(qname(tns, elem_name), type_name, nillable, abstract);
+        element_decl ed(qname(tns, elem_name), type_name, nillable, abstract,
+                        std::nullopt, std::nullopt, std::nullopt,
+                        std::move(alts));
         return particle(std::move(ed), occurs);
       }
 
@@ -698,9 +744,11 @@ namespace xb {
           subst_group = resolve_qname(reader, subst_str.value());
         }
 
+        std::vector<type_alternative> alts;
+
         if (type_str.has_value()) {
           type_name = resolve_qname(reader, type_str.value());
-          skip_element(reader);
+          alts = parse_alternatives(reader, reader.depth());
         } else {
           // Look for anonymous type child
           std::string synth_name = name + "_type";
@@ -739,6 +787,15 @@ namespace xb {
                   std::move(ct_content), std::move(ct_attrs),
                   std::move(ct_agrefs), std::move(ct_awild), std::move(ct_oc)));
               has_anon_type = true;
+            } else if (reader.name().local_name() == "alternative") {
+              auto test = opt_attr(reader, "test");
+              auto alt_type_str = opt_attr(reader, "type");
+              qname alt_type_name;
+              if (alt_type_str.has_value()) {
+                alt_type_name = resolve_qname(reader, alt_type_str.value());
+              }
+              skip_element(reader);
+              alts.push_back({test, alt_type_name});
             } else {
               skip_element(reader);
             }
@@ -747,9 +804,9 @@ namespace xb {
           if (!has_anon_type) { type_name = qname(xs_ns, "anyType"); }
         }
 
-        result.add_element(element_decl(qname(target_ns, name), type_name,
-                                        nillable, abstract, default_val,
-                                        fixed_val, subst_group));
+        result.add_element(
+            element_decl(qname(target_ns, name), type_name, nillable, abstract,
+                         default_val, fixed_val, subst_group, std::move(alts)));
       } else if (local == "attribute") {
         auto name = req_attr(reader, "name");
         auto type_str = opt_attr(reader, "type");

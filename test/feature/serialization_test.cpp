@@ -678,3 +678,138 @@ int main() {
 
   CHECK(build_and_run(files, "open_content_round_trip", test_code));
 }
+
+TEST_CASE("round-trip: conditional type assignment",
+          "[serialization][round-trip][cta]") {
+  schema s;
+  s.set_target_namespace("http://example.com/cta");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  // CarType with "kind" attribute and "doors" element
+  std::vector<attribute_use> car_attrs;
+  car_attrs.push_back({qname{"", "kind"}, qname{xs, "string"}, true, {}, {}});
+  std::vector<particle> car_particles;
+  car_particles.emplace_back(
+      element_decl(qname{"http://example.com/cta", "doors"}, qname{xs, "int"}));
+  model_group car_seq(compositor_kind::sequence, std::move(car_particles));
+  content_type car_ct(content_kind::element_only,
+                      complex_content(qname{}, derivation_method::restriction,
+                                      std::move(car_seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/cta", "CarType"},
+                                  false, false, std::move(car_ct),
+                                  std::move(car_attrs)));
+
+  // TruckType with "kind" attribute and "payload" element
+  std::vector<attribute_use> truck_attrs;
+  truck_attrs.push_back({qname{"", "kind"}, qname{xs, "string"}, true, {}, {}});
+  std::vector<particle> truck_particles;
+  truck_particles.emplace_back(element_decl(
+      qname{"http://example.com/cta", "payload"}, qname{xs, "double"}));
+  model_group truck_seq(compositor_kind::sequence, std::move(truck_particles));
+  content_type truck_ct(content_kind::element_only,
+                        complex_content(qname{}, derivation_method::restriction,
+                                        std::move(truck_seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/cta", "TruckType"},
+                                  false, false, std::move(truck_ct),
+                                  std::move(truck_attrs)));
+
+  // GarageType with CTA element "vehicle"
+  std::vector<type_alternative> alts = {
+      {std::string("@kind = 'car'"),
+       qname{"http://example.com/cta", "CarType"}},
+      {std::string("@kind = 'truck'"),
+       qname{"http://example.com/cta", "TruckType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/cta", "vehicle"},
+                   qname{"http://example.com/cta", "CarType"}, false, false,
+                   std::nullopt, std::nullopt, std::nullopt, std::move(alts)));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/cta", "GarageType"},
+                                  false, false, std::move(ct)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  std::string test_code = R"(
+int main() {
+  using namespace example::com::cta;
+
+  // Test car alternative
+  {
+    garage_type val;
+    car_type car;
+    car.kind = "car";
+    car.doors = 4;
+    val.vehicle = car;
+
+    std::ostringstream os;
+    {
+      xb::ostream_writer writer(os);
+      writer.start_element(xb::qname{"http://example.com/cta", "garage"});
+      writer.namespace_declaration("", "http://example.com/cta");
+      write_garage_type(val, writer);
+      writer.end_element();
+    }
+
+    std::string xml = os.str();
+    xb::expat_reader reader(xml);
+    reader.read();
+    auto result = read_garage_type(reader);
+
+    // Verify the car alternative was selected
+    assert(std::holds_alternative<car_type>(result.vehicle));
+    auto& result_car = std::get<car_type>(result.vehicle);
+    assert(result_car.kind == "car");
+    assert(result_car.doors == 4);
+  }
+
+  // Test truck alternative
+  {
+    garage_type val;
+    truck_type truck;
+    truck.kind = "truck";
+    truck.payload = 5.5;
+    val.vehicle = truck;
+
+    std::ostringstream os;
+    {
+      xb::ostream_writer writer(os);
+      writer.start_element(xb::qname{"http://example.com/cta", "garage"});
+      writer.namespace_declaration("", "http://example.com/cta");
+      write_garage_type(val, writer);
+      writer.end_element();
+    }
+
+    std::string xml = os.str();
+    xb::expat_reader reader(xml);
+    reader.read();
+    auto result = read_garage_type(reader);
+
+    // Verify the truck alternative was selected
+    assert(std::holds_alternative<truck_type>(result.vehicle));
+    auto& result_truck = std::get<truck_type>(result.vehicle);
+    assert(result_truck.kind == "truck");
+    assert(result_truck.payload == 5.5);
+  }
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "cta_round_trip", test_code));
+}

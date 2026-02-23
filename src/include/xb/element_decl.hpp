@@ -1,9 +1,11 @@
 #pragma once
 
 #include <xb/qname.hpp>
+#include <xb/type_alternative.hpp>
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace xb {
 
@@ -15,6 +17,7 @@ namespace xb {
     std::optional<std::string> default_value_;
     std::optional<std::string> fixed_value_;
     std::optional<qname> substitution_group_;
+    std::vector<type_alternative> type_alternatives_;
 
   public:
     element_decl() = default;
@@ -23,12 +26,14 @@ namespace xb {
                  bool abstract = false,
                  std::optional<std::string> default_value = std::nullopt,
                  std::optional<std::string> fixed_value = std::nullopt,
-                 std::optional<qname> substitution_group = std::nullopt)
+                 std::optional<qname> substitution_group = std::nullopt,
+                 std::vector<type_alternative> type_alternatives = {})
         : name_(std::move(name)), type_name_(std::move(type_name)),
           nillable_(nillable), abstract_(abstract),
           default_value_(std::move(default_value)),
           fixed_value_(std::move(fixed_value)),
-          substitution_group_(std::move(substitution_group)) {}
+          substitution_group_(std::move(substitution_group)),
+          type_alternatives_(std::move(type_alternatives)) {}
 
     const qname&
     name() const {
@@ -63,6 +68,11 @@ namespace xb {
     const std::optional<qname>&
     substitution_group() const {
       return substitution_group_;
+    }
+
+    const std::vector<type_alternative>&
+    type_alternatives() const {
+      return type_alternatives_;
     }
 
     bool

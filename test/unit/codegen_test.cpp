@@ -2645,3 +2645,360 @@ TEST_CASE("open content: empty type with open content gets read loop",
             "result.open_content.emplace_back(xb::any_element(reader))") !=
         std::string::npos);
 }
+
+// ===== Conditional Type Assignment: Type Generation =====
+
+TEST_CASE("CTA element with 2 alternatives generates variant field",
+          "[codegen][cta]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<type_alternative> alts = {
+      {std::string("@kind = 'car'"),
+       qname{"http://example.com/test", "CarType"}},
+      {std::string("@kind = 'truck'"),
+       qname{"http://example.com/test", "TruckType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "vehicle"},
+      qname{"http://example.com/test", "VehicleType"}, false, false,
+      std::nullopt, std::nullopt, std::nullopt, std::move(alts)));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  // Add the complex types so resolver can resolve them
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "VehicleType"}, false,
+                   false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "CarType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "TruckType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "container_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "vehicle");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::variant<car_type, truck_type>");
+}
+
+TEST_CASE("CTA element with alternatives + default: all types in variant",
+          "[codegen][cta]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<type_alternative> alts = {
+      {std::string("@kind = 'a'"), qname{"http://example.com/test", "AType"}},
+      {std::string("@kind = 'b'"), qname{"http://example.com/test", "BType"}},
+      {std::nullopt, qname{"http://example.com/test", "BaseType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "item"},
+                   qname{"http://example.com/test", "BaseType"}, false, false,
+                   std::nullopt, std::nullopt, std::nullopt, std::move(alts)));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "AType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "BType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "BaseType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "container_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "item");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::variant<a_type, b_type, base_type>");
+}
+
+TEST_CASE("CTA element optional occurrence wraps variant in optional",
+          "[codegen][cta]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<type_alternative> alts = {
+      {std::string("@k = '1'"), qname{"http://example.com/test", "AType"}},
+      {std::nullopt, qname{"http://example.com/test", "BType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{"http://example.com/test", "BType"},
+                                      false, false, std::nullopt, std::nullopt,
+                                      std::nullopt, std::move(alts)),
+                         occurrence{0, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "AType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "BType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "container_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "item");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::optional<std::variant<a_type, b_type>>");
+}
+
+TEST_CASE("CTA element unbounded occurrence wraps variant in vector",
+          "[codegen][cta]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<type_alternative> alts = {
+      {std::string("@k = '1'"), qname{"http://example.com/test", "AType"}},
+      {std::nullopt, qname{"http://example.com/test", "BType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{"http://example.com/test", "BType"},
+                                      false, false, std::nullopt, std::nullopt,
+                                      std::nullopt, std::move(alts)),
+                         occurrence{0, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "AType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "BType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "container_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "item");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::vector<std::variant<a_type, b_type>>");
+}
+
+TEST_CASE("element without CTA alternatives: unchanged single type field",
+          "[codegen][cta]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "simple");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "name");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::string");
+}
+
+// --- Group 4: CTA serialization / deserialization ---
+
+TEST_CASE("write function for CTA element uses std::visit dispatch",
+          "[codegen][cta][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<type_alternative> alts = {
+      {std::string("@kind = 'car'"),
+       qname{"http://example.com/test", "CarType"}},
+      {std::string("@kind = 'truck'"),
+       qname{"http://example.com/test", "TruckType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "vehicle"},
+      qname{"http://example.com/test", "VehicleType"}, false, false,
+      std::nullopt, std::nullopt, std::nullopt, std::move(alts)));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "VehicleType"}, false,
+                   false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "CarType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "TruckType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_container_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("std::visit") != std::string::npos);
+  CHECK(fn->body.find("car_type") != std::string::npos);
+  CHECK(fn->body.find("truck_type") != std::string::npos);
+  CHECK(fn->body.find("\"vehicle\"") != std::string::npos);
+}
+
+TEST_CASE("read function for CTA element dispatches on attribute value",
+          "[codegen][cta][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<type_alternative> alts = {
+      {std::string("@kind = 'car'"),
+       qname{"http://example.com/test", "CarType"}},
+      {std::string("@kind = 'truck'"),
+       qname{"http://example.com/test", "TruckType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "vehicle"},
+      qname{"http://example.com/test", "VehicleType"}, false, false,
+      std::nullopt, std::nullopt, std::nullopt, std::move(alts)));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "VehicleType"}, false,
+                   false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "CarType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "TruckType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_container_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("attribute_value") != std::string::npos);
+  CHECK(fn->body.find("\"kind\"") != std::string::npos);
+  CHECK(fn->body.find("\"car\"") != std::string::npos);
+  CHECK(fn->body.find("\"truck\"") != std::string::npos);
+  CHECK(fn->body.find("read_car_type") != std::string::npos);
+  CHECK(fn->body.find("read_truck_type") != std::string::npos);
+}
+
+TEST_CASE("read function for CTA with default alternative has else branch",
+          "[codegen][cta][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<type_alternative> alts = {
+      {std::string("@kind = 'a'"), qname{"http://example.com/test", "AType"}},
+      {std::nullopt, qname{"http://example.com/test", "BaseType"}},
+  };
+
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "item"},
+                   qname{"http://example.com/test", "BaseType"}, false, false,
+                   std::nullopt, std::nullopt, std::nullopt, std::move(alts)));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "AType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "BaseType"},
+                                  false, false, content_type{}));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_container_type");
+  REQUIRE(fn != nullptr);
+  // CTA dispatch on attribute value
+  CHECK(fn->body.find("attribute_value") != std::string::npos);
+  CHECK(fn->body.find("\"kind\"") != std::string::npos);
+  CHECK(fn->body.find("read_a_type") != std::string::npos);
+  // Default alternative generates else branch
+  CHECK(fn->body.find("else {") != std::string::npos);
+  CHECK(fn->body.find("read_base_type") != std::string::npos);
+}

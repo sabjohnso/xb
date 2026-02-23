@@ -876,3 +876,92 @@ TEST_CASE("schema_parser: defaultOpenContent suffix mode", "[schema_parser]") {
   REQUIRE(s.default_open_content().has_value());
   CHECK(s.default_open_content()->mode == open_content_mode::suffix);
 }
+
+// ===== XSD 1.1: Conditional Type Assignment =====
+
+TEST_CASE("schema_parser: global element with xs:alternative children",
+          "[schema_parser][cta]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:tns="urn:test">
+      <xs:element name="vehicle" type="tns:vehicleType">
+        <xs:alternative test="@kind = 'car'" type="tns:carType"/>
+        <xs:alternative test="@kind = 'truck'" type="tns:truckType"/>
+        <xs:alternative type="tns:vehicleType"/>
+      </xs:element>
+    </xs:schema>
+  )");
+  REQUIRE(s.elements().size() == 1);
+  const auto& elem = s.elements()[0];
+  CHECK(elem.name() == qname("urn:test", "vehicle"));
+  CHECK(elem.type_name() == qname("urn:test", "vehicleType"));
+
+  REQUIRE(elem.type_alternatives().size() == 3);
+  CHECK(elem.type_alternatives()[0].test.value() == "@kind = 'car'");
+  CHECK(elem.type_alternatives()[0].type_name == qname("urn:test", "carType"));
+  CHECK(elem.type_alternatives()[1].test.value() == "@kind = 'truck'");
+  CHECK(elem.type_alternatives()[1].type_name ==
+        qname("urn:test", "truckType"));
+  CHECK_FALSE(elem.type_alternatives()[2].test.has_value());
+  CHECK(elem.type_alternatives()[2].type_name ==
+        qname("urn:test", "vehicleType"));
+}
+
+TEST_CASE("schema_parser: inline element with xs:alternative children",
+          "[schema_parser][cta]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:tns="urn:test">
+      <xs:complexType name="ContainerType">
+        <xs:sequence>
+          <xs:element name="item" type="tns:baseType">
+            <xs:alternative test="@kind = 'a'" type="tns:aType"/>
+            <xs:alternative test="@kind = 'b'" type="tns:bType"/>
+          </xs:element>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& cc =
+      std::get<complex_content>(s.complex_types()[0].content().detail);
+  REQUIRE(cc.content_model.has_value());
+  REQUIRE(cc.content_model->particles().size() == 1);
+
+  const auto& ed =
+      std::get<element_decl>(cc.content_model->particles()[0].term);
+  REQUIRE(ed.type_alternatives().size() == 2);
+  CHECK(ed.type_alternatives()[0].test.value() == "@kind = 'a'");
+  CHECK(ed.type_alternatives()[0].type_name == qname("urn:test", "aType"));
+  CHECK(ed.type_alternatives()[1].test.value() == "@kind = 'b'");
+  CHECK(ed.type_alternatives()[1].type_name == qname("urn:test", "bType"));
+}
+
+TEST_CASE("schema_parser: element without alternatives has empty vector",
+          "[schema_parser][cta]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:element name="simple" type="xs:string"/>
+    </xs:schema>
+  )");
+  REQUIRE(s.elements().size() == 1);
+  CHECK(s.elements()[0].type_alternatives().empty());
+}
+
+TEST_CASE("schema_parser: default alternative has nullopt test",
+          "[schema_parser][cta]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:tns="urn:test">
+      <xs:element name="thing" type="tns:baseType">
+        <xs:alternative test="@x = '1'" type="tns:xType"/>
+        <xs:alternative type="tns:baseType"/>
+      </xs:element>
+    </xs:schema>
+  )");
+  REQUIRE(s.elements().size() == 1);
+  REQUIRE(s.elements()[0].type_alternatives().size() == 2);
+  CHECK(s.elements()[0].type_alternatives()[0].test.has_value());
+  CHECK_FALSE(s.elements()[0].type_alternatives()[1].test.has_value());
+}
