@@ -42,7 +42,7 @@ build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
     out << writer.write(file);
   }
 
-  // Write test main.cpp
+  // Write test main.cpp — only include headers, not source files
   auto main_path = tmp_dir / "main.cpp";
   {
     std::ofstream out(main_path);
@@ -51,8 +51,10 @@ build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
     out << "#pragma GCC diagnostic push\n";
     out << "#pragma GCC diagnostic ignored \"-Wmaybe-uninitialized\"\n";
     out << "#endif\n\n";
-    for (const auto& file : files)
-      out << "#include \"" << file.filename << "\"\n";
+    for (const auto& file : files) {
+      if (file.kind == file_kind::header)
+        out << "#include \"" << file.filename << "\"\n";
+    }
     out << "\n";
     out << "#include <xb/ostream_writer.hpp>\n";
     out << "#include <xb/expat_reader.hpp>\n";
@@ -61,6 +63,15 @@ build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
     out << "#include <iostream>\n";
     out << "\n";
     out << test_code;
+  }
+
+  // Collect generated source files for compilation
+  std::string source_files;
+  for (const auto& file : files) {
+    if (file.kind == file_kind::source) {
+      source_files += ' ';
+      source_files += (tmp_dir / file.filename).string();
+    }
   }
 
   std::string include_dir = STRINGIFY(XB_INCLUDE_DIR);
@@ -76,8 +87,8 @@ build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
   // Compile and link
   std::string cmd = "c++ -std=c++20 " + sanitizer_flags + "-I" +
                     tmp_dir.string() + " -I" + include_dir + " -o " +
-                    exe_path.string() + " " + main_path.string() + " " +
-                    lib_file + " -lexpat 2>&1";
+                    exe_path.string() + " " + main_path.string() +
+                    source_files + " " + lib_file + " -lexpat 2>&1";
   int rc = std::system(cmd.c_str());
 
   if (rc != 0) {
@@ -431,4 +442,156 @@ int main() {
 )";
 
   CHECK(build_and_run(files, "typemap_xsd", test_code));
+}
+
+// ===== Split mode round-trip tests =====
+
+TEST_CASE("split mode round-trip: sequence with attributes",
+          "[serialization][round-trip][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/order");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  facet_set side_facets;
+  side_facets.enumeration = {"Buy", "Sell"};
+  s.add_simple_type(simple_type(qname{"http://example.com/order", "SideType"},
+                                simple_type_variety::atomic,
+                                qname{xs, "string"}, side_facets));
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/order", "symbol"}, qname{xs, "string"}));
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/order", "quantity"}, qname{xs, "int"}));
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/order", "price"},
+                   qname{xs, "double"}),
+      occurrence{0, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "id"}, qname{xs, "string"}, true, {}, {}});
+  attrs.push_back({qname{"", "side"},
+                   qname{"http://example.com/order", "SideType"},
+                   true,
+                   {},
+                   {}});
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/order", "OrderType"}, false, false,
+                   std::move(ct), std::move(attrs)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 2);
+
+  std::string test_code = R"(
+int main() {
+  using namespace example::com::order;
+
+  order_type val;
+  val.id = "ABC123";
+  val.side = side_type::buy;
+  val.symbol = "AAPL";
+  val.quantity = 100;
+  val.price = 150.5;
+
+  std::ostringstream os;
+  {
+    xb::ostream_writer writer(os);
+    writer.start_element(xb::qname{"http://example.com/order", "Order"});
+    writer.namespace_declaration("", "http://example.com/order");
+    write_order_type(val, writer);
+    writer.end_element();
+  }
+
+  xb::expat_reader reader(os.str());
+  reader.read();
+  auto result = read_order_type(reader);
+
+  assert(result == val);
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "split_sequence_attrs", test_code));
+}
+
+TEST_CASE("split mode round-trip: xb-typemap.xsd",
+          "[serialization][round-trip][split]") {
+  std::string schema_path =
+      std::string(STRINGIFY(XB_SCHEMA_DIR)) + "/xb-typemap.xsd";
+  std::ifstream file(schema_path);
+  REQUIRE(file.good());
+  std::string xml((std::istreambuf_iterator<char>(file)),
+                  std::istreambuf_iterator<char>());
+
+  expat_reader reader(xml);
+  schema_parser parser;
+  auto s = parser.parse(reader);
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 2);
+
+  std::string test_code = R"(
+int main() {
+  using namespace xb::dev::typemap;
+
+  typemap_type val;
+
+  mapping_type m1;
+  m1.xsd_type = xsd_builtin_type::string;
+  m1.cpp_type = "std::string";
+  m1.cpp_header = "<string>";
+  val.mapping.push_back(m1);
+
+  mapping_type m2;
+  m2.xsd_type = xsd_builtin_type::int_;
+  m2.cpp_type = "int32_t";
+  m2.cpp_header = "<cstdint>";
+  val.mapping.push_back(m2);
+
+  std::ostringstream os;
+  {
+    xb::ostream_writer writer(os);
+    writer.start_element(xb::qname{"http://xb.dev/typemap", "typemap"});
+    writer.namespace_declaration("", "http://xb.dev/typemap");
+    write_typemap_type(val, writer);
+    writer.end_element();
+  }
+
+  xb::expat_reader reader(os.str());
+  reader.read();
+  auto result = read_typemap_type(reader);
+
+  assert(result == val);
+  assert(result.mapping.size() == 2);
+  assert(result.mapping[0].xsd_type == xsd_builtin_type::string);
+  assert(result.mapping[0].cpp_type == "std::string");
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "split_typemap_xsd", test_code));
 }

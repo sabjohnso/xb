@@ -99,8 +99,9 @@ namespace xb {
     }
 
     void
-    write_function(std::ostream& os, const cpp_function& f) {
-      if (f.is_inline) os << "inline ";
+    write_function_definition(std::ostream& os, const cpp_function& f,
+                              bool emit_inline) {
+      if (emit_inline) os << "inline ";
       os << f.return_type << ' ' << f.name << '(';
       os << f.parameters;
       os << ") {\n";
@@ -109,30 +110,75 @@ namespace xb {
     }
 
     void
-    write_decl(std::ostream& os, const cpp_decl& decl) {
+    write_function_declaration(std::ostream& os, const cpp_function& f) {
+      os << f.return_type << ' ' << f.name << '(';
+      os << f.parameters;
+      os << ");\n";
+    }
+
+    void
+    write_function(std::ostream& os, const cpp_function& f, file_kind kind) {
+      if (kind == file_kind::source) {
+        // Source: only render non-inline function definitions
+        if (!f.is_inline) write_function_definition(os, f, false);
+        // Inline functions are skipped in source mode
+        return;
+      }
+
+      // Header mode
+      if (f.is_inline) {
+        write_function_definition(os, f, true);
+      } else {
+        write_function_declaration(os, f);
+      }
+    }
+
+    void
+    write_decl(std::ostream& os, const cpp_decl& decl, file_kind kind) {
       std::visit(
-          [&os](const auto& d) {
+          [&os, kind](const auto& d) {
             using T = std::decay_t<decltype(d)>;
-            if constexpr (std::is_same_v<T, cpp_struct>)
+            if constexpr (std::is_same_v<T, cpp_function>) {
+              write_function(os, d, kind);
+            } else if (kind == file_kind::source) {
+              // Source mode: skip all non-function declarations
+              return;
+            } else if constexpr (std::is_same_v<T, cpp_struct>) {
               write_struct(os, d);
-            else if constexpr (std::is_same_v<T, cpp_enum>)
+            } else if constexpr (std::is_same_v<T, cpp_enum>) {
               write_enum(os, d);
-            else if constexpr (std::is_same_v<T, cpp_type_alias>)
+            } else if constexpr (std::is_same_v<T, cpp_type_alias>) {
               write_type_alias(os, d);
-            else if constexpr (std::is_same_v<T, cpp_forward_decl>)
+            } else if constexpr (std::is_same_v<T, cpp_forward_decl>) {
               write_forward_decl(os, d);
-            else if constexpr (std::is_same_v<T, cpp_function>)
-              write_function(os, d);
+            }
+          },
+          decl);
+    }
+
+    bool
+    has_visible_decl(const cpp_decl& decl, file_kind kind) {
+      return std::visit(
+          [kind](const auto& d) -> bool {
+            using T = std::decay_t<decltype(d)>;
+            if constexpr (std::is_same_v<T, cpp_function>) {
+              if (kind == file_kind::source) return !d.is_inline;
+              return true;
+            } else {
+              return kind == file_kind::header;
+            }
           },
           decl);
     }
 
     void
-    write_namespace(std::ostream& os, const cpp_namespace& ns) {
+    write_namespace(std::ostream& os, const cpp_namespace& ns, file_kind kind) {
       os << "\nnamespace " << ns.name << " {\n";
       for (const auto& decl : ns.declarations) {
-        os << '\n';
-        write_decl(os, decl);
+        if (has_visible_decl(decl, kind)) {
+          os << '\n';
+          write_decl(os, decl, kind);
+        }
       }
       os << "\n} // namespace " << ns.name << '\n';
     }
@@ -141,11 +187,16 @@ namespace xb {
 
   std::string
   cpp_writer::write(const cpp_file& file) const {
+    return write(file, write_options{file.kind});
+  }
+
+  std::string
+  cpp_writer::write(const cpp_file& file, write_options opts) const {
     std::ostringstream os;
-    os << "#pragma once\n";
+    if (opts.kind == file_kind::header) os << "#pragma once\n";
     write_includes(os, file.includes);
     for (const auto& ns : file.namespaces)
-      write_namespace(os, ns);
+      write_namespace(os, ns, opts.kind);
     return os.str();
   }
 

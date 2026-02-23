@@ -446,89 +446,56 @@ namespace xb {
       return cpp_type_alias{to_cpp_identifier(st.name().local_name()), base};
     }
 
-    std::vector<cpp_include>
-    compute_includes(const std::set<std::string>& referenced_namespaces,
-                     const std::vector<schema>& schemas,
-                     const std::vector<cpp_decl>& declarations) {
-      std::set<std::string> includes;
+    void
+    add_type_includes(std::set<std::string>& includes,
+                      const std::string& type_expr) {
+      if (type_expr.find("std::string") != std::string::npos)
+        includes.insert("<string>");
+      if (type_expr.find("std::optional") != std::string::npos)
+        includes.insert("<optional>");
+      if (type_expr.find("std::vector") != std::string::npos)
+        includes.insert("<vector>");
+      if (type_expr.find("std::variant") != std::string::npos)
+        includes.insert("<variant>");
+      if (type_expr.find("std::unique_ptr") != std::string::npos)
+        includes.insert("<memory>");
+      if (type_expr.find("int8_t") != std::string::npos ||
+          type_expr.find("int16_t") != std::string::npos ||
+          type_expr.find("int32_t") != std::string::npos ||
+          type_expr.find("int64_t") != std::string::npos ||
+          type_expr.find("uint8_t") != std::string::npos ||
+          type_expr.find("uint16_t") != std::string::npos ||
+          type_expr.find("uint32_t") != std::string::npos ||
+          type_expr.find("uint64_t") != std::string::npos)
+        includes.insert("<cstdint>");
+      if (type_expr.find("xb::any_element") != std::string::npos)
+        includes.insert("\"xb/any_element.hpp\"");
+      if (type_expr.find("xb::any_attribute") != std::string::npos)
+        includes.insert("\"xb/any_attribute.hpp\"");
+      if (type_expr.find("xb::decimal") != std::string::npos)
+        includes.insert("\"xb/decimal.hpp\"");
+      if (type_expr.find("xb::integer") != std::string::npos)
+        includes.insert("\"xb/integer.hpp\"");
+      if (type_expr.find("xb::qname") != std::string::npos)
+        includes.insert("\"xb/qname.hpp\"");
+      if (type_expr.find("xb::date_time") != std::string::npos)
+        includes.insert("\"xb/date_time.hpp\"");
+      else if (type_expr.find("xb::date") != std::string::npos)
+        includes.insert("\"xb/date.hpp\"");
+      if (type_expr.find("xb::time") != std::string::npos &&
+          type_expr.find("xb::date_time") == std::string::npos)
+        includes.insert("\"xb/time.hpp\"");
+      if (type_expr.find("xb::duration") != std::string::npos)
+        includes.insert("\"xb/duration.hpp\"");
+      if (type_expr.find("std::byte") != std::string::npos)
+        includes.insert("<cstddef>");
+    }
 
-      auto check_type = [&](const std::string& type_expr) {
-        if (type_expr.find("std::string") != std::string::npos)
-          includes.insert("<string>");
-        if (type_expr.find("std::optional") != std::string::npos)
-          includes.insert("<optional>");
-        if (type_expr.find("std::vector") != std::string::npos)
-          includes.insert("<vector>");
-        if (type_expr.find("std::variant") != std::string::npos)
-          includes.insert("<variant>");
-        if (type_expr.find("std::unique_ptr") != std::string::npos)
-          includes.insert("<memory>");
-        if (type_expr.find("int8_t") != std::string::npos ||
-            type_expr.find("int16_t") != std::string::npos ||
-            type_expr.find("int32_t") != std::string::npos ||
-            type_expr.find("int64_t") != std::string::npos ||
-            type_expr.find("uint8_t") != std::string::npos ||
-            type_expr.find("uint16_t") != std::string::npos ||
-            type_expr.find("uint32_t") != std::string::npos ||
-            type_expr.find("uint64_t") != std::string::npos)
-          includes.insert("<cstdint>");
-        if (type_expr.find("xb::any_element") != std::string::npos)
-          includes.insert("\"xb/any_element.hpp\"");
-        if (type_expr.find("xb::any_attribute") != std::string::npos)
-          includes.insert("\"xb/any_attribute.hpp\"");
-        if (type_expr.find("xb::decimal") != std::string::npos)
-          includes.insert("\"xb/decimal.hpp\"");
-        if (type_expr.find("xb::integer") != std::string::npos)
-          includes.insert("\"xb/integer.hpp\"");
-        if (type_expr.find("xb::qname") != std::string::npos)
-          includes.insert("\"xb/qname.hpp\"");
-        if (type_expr.find("xb::date_time") != std::string::npos)
-          includes.insert("\"xb/date_time.hpp\"");
-        else if (type_expr.find("xb::date") != std::string::npos)
-          includes.insert("\"xb/date.hpp\"");
-        if (type_expr.find("xb::time") != std::string::npos &&
-            type_expr.find("xb::date_time") == std::string::npos)
-          includes.insert("\"xb/time.hpp\"");
-        if (type_expr.find("xb::duration") != std::string::npos)
-          includes.insert("\"xb/duration.hpp\"");
-        if (type_expr.find("std::byte") != std::string::npos)
-          includes.insert("<cstddef>");
-      };
-
-      for (const auto& decl : declarations) {
-        std::visit(
-            [&](const auto& d) {
-              using T = std::decay_t<decltype(d)>;
-              if constexpr (std::is_same_v<T, cpp_struct>) {
-                for (const auto& f : d.fields)
-                  check_type(f.type);
-              } else if constexpr (std::is_same_v<T, cpp_type_alias>) {
-                check_type(d.target);
-              }
-            },
-            decl);
-      }
-
-      for (const auto& decl : declarations) {
-        if (std::holds_alternative<cpp_enum>(decl)) {
-          includes.insert("<stdexcept>");
-          includes.insert("<string>");
-          includes.insert("<string_view>");
-          break;
-        }
-      }
-
-      for (const auto& decl : declarations) {
-        if (std::holds_alternative<cpp_function>(decl)) {
-          includes.insert("\"xb/xml_value.hpp\"");
-          includes.insert("\"xb/xml_io.hpp\"");
-          includes.insert("\"xb/xml_reader.hpp\"");
-          includes.insert("\"xb/xml_writer.hpp\"");
-          break;
-        }
-      }
-
-      for (const auto& ref_ns : referenced_namespaces) {
+    void
+    add_cross_namespace_includes(std::set<std::string>& includes,
+                                 const std::set<std::string>& referenced_ns,
+                                 const std::vector<schema>& schemas) {
+      for (const auto& ref_ns : referenced_ns) {
         for (const auto& s : schemas) {
           if (s.target_namespace() == ref_ns) {
             std::string filename =
@@ -536,6 +503,88 @@ namespace xb {
             includes.insert("\"" + filename + "\"");
           }
         }
+      }
+    }
+
+    bool
+    has_enum_decl(const std::vector<cpp_decl>& declarations) {
+      return std::any_of(declarations.begin(), declarations.end(),
+                         [](const cpp_decl& d) {
+                           return std::holds_alternative<cpp_enum>(d);
+                         });
+    }
+
+    bool
+    has_function_decl(const std::vector<cpp_decl>& declarations) {
+      return std::any_of(declarations.begin(), declarations.end(),
+                         [](const cpp_decl& d) {
+                           return std::holds_alternative<cpp_function>(d);
+                         });
+    }
+
+    std::vector<cpp_include>
+    compute_includes(const std::set<std::string>& referenced_namespaces,
+                     const std::vector<schema>& schemas,
+                     const std::vector<cpp_decl>& declarations,
+                     file_kind kind = file_kind::header,
+                     const std::string& self_header = "") {
+      std::set<std::string> includes;
+
+      if (kind == file_kind::source) {
+        // Source file: include self header + runtime
+        if (!self_header.empty()) includes.insert("\"" + self_header + "\"");
+        if (has_function_decl(declarations)) {
+          includes.insert("\"xb/xml_value.hpp\"");
+          includes.insert("\"xb/xml_io.hpp\"");
+          includes.insert("\"xb/xml_reader.hpp\"");
+          includes.insert("\"xb/xml_writer.hpp\"");
+        }
+      } else {
+        // Header file: type includes + cross-namespace + enum includes
+        for (const auto& decl : declarations) {
+          std::visit(
+              [&](const auto& d) {
+                using T = std::decay_t<decltype(d)>;
+                if constexpr (std::is_same_v<T, cpp_struct>) {
+                  for (const auto& f : d.fields)
+                    add_type_includes(includes, f.type);
+                } else if constexpr (std::is_same_v<T, cpp_type_alias>) {
+                  add_type_includes(includes, d.target);
+                }
+              },
+              decl);
+        }
+
+        if (has_enum_decl(declarations)) {
+          includes.insert("<stdexcept>");
+          includes.insert("<string>");
+          includes.insert("<string_view>");
+        }
+
+        // Check if functions are inline or just declarations
+        bool has_non_inline_fn = false;
+        for (const auto& decl : declarations) {
+          if (auto* fn = std::get_if<cpp_function>(&decl)) {
+            if (!fn->is_inline) {
+              has_non_inline_fn = true;
+              break;
+            }
+          }
+        }
+        if (has_function_decl(declarations)) {
+          // Always include reader/writer headers — needed for function
+          // parameter types in both declarations and definitions
+          includes.insert("\"xb/xml_reader.hpp\"");
+          includes.insert("\"xb/xml_writer.hpp\"");
+          if (!has_non_inline_fn) {
+            // All functions inline (header_only mode): also include
+            // value/io headers needed for function bodies
+            includes.insert("\"xb/xml_value.hpp\"");
+            includes.insert("\"xb/xml_io.hpp\"");
+          }
+        }
+
+        add_cross_namespace_includes(includes, referenced_namespaces, schemas);
       }
 
       std::vector<cpp_include> result;
@@ -546,8 +595,8 @@ namespace xb {
     }
 
     std::string
-    filename_for_namespace(const std::string& target_ns) {
-      if (target_ns.empty()) return "generated.hpp";
+    stem_for_namespace(const std::string& target_ns) {
+      if (target_ns.empty()) return "generated";
 
       auto last_sep = target_ns.rfind('/');
       std::string segment;
@@ -556,7 +605,7 @@ namespace xb {
       else
         segment = target_ns;
 
-      return to_snake_case(segment) + ".hpp";
+      return to_snake_case(segment);
     }
 
     // Get the name of a declaration (for dependency resolution)
@@ -1438,10 +1487,7 @@ namespace xb {
       for (const auto& ct : s.complex_types())
         ct_by_name[to_cpp_identifier(ct.name().local_name())] = &ct;
 
-      // Generate write_ functions in the same order as the sorted type decls
-      // (which respects dependencies: if A depends on B, B comes first)
-      // Collect struct names first, then generate to avoid iterator
-      // invalidation
+      // Generate read_/write_ functions in dependency order
       std::vector<const complex_type*> ordered_cts;
       for (const auto& decl : ordered_types) {
         auto* st_decl = std::get_if<cpp_struct>(&decl);
@@ -1454,19 +1500,180 @@ namespace xb {
         ordered_types.push_back(generate_write_function(*ct_ptr, resolver));
       }
 
-      cpp_namespace ns;
-      ns.name = cpp_namespace_for(s.target_namespace(), options_);
-      ns.declarations = std::move(ordered_types);
+      // In split mode, mark read_/write_ functions as non-inline
+      if (options_.mode == output_mode::split ||
+          options_.mode == output_mode::file_per_type) {
+        for (auto& decl : ordered_types) {
+          if (auto* fn = std::get_if<cpp_function>(&decl))
+            fn->is_inline = false;
+        }
+      }
 
-      auto includes = compute_includes(referenced_namespaces,
-                                       schemas_.schemas(), ns.declarations);
+      std::string ns_name = cpp_namespace_for(s.target_namespace(), options_);
+      std::string stem = stem_for_namespace(s.target_namespace());
+      std::string header_filename = stem + ".hpp";
 
-      cpp_file file;
-      file.filename = filename_for_namespace(s.target_namespace());
-      file.includes = std::move(includes);
-      file.namespaces.push_back(std::move(ns));
+      if (options_.mode == output_mode::header_only) {
+        // Single header file per namespace (current behavior)
+        cpp_namespace ns;
+        ns.name = ns_name;
+        ns.declarations = std::move(ordered_types);
 
-      files.push_back(std::move(file));
+        auto includes = compute_includes(referenced_namespaces,
+                                         schemas_.schemas(), ns.declarations);
+
+        cpp_file file;
+        file.filename = header_filename;
+        file.kind = file_kind::header;
+        file.includes = std::move(includes);
+        file.namespaces.push_back(std::move(ns));
+
+        files.push_back(std::move(file));
+      } else if (options_.mode == output_mode::split) {
+        // Header + source file per namespace
+        cpp_namespace ns;
+        ns.name = ns_name;
+        ns.declarations = std::move(ordered_types);
+
+        auto header_includes =
+            compute_includes(referenced_namespaces, schemas_.schemas(),
+                             ns.declarations, file_kind::header);
+
+        auto source_includes = compute_includes(
+            referenced_namespaces, schemas_.schemas(), ns.declarations,
+            file_kind::source, header_filename);
+
+        cpp_file header;
+        header.filename = header_filename;
+        header.kind = file_kind::header;
+        header.includes = std::move(header_includes);
+        header.namespaces.push_back(ns); // copy — shared with source
+
+        cpp_file source;
+        source.filename = stem + ".cpp";
+        source.kind = file_kind::source;
+        source.includes = std::move(source_includes);
+        source.namespaces.push_back(std::move(ns));
+
+        files.push_back(std::move(header));
+        files.push_back(std::move(source));
+      } else if (options_.mode == output_mode::file_per_type) {
+        // Per-type headers + umbrella header + source file
+
+        // Partition declarations into per-type groups
+        // Each struct or enum gets its own header file
+        struct type_group {
+          std::string type_name;
+          std::vector<cpp_decl> decls;
+        };
+
+        std::vector<type_group> groups;
+        std::vector<cpp_decl> function_decls;
+
+        for (auto& decl : ordered_types) {
+          if (auto* st = std::get_if<cpp_struct>(&decl)) {
+            groups.push_back({st->name, {std::move(decl)}});
+          } else if (auto* en = std::get_if<cpp_enum>(&decl)) {
+            groups.push_back({en->name, {std::move(decl)}});
+          } else if (auto* alias = std::get_if<cpp_type_alias>(&decl)) {
+            // Aliases go with their name as standalone type files
+            groups.push_back({alias->name, {std::move(decl)}});
+          } else if (auto* fwd = std::get_if<cpp_forward_decl>(&decl)) {
+            // Forward decls go with their associated type — find the group
+            bool found = false;
+            for (auto& g : groups) {
+              if (g.type_name == fwd->name) {
+                g.decls.insert(g.decls.begin(), std::move(decl));
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              // Forward decl for a type not yet seen — create group
+              groups.push_back({fwd->name, {std::move(decl)}});
+            }
+          } else if (std::holds_alternative<cpp_function>(decl)) {
+            function_decls.push_back(std::move(decl));
+          }
+        }
+
+        // Emit per-type header files
+        std::vector<std::string> per_type_filenames;
+        for (const auto& group : groups) {
+          std::string type_filename = stem + "_" + group.type_name + ".hpp";
+          per_type_filenames.push_back(type_filename);
+
+          // Compute includes for this type's declarations
+          std::set<std::string> empty_ns_refs;
+          auto type_includes =
+              compute_includes(empty_ns_refs, schemas_.schemas(), group.decls,
+                               file_kind::header);
+
+          // Add includes for cross-type dependencies within the namespace
+          auto deps = decl_dependencies(group.decls.back());
+          for (const auto& dep_name : deps) {
+            for (const auto& other : groups) {
+              if (other.type_name == dep_name &&
+                  other.type_name != group.type_name) {
+                type_includes.push_back(
+                    {"\"" + stem + "_" + other.type_name + ".hpp\""});
+                break;
+              }
+            }
+          }
+
+          cpp_namespace type_ns;
+          type_ns.name = ns_name;
+          type_ns.declarations = group.decls;
+
+          cpp_file type_file;
+          type_file.filename = type_filename;
+          type_file.kind = file_kind::header;
+          type_file.includes = std::move(type_includes);
+          type_file.namespaces.push_back(std::move(type_ns));
+
+          files.push_back(std::move(type_file));
+        }
+
+        // Also add cross-namespace includes to per-type files
+        if (!referenced_namespaces.empty()) {
+          for (auto& file : files) {
+            if (file.kind == file_kind::header &&
+                file.filename != header_filename) {
+              std::set<std::string> inc_set;
+              add_cross_namespace_includes(inc_set, referenced_namespaces,
+                                           schemas_.schemas());
+              for (auto& inc : inc_set)
+                file.includes.push_back({inc});
+            }
+          }
+        }
+
+        // Emit umbrella header
+        cpp_file umbrella;
+        umbrella.filename = header_filename;
+        umbrella.kind = file_kind::header;
+        for (const auto& pf : per_type_filenames)
+          umbrella.includes.push_back({"\"" + pf + "\""});
+        files.push_back(std::move(umbrella));
+
+        // Emit source file with all function definitions
+        cpp_namespace fn_ns;
+        fn_ns.name = ns_name;
+        fn_ns.declarations = std::move(function_decls);
+
+        auto source_includes = compute_includes(
+            referenced_namespaces, schemas_.schemas(), fn_ns.declarations,
+            file_kind::source, header_filename);
+
+        cpp_file source;
+        source.filename = stem + ".cpp";
+        source.kind = file_kind::source;
+        source.includes = std::move(source_includes);
+        source.namespaces.push_back(std::move(fn_ns));
+
+        files.push_back(std::move(source));
+      }
     }
 
     return files;

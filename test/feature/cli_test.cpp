@@ -157,6 +157,101 @@ TEST_CASE("namespace mapping overrides generated namespace", "[cli]") {
   cleanup_dir(out_dir);
 }
 
+// ===== Output mode flags =====
+
+static int
+run_cli_stdout(const std::string& args, std::string& stdout_output) {
+  auto tmp = fs::temp_directory_path() / "xb_cli_stdout.txt";
+  std::string cmd = xb_cli + " " + args + " >" + tmp.string() + " 2>/dev/null";
+  int rc = exit_code(std::system(cmd.c_str()));
+  std::ifstream in(tmp);
+  stdout_output.assign(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
+  fs::remove(tmp);
+  return rc;
+}
+
+TEST_CASE("default mode produces hpp and cpp files", "[cli]") {
+  std::string out_dir = make_tmp_dir("gen_default_mode");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("-o " + out_dir + " " + schema_dir + "/xb-typemap.xsd");
+  CHECK(rc == 0);
+
+  bool found_hpp = false;
+  bool found_cpp = false;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      auto ext = entry.path().extension().string();
+      if (ext == ".hpp") found_hpp = true;
+      if (ext == ".cpp") found_cpp = true;
+    }
+  }
+  CHECK(found_hpp);
+  CHECK(found_cpp);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("--header-only produces only hpp files", "[cli]") {
+  std::string out_dir = make_tmp_dir("gen_header_only");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("--header-only -o " + out_dir + " " + schema_dir +
+                   "/xb-typemap.xsd");
+  CHECK(rc == 0);
+
+  bool found_hpp = false;
+  bool found_cpp = false;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      auto ext = entry.path().extension().string();
+      if (ext == ".hpp") found_hpp = true;
+      if (ext == ".cpp") found_cpp = true;
+    }
+  }
+  CHECK(found_hpp);
+  CHECK_FALSE(found_cpp);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("--file-per-type produces multiple hpp files", "[cli]") {
+  std::string out_dir = make_tmp_dir("gen_file_per_type");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("--file-per-type -o " + out_dir + " " + schema_dir +
+                   "/xb-typemap.xsd");
+  CHECK(rc == 0);
+
+  int hpp_count = 0;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      if (entry.path().extension() == ".hpp") ++hpp_count;
+    }
+  }
+  // Should have more than 1 header (per-type + umbrella)
+  CHECK(hpp_count > 1);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("--header-only --file-per-type is an error", "[cli]") {
+  CHECK(run_cli("--header-only --file-per-type " + schema_dir +
+                "/xb-typemap.xsd") == 1);
+}
+
+TEST_CASE("--list-outputs prints filenames without generating", "[cli]") {
+  std::string stdout_out;
+  int rc = run_cli_stdout("--list-outputs " + schema_dir + "/xb-typemap.xsd",
+                          stdout_out);
+  CHECK(rc == 0);
+  CHECK(!stdout_out.empty());
+  // Should contain at least one filename
+  CHECK(stdout_out.find(".hpp") != std::string::npos);
+  CHECK(stdout_out.find(".cpp") != std::string::npos);
+}
+
 TEST_CASE("output to non-existent directory creates it", "[cli]") {
   auto base = fs::temp_directory_path() / "xb_cli_mkdir_test";
   auto nested = base / "sub" / "dir";

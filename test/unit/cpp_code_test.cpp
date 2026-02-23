@@ -319,6 +319,150 @@ TEST_CASE("system and local includes ordering", "[cpp_writer]") {
   CHECK(sys_pos < local_pos);
 }
 
+// ===== file_kind and write_options =====
+
+TEST_CASE("non-inline function in header mode renders declaration only",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  file.kind = file_kind::header;
+  cpp_function fn;
+  fn.return_type = "int";
+  fn.name = "compute";
+  fn.parameters = "int a, int b";
+  fn.body = "  return a + b;\n";
+  fn.is_inline = false;
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("int compute(int a, int b);") != std::string::npos);
+  CHECK(result.find("return a + b") == std::string::npos);
+}
+
+TEST_CASE("non-inline function in source mode renders definition",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+  cpp_function fn;
+  fn.return_type = "int";
+  fn.name = "compute";
+  fn.parameters = "int a, int b";
+  fn.body = "  return a + b;\n";
+  fn.is_inline = false;
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("int compute(int a, int b) {") != std::string::npos);
+  CHECK(result.find("return a + b") != std::string::npos);
+  CHECK(result.find("inline") == std::string::npos);
+}
+
+TEST_CASE("source mode skips structs", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+  cpp_struct s;
+  s.name = "point";
+  s.fields.push_back({"int", "x", ""});
+  s.generate_equality = false;
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("struct") == std::string::npos);
+}
+
+TEST_CASE("source mode skips enums", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+  cpp_enum e;
+  e.name = "color";
+  e.values.push_back({"red", "red"});
+  file.namespaces.push_back({"ns", {std::move(e)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("enum") == std::string::npos);
+}
+
+TEST_CASE("source mode skips type aliases", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+  file.namespaces.push_back({"ns", {cpp_type_alias{"my_id", "std::string"}}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("using") == std::string::npos);
+}
+
+TEST_CASE("source mode skips forward declarations", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+  file.namespaces.push_back({"ns", {cpp_forward_decl{"order"}}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("struct order") == std::string::npos);
+}
+
+TEST_CASE("source mode skips inline functions", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+  cpp_function fn;
+  fn.return_type = "void";
+  fn.name = "helper";
+  fn.body = "  // noop\n";
+  fn.is_inline = true;
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("helper") == std::string::npos);
+}
+
+TEST_CASE("source mode omits pragma once", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+
+  auto result = writer.write(file);
+  CHECK(result.find("#pragma once") == std::string::npos);
+}
+
+TEST_CASE("header mode with inline functions unchanged", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  file.kind = file_kind::header;
+  cpp_function fn;
+  fn.return_type = "void";
+  fn.name = "foo";
+  fn.body = "";
+  fn.is_inline = true;
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("inline void foo()") != std::string::npos);
+  CHECK(result.find("#pragma once") != std::string::npos);
+}
+
+TEST_CASE("default write reads file.kind", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.cpp";
+  file.kind = file_kind::source;
+  cpp_function fn;
+  fn.return_type = "void";
+  fn.name = "setup";
+  fn.parameters = "int x";
+  fn.body = "  (void)x;\n";
+  fn.is_inline = false;
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  // Default write() should use file.kind (source), rendering the definition
+  auto result = writer.write(file);
+  CHECK(result.find("void setup(int x) {") != std::string::npos);
+  CHECK(result.find("(void)x;") != std::string::npos);
+}
+
 // ===== cpp_function rendering =====
 
 // TDD step 15: Render empty inline function
@@ -351,8 +495,9 @@ TEST_CASE("render function with params and body", "[cpp_writer]") {
         std::string::npos);
 }
 
-// TDD step 17: Render non-inline function
-TEST_CASE("render non-inline function", "[cpp_writer]") {
+// TDD step 17: Render non-inline function in header -> declaration only
+TEST_CASE("render non-inline function in header is declaration only",
+          "[cpp_writer]") {
   cpp_file file;
   file.filename = "test.hpp";
   cpp_function fn;
@@ -364,8 +509,8 @@ TEST_CASE("render non-inline function", "[cpp_writer]") {
   file.namespaces.push_back({"ns", {std::move(fn)}});
 
   auto result = writer.write(file);
-  CHECK(result.find("void setup(int x) {\n  (void)x;\n}\n") !=
-        std::string::npos);
-  // Should NOT have "inline" prefix
+  // In header mode, non-inline -> declaration only
+  CHECK(result.find("void setup(int x);") != std::string::npos);
+  CHECK(result.find("(void)x") == std::string::npos);
   CHECK(result.find("inline void setup") == std::string::npos);
 }

@@ -41,19 +41,48 @@ compile_generated_files(const std::vector<cpp_file>& files,
     out << writer.write(file);
   }
 
-  // Write a main.cpp that includes all generated headers
+  // Write a main.cpp that includes only header files
   auto main_path = tmp_dir / "main.cpp";
   {
     std::ofstream out(main_path);
-    for (const auto& file : files)
-      out << "#include \"" << file.filename << "\"\n";
+    for (const auto& file : files) {
+      if (file.kind == file_kind::header)
+        out << "#include \"" << file.filename << "\"\n";
+    }
     out << "int main() { return 0; }\n";
+  }
+
+  // Collect source files for compilation
+  std::string source_files;
+  for (const auto& file : files) {
+    if (file.kind == file_kind::source) {
+      source_files += ' ';
+      source_files += (tmp_dir / file.filename).string();
+    }
   }
 
   // Compile with the system C++ compiler
   std::string include_dir = STRINGIFY(XB_INCLUDE_DIR);
-  std::string cmd = "c++ -std=c++20 -fsyntax-only -I" + tmp_dir.string() +
-                    " -I" + include_dir + " " + main_path.string() + " 2>&1";
+  std::string lib_file = STRINGIFY(XB_LIB_FILE);
+
+  // When the library was built with sanitizers (RelWithDebInfo), pass
+  // the same flags to the subprocess so it can link the sanitizer runtime.
+  std::string sanitizer_flags;
+  if (XB_SANITIZERS)
+    sanitizer_flags = "-fsanitize=undefined -fsanitize=address ";
+
+  std::string cmd;
+  if (source_files.empty()) {
+    // Header-only: syntax check suffices
+    cmd = "c++ -std=c++20 -fsyntax-only -I" + tmp_dir.string() + " -I" +
+          include_dir + " " + main_path.string() + " 2>&1";
+  } else {
+    // Split mode: compile and link all translation units against xb runtime
+    auto exe_path = tmp_dir / "test_exe";
+    cmd = "c++ -std=c++20 " + sanitizer_flags + "-I" + tmp_dir.string() +
+          " -I" + include_dir + " -o " + exe_path.string() + " " +
+          main_path.string() + source_files + " " + lib_file + " -lexpat 2>&1";
+  }
   int rc = std::system(cmd.c_str());
 
   // Cleanup
@@ -240,4 +269,86 @@ TEST_CASE("generate from xb-typemap.xsd compiles", "[codegen][compile]") {
   REQUIRE(!files.empty());
   // The generated code should at least compile syntactically
   CHECK(compile_generated_files(files, "typemap_xsd"));
+}
+
+// ===== Split mode compile tests =====
+
+TEST_CASE("split mode: sequence + attributes compiles",
+          "[codegen][compile][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/order");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  facet_set side_facets;
+  side_facets.enumeration = {"Buy", "Sell"};
+  s.add_simple_type(simple_type(qname{"http://example.com/order", "SideType"},
+                                simple_type_variety::atomic,
+                                qname{xs, "string"}, side_facets));
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/order", "symbol"}, qname{xs, "string"}));
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/order", "quantity"}, qname{xs, "int"}));
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/order", "price"},
+                   qname{xs, "double"}),
+      occurrence{0, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "id"}, qname{xs, "string"}, true, {}, {}});
+  attrs.push_back({qname{"", "side"},
+                   qname{"http://example.com/order", "SideType"},
+                   true,
+                   {},
+                   {}});
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/order", "OrderType"}, false, false,
+                   std::move(ct), std::move(attrs)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 2);
+  CHECK(compile_generated_files(files, "split_sequence_attrs"));
+}
+
+TEST_CASE("split mode: xb-typemap.xsd compiles", "[codegen][compile][split]") {
+  std::string schema_path =
+      std::string(STRINGIFY(XB_SCHEMA_DIR)) + "/xb-typemap.xsd";
+  std::ifstream file(schema_path);
+  REQUIRE(file.good());
+  std::string xml((std::istreambuf_iterator<char>(file)),
+                  std::istreambuf_iterator<char>());
+
+  expat_reader reader(xml);
+  schema_parser parser;
+  auto s = parser.parse(reader);
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 2);
+  CHECK(compile_generated_files(files, "split_typemap_xsd"));
 }

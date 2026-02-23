@@ -84,10 +84,13 @@ namespace xb {
     operator==(const cpp_namespace&) const = default;
   };
 
+  enum class file_kind { header, source };
+
   struct cpp_file {
     std::string filename;
     std::vector<cpp_include> includes;
     std::vector<cpp_namespace> namespaces;
+    file_kind kind = file_kind::header;
 
     bool
     operator==(const cpp_file&) const = default;

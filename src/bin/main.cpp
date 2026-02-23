@@ -35,8 +35,10 @@ struct cli_options {
   std::string output_dir = ".";
   std::string type_map_file;
   std::unordered_map<std::string, std::string> namespace_map;
+  xb::output_mode mode = xb::output_mode::split;
   bool show_help = false;
   bool show_version = false;
+  bool list_outputs = false;
 };
 
 static void
@@ -44,12 +46,15 @@ print_usage(std::ostream& os) {
   os << "Usage: xb [options] <schema.xsd> [schema2.xsd ...]\n"
      << "\n"
      << "Options:\n"
-     << "  -o <dir>        Output directory (default: current directory)\n"
-     << "  -t <file>       Type map override file (xb-typemap.xml)\n"
-     << "  -n <uri=ns>     Namespace mapping (XML namespace URI = C++ "
+     << "  -o <dir>          Output directory (default: current directory)\n"
+     << "  -t <file>         Type map override file (xb-typemap.xml)\n"
+     << "  -n <uri=ns>       Namespace mapping (XML namespace URI = C++ "
         "namespace)\n"
-     << "  -h, --help      Show this help message\n"
-     << "  --version       Show version information\n";
+     << "  --header-only     Generate header-only output (single .hpp)\n"
+     << "  --file-per-type   Generate one header per type\n"
+     << "  --list-outputs    Print expected output filenames and exit\n"
+     << "  -h, --help        Show this help message\n"
+     << "  --version         Show version information\n";
 }
 
 static void
@@ -60,6 +65,9 @@ print_version(std::ostream& os) {
 static cli_options
 parse_args(int argc, char* argv[]) {
   cli_options opts;
+
+  bool saw_header_only = false;
+  bool saw_file_per_type = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -72,6 +80,21 @@ parse_args(int argc, char* argv[]) {
     if (arg == "--version") {
       opts.show_version = true;
       return opts;
+    }
+
+    if (arg == "--header-only") {
+      saw_header_only = true;
+      continue;
+    }
+
+    if (arg == "--file-per-type") {
+      saw_file_per_type = true;
+      continue;
+    }
+
+    if (arg == "--list-outputs") {
+      opts.list_outputs = true;
+      continue;
     }
 
     if (arg == "-o") {
@@ -114,6 +137,17 @@ parse_args(int argc, char* argv[]) {
 
     opts.schema_files.push_back(arg);
   }
+
+  if (saw_header_only && saw_file_per_type) {
+    std::cerr << "xb: --header-only and --file-per-type are mutually "
+                 "exclusive\n";
+    std::exit(exit_usage);
+  }
+
+  if (saw_header_only)
+    opts.mode = xb::output_mode::header_only;
+  else if (saw_file_per_type)
+    opts.mode = xb::output_mode::file_per_type;
 
   return opts;
 }
@@ -173,6 +207,7 @@ run(const cli_options& opts) {
   // Set up codegen options
   xb::codegen_options codegen_opts;
   codegen_opts.namespace_map = opts.namespace_map;
+  codegen_opts.mode = opts.mode;
 
   // Generate code
   std::vector<xb::cpp_file> files;
@@ -182,6 +217,13 @@ run(const cli_options& opts) {
   } catch (const std::exception& e) {
     std::cerr << "xb: code generation error: " << e.what() << "\n";
     return exit_codegen;
+  }
+
+  // --list-outputs: print filenames and exit
+  if (opts.list_outputs) {
+    for (const auto& file : files)
+      std::cout << file.filename << "\n";
+    return exit_success;
   }
 
   // Create output directory

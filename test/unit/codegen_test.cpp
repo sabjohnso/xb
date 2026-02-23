@@ -1939,3 +1939,377 @@ TEST_CASE("read function wildcard uses any_element",
   REQUIRE(fn != nullptr);
   CHECK(fn->body.find("xb::any_element(reader)") != std::string::npos);
 }
+
+// ===== Group: Split Mode =====
+
+TEST_CASE("split mode produces two files per namespace", "[codegen][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 2);
+
+  // One header, one source
+  bool found_header = false;
+  bool found_source = false;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header) found_header = true;
+    if (f.kind == file_kind::source) found_source = true;
+  }
+  CHECK(found_header);
+  CHECK(found_source);
+}
+
+TEST_CASE("split mode header has file_kind::header", "[codegen][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  const cpp_file* hpp = nullptr;
+  const cpp_file* cpp = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header) hpp = &f;
+    if (f.kind == file_kind::source) cpp = &f;
+  }
+  REQUIRE(hpp != nullptr);
+  REQUIRE(cpp != nullptr);
+  CHECK(hpp->filename.find(".hpp") != std::string::npos);
+  CHECK(cpp->filename.find(".cpp") != std::string::npos);
+}
+
+TEST_CASE("split mode read/write functions are not inline",
+          "[codegen][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Find the header file and check functions are non-inline
+  const cpp_file* hpp = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header) hpp = &f;
+  }
+  REQUIRE(hpp != nullptr);
+
+  auto* read_fn = find_function(*hpp, "read_simple");
+  auto* write_fn = find_function(*hpp, "write_simple");
+  REQUIRE(read_fn != nullptr);
+  REQUIRE(write_fn != nullptr);
+  CHECK_FALSE(read_fn->is_inline);
+  CHECK_FALSE(write_fn->is_inline);
+}
+
+TEST_CASE("split mode header omits runtime includes", "[codegen][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  const cpp_file* hpp = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header) hpp = &f;
+  }
+  REQUIRE(hpp != nullptr);
+
+  // Header includes xml_reader/xml_writer (needed for declaration parameter
+  // types) but NOT xml_value/xml_io (only needed for function bodies)
+  bool found_reader = false;
+  bool found_writer = false;
+  for (const auto& inc : hpp->includes) {
+    if (inc.path.find("xml_reader") != std::string::npos) found_reader = true;
+    if (inc.path.find("xml_writer") != std::string::npos) found_writer = true;
+    CHECK(inc.path.find("xml_value") == std::string::npos);
+    CHECK(inc.path.find("xml_io") == std::string::npos);
+  }
+  CHECK(found_reader);
+  CHECK(found_writer);
+}
+
+TEST_CASE("split mode source includes self header and runtime",
+          "[codegen][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  const cpp_file* cpp_f = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::source) cpp_f = &f;
+  }
+  REQUIRE(cpp_f != nullptr);
+
+  // Source should include the self header
+  bool has_self = false;
+  bool has_runtime = false;
+  for (const auto& inc : cpp_f->includes) {
+    if (inc.path.find("test.hpp") != std::string::npos) has_self = true;
+    if (inc.path.find("xml_reader") != std::string::npos ||
+        inc.path.find("xml_io") != std::string::npos)
+      has_runtime = true;
+  }
+  CHECK(has_self);
+  CHECK(has_runtime);
+}
+
+TEST_CASE("header_only mode produces one file unchanged", "[codegen][split]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::header_only;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  CHECK(files[0].kind == file_kind::header);
+
+  // Functions should be inline
+  auto* fn = find_function(files[0], "read_simple");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->is_inline);
+}
+
+// ===== Group: File-per-type Mode =====
+
+TEST_CASE("file_per_type produces per-type headers + umbrella + source",
+          "[codegen][file_per_type]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  // Enum type
+  facet_set facets;
+  facets.enumeration = {"Red", "Green", "Blue"};
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "Color"},
+                                simple_type_variety::atomic,
+                                qname{xs, "string"}, facets));
+
+  // Two complex types
+  std::vector<particle> p1;
+  p1.emplace_back(
+      element_decl(qname{"http://example.com/test", "x"}, qname{xs, "int"}));
+  model_group seq1(compositor_kind::sequence, std::move(p1));
+  content_type ct1(content_kind::element_only,
+                   complex_content(qname{}, derivation_method::restriction,
+                                   std::move(seq1)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "PointType"},
+                                  false, false, std::move(ct1)));
+
+  std::vector<particle> p2;
+  p2.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                               qname{xs, "string"}));
+  model_group seq2(compositor_kind::sequence, std::move(p2));
+  content_type ct2(content_kind::element_only,
+                   complex_content(qname{}, derivation_method::restriction,
+                                   std::move(seq2)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "LabelType"},
+                                  false, false, std::move(ct2)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::file_per_type;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Should have: color.hpp, point_type.hpp, label_type.hpp, test.hpp
+  // (umbrella), test.cpp
+  int header_count = 0;
+  int source_count = 0;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header) ++header_count;
+    if (f.kind == file_kind::source) ++source_count;
+  }
+  // 3 per-type headers + 1 umbrella = 4 headers, 1 source
+  CHECK(header_count == 4);
+  CHECK(source_count == 1);
+}
+
+TEST_CASE("file_per_type umbrella includes all per-type headers",
+          "[codegen][file_per_type]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> p1;
+  p1.emplace_back(
+      element_decl(qname{"http://example.com/test", "x"}, qname{xs, "int"}));
+  model_group seq1(compositor_kind::sequence, std::move(p1));
+  content_type ct1(content_kind::element_only,
+                   complex_content(qname{}, derivation_method::restriction,
+                                   std::move(seq1)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "PointType"},
+                                  false, false, std::move(ct1)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::file_per_type;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Find umbrella (stem.hpp with no type-specific declarations)
+  const cpp_file* umbrella = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header && f.filename == "test.hpp") umbrella = &f;
+  }
+  REQUIRE(umbrella != nullptr);
+
+  // Umbrella should include the per-type header
+  bool has_point = false;
+  for (const auto& inc : umbrella->includes) {
+    if (inc.path.find("test_point_type.hpp") != std::string::npos)
+      has_point = true;
+  }
+  CHECK(has_point);
+}
+
+TEST_CASE("file_per_type source includes umbrella + runtime",
+          "[codegen][file_per_type]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> p1;
+  p1.emplace_back(
+      element_decl(qname{"http://example.com/test", "x"}, qname{xs, "int"}));
+  model_group seq1(compositor_kind::sequence, std::move(p1));
+  content_type ct1(content_kind::element_only,
+                   complex_content(qname{}, derivation_method::restriction,
+                                   std::move(seq1)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "PointType"},
+                                  false, false, std::move(ct1)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::file_per_type;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  const cpp_file* src = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::source) src = &f;
+  }
+  REQUIRE(src != nullptr);
+
+  bool has_umbrella = false;
+  bool has_runtime = false;
+  for (const auto& inc : src->includes) {
+    if (inc.path.find("test.hpp") != std::string::npos) has_umbrella = true;
+    if (inc.path.find("xml_reader") != std::string::npos) has_runtime = true;
+  }
+  CHECK(has_umbrella);
+  CHECK(has_runtime);
+}

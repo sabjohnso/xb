@@ -6,8 +6,11 @@
 
 namespace xb {
 
+  enum class output_mode { header_only, split, file_per_type };
+
   struct codegen_options {
     std::unordered_map<std::string, std::string> namespace_map;
+    output_mode mode = output_mode::header_only;
   };
 
   std::string
