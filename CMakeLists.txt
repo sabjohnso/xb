@@ -16,6 +16,8 @@ include(xb_deps)
 
 add_subdirectory(src)
 
+include(${PROJECT_SOURCE_DIR}/cmake/xbGenerateCpp.cmake)
+
 if(xb_BUILD_TESTING)
   include(CTest)
   if(BUILD_TESTING)
@@ -33,6 +35,9 @@ install(FILES schema/xb-typemap.xsd
 install(EXPORT xb_EXPORTS
   NAMESPACE xb::
   FILE xb-exports.cmake
+  DESTINATION ${xb_INSTALL_CONFDIR})
+
+install(FILES cmake/xbGenerateCpp.cmake
   DESTINATION ${xb_INSTALL_CONFDIR})
 
 configure_file(xb-config.cmake.in xb-config.cmake)

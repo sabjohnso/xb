@@ -33,3 +33,14 @@ target_compile_definitions(xb_cli_test PRIVATE
   XB_CLI=$<TARGET_FILE:xb_cli>
   XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
 add_test(NAME xb_cli_test COMMAND xb_cli_test)
+
+xb_generate_cpp(
+  TARGET xb_cmake_gen_test_types
+  SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xb-typemap.xsd
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_cmake_gen)
+
+add_executable(xb_cmake_gen_test cmake_integration_test.cpp)
+target_link_libraries(xb_cmake_gen_test
+  PRIVATE Catch2::Catch2WithMain xb_cmake_gen_test_types xb)
+target_compile_features(xb_cmake_gen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_cmake_gen_test COMMAND xb_cmake_gen_test)
