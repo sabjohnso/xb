@@ -318,3 +318,54 @@ TEST_CASE("system and local includes ordering", "[cpp_writer]") {
   auto local_pos = result.find("#include \"xb/types.hpp\"");
   CHECK(sys_pos < local_pos);
 }
+
+// ===== cpp_function rendering =====
+
+// TDD step 15: Render empty inline function
+TEST_CASE("render empty inline function", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_function fn;
+  fn.return_type = "void";
+  fn.name = "foo";
+  fn.body = "";
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("inline void foo() {\n}\n") != std::string::npos);
+}
+
+// TDD step 16: Render function with parameters and body
+TEST_CASE("render function with params and body", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_function fn;
+  fn.return_type = "int";
+  fn.name = "add";
+  fn.parameters = "int a, int b";
+  fn.body = "  return a + b;\n";
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("inline int add(int a, int b) {\n  return a + b;\n}\n") !=
+        std::string::npos);
+}
+
+// TDD step 17: Render non-inline function
+TEST_CASE("render non-inline function", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_function fn;
+  fn.return_type = "void";
+  fn.name = "setup";
+  fn.parameters = "int x";
+  fn.body = "  (void)x;\n";
+  fn.is_inline = false;
+  file.namespaces.push_back({"ns", {std::move(fn)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("void setup(int x) {\n  (void)x;\n}\n") !=
+        std::string::npos);
+  // Should NOT have "inline" prefix
+  CHECK(result.find("inline void setup") == std::string::npos);
+}

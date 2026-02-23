@@ -16,7 +16,9 @@ add_library(xb STATIC
   schema_set.cpp
   cpp_writer.cpp
   naming.cpp
-  codegen.cpp)
+  codegen.cpp
+  xml_value.cpp
+  xml_io.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

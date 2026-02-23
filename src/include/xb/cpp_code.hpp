@@ -62,8 +62,19 @@ namespace xb {
     operator==(const cpp_forward_decl&) const = default;
   };
 
-  using cpp_decl =
-      std::variant<cpp_struct, cpp_enum, cpp_type_alias, cpp_forward_decl>;
+  struct cpp_function {
+    std::string return_type;
+    std::string name;
+    std::string parameters;
+    std::string body;
+    bool is_inline = true;
+
+    bool
+    operator==(const cpp_function&) const = default;
+  };
+
+  using cpp_decl = std::variant<cpp_struct, cpp_enum, cpp_type_alias,
+                                cpp_forward_decl, cpp_function>;
 
   struct cpp_namespace {
     std::string name;

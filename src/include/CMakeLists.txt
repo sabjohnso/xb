@@ -51,4 +51,6 @@ install(FILES
   xb/cpp_writer.hpp
   xb/naming.hpp
   xb/codegen.hpp
+  xb/xml_value.hpp
+  xb/xml_io.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)

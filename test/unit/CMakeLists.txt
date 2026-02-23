@@ -111,3 +111,13 @@ target_compile_features(xb_typemap_schema_test PRIVATE cxx_std_${xb_CXX_STANDARD
 target_compile_definitions(xb_typemap_schema_test PRIVATE
   XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
 add_test(NAME xb_typemap_schema_test COMMAND xb_typemap_schema_test)
+
+add_executable(xb_xml_value_test xml_value_test.cpp)
+target_link_libraries(xb_xml_value_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_xml_value_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xml_value_test COMMAND xb_xml_value_test)
+
+add_executable(xb_xml_io_test xml_io_test.cpp)
+target_link_libraries(xb_xml_io_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_xml_io_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xml_io_test COMMAND xb_xml_io_test)

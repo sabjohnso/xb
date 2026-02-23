@@ -11,6 +11,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <string>
+
 using namespace xb;
 
 static const std::string xs_ns = "http://www.w3.org/2001/XMLSchema";
@@ -61,6 +63,19 @@ find_alias(const cpp_file& file, const std::string& name) {
     for (const auto& decl : ns.declarations) {
       if (auto* a = std::get_if<cpp_type_alias>(&decl)) {
         if (a->name == name) return a;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Helper to find a function declaration
+static const cpp_function*
+find_function(const cpp_file& file, const std::string& name) {
+  for (const auto& ns : file.namespaces) {
+    for (const auto& decl : ns.declarations) {
+      if (auto* f = std::get_if<cpp_function>(&decl)) {
+        if (f->name == name) return f;
       }
     }
   }
@@ -1182,4 +1197,745 @@ TEST_CASE("element default value becomes field initializer", "[codegen]") {
   auto* f = find_field(*st, "priority");
   REQUIRE(f != nullptr);
   CHECK(f->default_value == "5");
+}
+
+// ===== Group 2: Serialization Codegen =====
+
+// Serialization TDD step 1: Complex type with sequence -> write_ function
+TEST_CASE("codegen generates write function for sequence type",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "age"},
+                                      qname{xs_ns, "int"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "PersonType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* fn = find_function(files[0], "write_person_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->return_type == "void");
+  CHECK(fn->parameters.find("const person_type&") != std::string::npos);
+  CHECK(fn->parameters.find("xb::xml_writer&") != std::string::npos);
+  // Body should contain write_simple calls for each element
+  CHECK(fn->body.find("write_simple") != std::string::npos);
+  CHECK(fn->body.find("\"name\"") != std::string::npos);
+  CHECK(fn->body.find("\"age\"") != std::string::npos);
+}
+
+// Serialization TDD step 2: Required element -> unconditional write_simple
+TEST_CASE("write function required element is unconditional",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_simple");
+  REQUIRE(fn != nullptr);
+  // Required element: no "if" guard
+  CHECK(fn->body.find("xb::write_simple(writer") != std::string::npos);
+  CHECK(fn->body.find("value.name") != std::string::npos);
+}
+
+// Serialization TDD step 3: Optional element -> conditional write
+TEST_CASE("write function optional element is conditional",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "note"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{0, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "WithOpt"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_with_opt");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("if (value.note)") != std::string::npos);
+}
+
+// Serialization TDD step 4: Unbounded element -> for loop
+TEST_CASE("write function unbounded element uses for loop",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{0, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ListType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_list_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("for (") != std::string::npos);
+  CHECK(fn->body.find("value.item") != std::string::npos);
+}
+
+// Serialization TDD step 5: Required attribute -> writer.attribute()
+TEST_CASE("write function required attribute", "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "id"}, qname{xs_ns, "string"}, true, {}, {}});
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "WithAttr"},
+                                  false, false, std::move(ct),
+                                  std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_with_attr");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("writer.attribute(") != std::string::npos);
+  CHECK(fn->body.find("xb::format(value.id)") != std::string::npos);
+}
+
+// Serialization TDD step 6: Optional attribute -> conditional
+TEST_CASE("write function optional attribute is conditional",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "tag"}, qname{xs_ns, "string"}, false, {}, {}});
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "WithOptAttr"}, false,
+                   false, std::move(ct), std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_with_opt_attr");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("if (value.tag)") != std::string::npos);
+}
+
+// Serialization TDD step 7: Enum attribute -> to_string
+TEST_CASE("write function enum attribute uses to_string",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.enumeration = {"Buy", "Sell"};
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "SideType"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "side"},
+                   qname{"http://example.com/test", "SideType"},
+                   true,
+                   {},
+                   {}});
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "WithEnum"},
+                                  false, false, std::move(ct),
+                                  std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_with_enum");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("to_string(value.side)") != std::string::npos);
+}
+
+// Serialization TDD step 8: Choice (variant) -> std::visit
+TEST_CASE("write function choice uses std::visit", "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "text"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "code"},
+                                      qname{xs_ns, "int"}));
+  model_group choice(compositor_kind::choice, std::move(particles));
+
+  content_type ct(content_kind::element_only,
+                  complex_content(qname{}, derivation_method::restriction,
+                                  std::move(choice)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ChoiceType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_choice_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("std::visit") != std::string::npos);
+}
+
+// Serialization TDD step 9: Simple content -> writer.characters()
+TEST_CASE("write function simple content uses characters",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct(
+      content_kind::simple,
+      simple_content{qname{xs_ns, "string"}, derivation_method::extension, {}});
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back(
+      {qname{"", "currency"}, qname{xs_ns, "string"}, true, {}, {}});
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "MoneyType"},
+                                  false, false, std::move(ct),
+                                  std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_money_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("writer.characters(") != std::string::npos);
+  CHECK(fn->body.find("value.value") != std::string::npos);
+}
+
+// Serialization TDD step 10: Extension -> writes base + derived fields
+TEST_CASE("write function extension writes base and derived fields",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  // Base type
+  std::vector<particle> base_particles;
+  base_particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "name"}, qname{xs_ns, "string"}));
+  model_group base_seq(compositor_kind::sequence, std::move(base_particles));
+  content_type base_ct(content_kind::element_only,
+                       complex_content(qname{}, derivation_method::restriction,
+                                       std::move(base_seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "BaseType"},
+                                  false, false, std::move(base_ct)));
+
+  // Derived type
+  std::vector<particle> derived_particles;
+  derived_particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "age"}, qname{xs_ns, "int"}));
+  model_group derived_seq(compositor_kind::sequence,
+                          std::move(derived_particles));
+  content_type derived_ct(
+      content_kind::element_only,
+      complex_content(qname{"http://example.com/test", "BaseType"},
+                      derivation_method::extension, std::move(derived_seq)));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "DerivedType"}, false,
+                   false, std::move(derived_ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_derived_type");
+  REQUIRE(fn != nullptr);
+  // Should write both base field 'name' and derived field 'age'
+  CHECK(fn->body.find("value.name") != std::string::npos);
+  CHECK(fn->body.find("value.age") != std::string::npos);
+}
+
+// Serialization TDD step 11: Wildcard (xs:any) -> any_element write
+TEST_CASE("write function wildcard delegates to any_element write",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(wildcard{});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ExtType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_ext_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find(".write(writer)") != std::string::npos);
+}
+
+// Serialization TDD step 12: Recursive type -> null check + dereference
+TEST_CASE("write function recursive type checks null",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "value"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "left"},
+                   qname{"http://example.com/test", "TreeNode"}),
+      occurrence{0, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "TreeNode"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_tree_node");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("if (value.left)") != std::string::npos);
+  CHECK(fn->body.find("write_tree_node(*value.left") != std::string::npos);
+}
+
+// ===== Group 3: Deserialization Codegen =====
+
+// Deserialization TDD step 1: Complex type with sequence -> read_ function
+TEST_CASE("codegen generates read function for sequence type",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "age"},
+                                      qname{xs_ns, "int"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "PersonType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* fn = find_function(files[0], "read_person_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->return_type == "person_type");
+  CHECK(fn->parameters.find("xb::xml_reader&") != std::string::npos);
+  // Body should dispatch by element name
+  CHECK(fn->body.find("reader.name()") != std::string::npos);
+  CHECK(fn->body.find("\"name\"") != std::string::npos);
+  CHECK(fn->body.find("\"age\"") != std::string::npos);
+  CHECK(fn->body.find("read_simple") != std::string::npos);
+}
+
+// Deserialization TDD step 2: Required element
+TEST_CASE("read function required element assigns field",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_simple");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("result.name = xb::read_simple<std::string>(reader)") !=
+        std::string::npos);
+}
+
+// Deserialization TDD step 3: Unbounded element -> push_back
+TEST_CASE("read function unbounded element uses push_back",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{0, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ListType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_list_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("result.item.push_back(") != std::string::npos);
+}
+
+// Deserialization TDD step 4: Required attribute
+TEST_CASE("read function required attribute parses from attr",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "id"}, qname{xs_ns, "string"}, true, {}, {}});
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "WithAttr"},
+                                  false, false, std::move(ct),
+                                  std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_with_attr");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("result.id = xb::parse<std::string>") !=
+        std::string::npos);
+  CHECK(fn->body.find("attribute_value") != std::string::npos);
+}
+
+// Deserialization TDD step 5: Optional attribute
+TEST_CASE("read function optional attribute checks empty",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "tag"}, qname{xs_ns, "string"}, false, {}, {}});
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "WithOptAttr"}, false,
+                   false, std::move(ct), std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_with_opt_attr");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("if (!") != std::string::npos);
+  CHECK(fn->body.find(".empty()") != std::string::npos);
+}
+
+// Deserialization TDD step 6: Enum attribute -> from_string
+TEST_CASE("read function enum attribute uses from_string",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.enumeration = {"Buy", "Sell"};
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "SideType"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "side"},
+                   qname{"http://example.com/test", "SideType"},
+                   true,
+                   {},
+                   {}});
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "WithEnum"},
+                                  false, false, std::move(ct),
+                                  std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_with_enum");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("_from_string(") != std::string::npos);
+}
+
+// Deserialization TDD step 7: Choice -> element name selects variant
+TEST_CASE("read function choice dispatches by element name",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "text"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "code"},
+                                      qname{xs_ns, "int"}));
+  model_group choice(compositor_kind::choice, std::move(particles));
+
+  content_type ct(content_kind::element_only,
+                  complex_content(qname{}, derivation_method::restriction,
+                                  std::move(choice)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ChoiceType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_choice_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("result.choice =") != std::string::npos);
+  CHECK(fn->body.find("\"text\"") != std::string::npos);
+  CHECK(fn->body.find("\"code\"") != std::string::npos);
+}
+
+// Deserialization TDD step 8: Simple content -> parse from text
+TEST_CASE("read function simple content parses text",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct(
+      content_kind::simple,
+      simple_content{qname{xs_ns, "string"}, derivation_method::extension, {}});
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back(
+      {qname{"", "currency"}, qname{xs_ns, "string"}, true, {}, {}});
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "MoneyType"},
+                                  false, false, std::move(ct),
+                                  std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_money_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("result.value = xb::parse<") != std::string::npos);
+  CHECK(fn->body.find("xb::read_text(reader)") != std::string::npos);
+}
+
+// Deserialization TDD step 9: Unknown elements -> skip_element
+TEST_CASE("read function skips unknown elements",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_simple");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("xb::skip_element(reader)") != std::string::npos);
+}
+
+// Deserialization TDD step 10: Recursive type -> make_unique
+TEST_CASE("read function recursive type uses make_unique",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "value"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "left"},
+                   qname{"http://example.com/test", "TreeNode"}),
+      occurrence{0, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "TreeNode"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_tree_node");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("std::make_unique<tree_node>") != std::string::npos);
+  CHECK(fn->body.find("read_tree_node(reader)") != std::string::npos);
+}
+
+// Deserialization TDD step 11: Wildcard -> any_element(reader)
+TEST_CASE("read function wildcard uses any_element",
+          "[codegen][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(wildcard{});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ExtType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_ext_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("xb::any_element(reader)") != std::string::npos);
 }

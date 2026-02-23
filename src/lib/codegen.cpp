@@ -518,6 +518,16 @@ namespace xb {
         }
       }
 
+      for (const auto& decl : declarations) {
+        if (std::holds_alternative<cpp_function>(decl)) {
+          includes.insert("\"xb/xml_value.hpp\"");
+          includes.insert("\"xb/xml_io.hpp\"");
+          includes.insert("\"xb/xml_reader.hpp\"");
+          includes.insert("\"xb/xml_writer.hpp\"");
+          break;
+        }
+      }
+
       for (const auto& ref_ns : referenced_namespaces) {
         for (const auto& s : schemas) {
           if (s.target_namespace() == ref_ns) {
@@ -562,6 +572,8 @@ namespace xb {
             else if constexpr (std::is_same_v<T, cpp_type_alias>)
               return d.name;
             else if constexpr (std::is_same_v<T, cpp_forward_decl>)
+              return d.name;
+            else if constexpr (std::is_same_v<T, cpp_function>)
               return d.name;
             else
               return "";
@@ -678,6 +690,726 @@ namespace xb {
       return result;
     }
 
+    // ===== Serialization code generation =====
+
+    // Determine if a type name resolves to an enum
+    bool
+    is_enum_type(const schema_set& schemas, const qname& type_name) {
+      auto* st = schemas.find_simple_type(type_name);
+      return st && !st->facets().enumeration.empty();
+    }
+
+    // Determine if a type name resolves to a complex type
+    bool
+    is_complex_type(const schema_set& schemas, const qname& type_name) {
+      return schemas.find_complex_type(type_name) != nullptr;
+    }
+
+    // Generate the format expression for a value, considering type
+    std::string
+    format_expr(const std::string& value_expr, const qname& type_name,
+                const schema_set& schemas, const type_resolver& /*resolver*/) {
+      if (is_enum_type(schemas, type_name))
+        return "to_string(" + value_expr + ")";
+      return "xb::format(" + value_expr + ")";
+    }
+
+    // Generate write code for a single element particle
+    struct write_element_info {
+      std::string field_name;
+      qname element_name;
+      qname type_name;
+      occurrence occurs;
+      bool nillable;
+      bool is_recursive;
+    };
+
+    void
+    emit_write_element(std::string& body, const write_element_info& info,
+                       const schema_set& schemas,
+                       const type_resolver& /*resolver*/) {
+      std::string qn = "xb::qname{\"" + info.element_name.namespace_uri() +
+                       "\", \"" + info.element_name.local_name() + "\"}";
+      std::string field = "value." + info.field_name;
+
+      bool is_complex = is_complex_type(schemas, info.type_name);
+
+      if (info.is_recursive && info.occurs.min_occurs == 0 &&
+          !info.occurs.is_unbounded() && info.occurs.max_occurs <= 1) {
+        // unique_ptr field
+        std::string write_fn =
+            "write_" + to_cpp_identifier(info.type_name.local_name());
+        body += "  if (" + field + ") {\n";
+        body += "    writer.start_element(" + qn + ");\n";
+        body += "    " + write_fn + "(*" + field + ", writer);\n";
+        body += "    writer.end_element();\n";
+        body += "  }\n";
+        return;
+      }
+
+      if (info.occurs.is_unbounded() || info.occurs.max_occurs > 1) {
+        // vector field
+        body += "  for (const auto& item : " + field + ") {\n";
+        if (is_complex) {
+          std::string write_fn =
+              "write_" + to_cpp_identifier(info.type_name.local_name());
+          body += "    writer.start_element(" + qn + ");\n";
+          body += "    " + write_fn + "(item, writer);\n";
+          body += "    writer.end_element();\n";
+        } else {
+          body += "    xb::write_simple(writer, " + qn + ", item);\n";
+        }
+        body += "  }\n";
+        return;
+      }
+
+      if (info.occurs.min_occurs == 0) {
+        // optional field
+        body += "  if (" + field + ") {\n";
+        if (is_complex) {
+          std::string write_fn =
+              "write_" + to_cpp_identifier(info.type_name.local_name());
+          body += "    writer.start_element(" + qn + ");\n";
+          body += "    " + write_fn + "(*" + field + ", writer);\n";
+          body += "    writer.end_element();\n";
+        } else {
+          body += "    xb::write_simple(writer, " + qn + ", *" + field + ");\n";
+        }
+        body += "  }\n";
+        return;
+      }
+
+      // Required field
+      if (is_complex) {
+        std::string write_fn =
+            "write_" + to_cpp_identifier(info.type_name.local_name());
+        body += "  writer.start_element(" + qn + ");\n";
+        body += "  " + write_fn + "(" + field + ", writer);\n";
+        body += "  writer.end_element();\n";
+      } else {
+        body += "  xb::write_simple(writer, " + qn + ", " + field + ");\n";
+      }
+    }
+
+    // Forward declare
+    void
+    emit_write_particles(std::string& body,
+                         const std::vector<particle>& particles,
+                         compositor_kind compositor,
+                         const type_resolver& resolver,
+                         const qname& containing_type_name);
+
+    void
+    emit_write_particle_term(std::string& body, const particle& p,
+                             const type_resolver& resolver,
+                             const qname& containing_type_name) {
+      std::visit(
+          [&](const auto& term) {
+            using T = std::decay_t<decltype(term)>;
+            if constexpr (std::is_same_v<T, element_decl>) {
+              bool is_recursive = (term.type_name() == containing_type_name);
+              emit_write_element(body,
+                                 {to_cpp_identifier(term.name().local_name()),
+                                  term.name(), term.type_name(), p.occurs,
+                                  term.nillable(), is_recursive},
+                                 resolver.schemas, resolver);
+            } else if constexpr (std::is_same_v<T, element_ref>) {
+              auto* elem = resolver.schemas.find_element(term.ref);
+              if (!elem) return;
+              emit_write_element(body,
+                                 {to_cpp_identifier(elem->name().local_name()),
+                                  elem->name(), elem->type_name(), p.occurs,
+                                  elem->nillable(), false},
+                                 resolver.schemas, resolver);
+            } else if constexpr (std::is_same_v<T, group_ref>) {
+              auto* group_def = resolver.schemas.find_model_group_def(term.ref);
+              if (group_def)
+                emit_write_particles(body, group_def->group().particles(),
+                                     group_def->group().compositor(), resolver,
+                                     containing_type_name);
+            } else if constexpr (std::is_same_v<T,
+                                                std::unique_ptr<model_group>>) {
+              if (term)
+                emit_write_particles(body, term->particles(),
+                                     term->compositor(), resolver,
+                                     containing_type_name);
+            } else if constexpr (std::is_same_v<T, wildcard>) {
+              body += "  for (const auto& e : value.any) {\n";
+              body += "    e.write(writer);\n";
+              body += "  }\n";
+            }
+          },
+          p.term);
+    }
+
+    void
+    emit_write_particles(std::string& body,
+                         const std::vector<particle>& particles,
+                         compositor_kind compositor,
+                         const type_resolver& resolver,
+                         const qname& containing_type_name) {
+      if (compositor == compositor_kind::choice) {
+        // std::visit dispatch
+        body += "  std::visit([&](const auto& v) {\n";
+        body += "    using T = std::decay_t<decltype(v)>;\n";
+
+        bool first = true;
+        for (const auto& p : particles) {
+          std::visit(
+              [&](const auto& term) {
+                using TermT = std::decay_t<decltype(term)>;
+                if constexpr (std::is_same_v<TermT, element_decl>) {
+                  std::string cpp_type = resolver.resolve(term.type_name());
+                  std::string qn = "xb::qname{\"" +
+                                   term.name().namespace_uri() + "\", \"" +
+                                   term.name().local_name() + "\"}";
+                  std::string kw = first ? "if" : "else if";
+                  body += "    " + kw + " constexpr (std::is_same_v<T, " +
+                          cpp_type + ">) {\n";
+                  if (is_complex_type(resolver.schemas, term.type_name())) {
+                    std::string write_fn =
+                        "write_" +
+                        to_cpp_identifier(term.type_name().local_name());
+                    body += "      writer.start_element(" + qn + ");\n";
+                    body += "      " + write_fn + "(v, writer);\n";
+                    body += "      writer.end_element();\n";
+                  } else {
+                    body += "      xb::write_simple(writer, " + qn + ", v);\n";
+                  }
+                  body += "    }\n";
+                  first = false;
+                } else if constexpr (std::is_same_v<TermT, element_ref>) {
+                  auto* elem = resolver.schemas.find_element(term.ref);
+                  if (!elem) return;
+                  std::string cpp_type = resolver.resolve(elem->type_name());
+                  std::string qn = "xb::qname{\"" +
+                                   elem->name().namespace_uri() + "\", \"" +
+                                   elem->name().local_name() + "\"}";
+                  std::string kw = first ? "if" : "else if";
+                  body += "    " + kw + " constexpr (std::is_same_v<T, " +
+                          cpp_type + ">) {\n";
+                  body += "      xb::write_simple(writer, " + qn + ", v);\n";
+                  body += "    }\n";
+                  first = false;
+                }
+              },
+              p.term);
+        }
+
+        body += "  }, value.choice);\n";
+        return;
+      }
+
+      // Sequence or all: write each particle in order
+      for (const auto& p : particles)
+        emit_write_particle_term(body, p, resolver, containing_type_name);
+    }
+
+    void
+    emit_write_attributes(std::string& body,
+                          const std::vector<attribute_use>& attrs,
+                          const schema_set& schemas,
+                          const type_resolver& resolver) {
+      for (const auto& attr : attrs) {
+        std::string name = to_cpp_identifier(attr.name.local_name());
+        std::string qn = "xb::qname{\"" + attr.name.namespace_uri() + "\", \"" +
+                         attr.name.local_name() + "\"}";
+        std::string fmt_expr =
+            format_expr("value." + name, attr.type_name, schemas, resolver);
+
+        if (attr.required) {
+          body += "  writer.attribute(" + qn + ", " + fmt_expr + ");\n";
+        } else {
+          body += "  if (value." + name + ") {\n";
+          std::string opt_fmt =
+              format_expr("*value." + name, attr.type_name, schemas, resolver);
+          body += "    writer.attribute(" + qn + ", " + opt_fmt + ");\n";
+          body += "  }\n";
+        }
+      }
+    }
+
+    void
+    emit_write_attribute_group_refs(
+        std::string& body, const std::vector<attribute_group_ref>& refs,
+        const schema_set& schemas, const type_resolver& resolver) {
+      for (const auto& ref : refs) {
+        auto* group_def = schemas.find_attribute_group_def(ref.ref);
+        if (group_def) {
+          emit_write_attributes(body, group_def->attributes(), schemas,
+                                resolver);
+          emit_write_attribute_group_refs(
+              body, group_def->attribute_group_refs(), schemas, resolver);
+        }
+      }
+    }
+
+    void
+    emit_write_base_fields(std::string& body, const schema_set& schemas,
+                           const qname& base_name,
+                           const type_resolver& resolver,
+                           const qname& containing_type_name) {
+      auto* base_ct = schemas.find_complex_type(base_name);
+      if (!base_ct) return;
+
+      if (base_ct->content().kind == content_kind::element_only ||
+          base_ct->content().kind == content_kind::mixed) {
+        if (auto* cc =
+                std::get_if<complex_content>(&base_ct->content().detail)) {
+          if (!cc->base_type_name.namespace_uri().empty() ||
+              !cc->base_type_name.local_name().empty()) {
+            if (cc->derivation == derivation_method::extension)
+              emit_write_base_fields(body, schemas, cc->base_type_name,
+                                     resolver, containing_type_name);
+          }
+          if (cc->content_model.has_value())
+            emit_write_particles(body, cc->content_model->particles(),
+                                 cc->content_model->compositor(), resolver,
+                                 containing_type_name);
+        }
+      }
+
+      emit_write_attributes(body, base_ct->attributes(), schemas, resolver);
+      emit_write_attribute_group_refs(body, base_ct->attribute_group_refs(),
+                                      schemas, resolver);
+    }
+
+    cpp_function
+    generate_write_function(const complex_type& ct,
+                            const type_resolver& resolver) {
+      cpp_function fn;
+      std::string struct_name = to_cpp_identifier(ct.name().local_name());
+      fn.return_type = "void";
+      fn.name = "write_" + struct_name;
+      fn.parameters =
+          "const " + struct_name + "& value, xb::xml_writer& writer";
+
+      std::string body;
+
+      // Handle simpleContent
+      if (ct.content().kind == content_kind::simple) {
+        emit_write_attributes(body, ct.attributes(), resolver.schemas,
+                              resolver);
+        emit_write_attribute_group_refs(body, ct.attribute_group_refs(),
+                                        resolver.schemas, resolver);
+
+        if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
+          std::string fmt = format_expr("value.value", sc->base_type_name,
+                                        resolver.schemas, resolver);
+          body += "  writer.characters(" + fmt + ");\n";
+        }
+
+        fn.body = body;
+        return fn;
+      }
+
+      // Handle attributes first
+      emit_write_attributes(body, ct.attributes(), resolver.schemas, resolver);
+      emit_write_attribute_group_refs(body, ct.attribute_group_refs(),
+                                      resolver.schemas, resolver);
+
+      if (ct.attribute_wildcard().has_value()) {
+        body += "  for (const auto& a : value.any_attribute) {\n";
+        body += "    writer.attribute(a.name(), a.value());\n";
+        body += "  }\n";
+      }
+
+      // Handle mixed content
+      if (ct.mixed() && (ct.content().kind == content_kind::mixed ||
+                         ct.content().kind == content_kind::element_only)) {
+        if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
+          if (cc->content_model.has_value()) {
+            body += "  for (const auto& item : value.content) {\n";
+            body += "    std::visit([&](const auto& v) {\n";
+            body += "      using T = std::decay_t<decltype(v)>;\n";
+            body += "      if constexpr (std::is_same_v<T, std::string>) {\n";
+            body += "        writer.characters(v);\n";
+            body += "      }\n";
+            // TODO: handle element alternatives in mixed content
+            body += "    }, item);\n";
+            body += "  }\n";
+          }
+        }
+        fn.body = body;
+        return fn;
+      }
+
+      // Handle element_only content
+      if (ct.content().kind == content_kind::element_only) {
+        if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
+          // Extension: write base fields first
+          if (cc->derivation == derivation_method::extension &&
+              (!cc->base_type_name.namespace_uri().empty() ||
+               !cc->base_type_name.local_name().empty())) {
+            emit_write_base_fields(body, resolver.schemas, cc->base_type_name,
+                                   resolver, ct.name());
+          }
+
+          if (cc->content_model.has_value()) {
+            emit_write_particles(body, cc->content_model->particles(),
+                                 cc->content_model->compositor(), resolver,
+                                 ct.name());
+          }
+        }
+      }
+
+      fn.body = body;
+      return fn;
+    }
+
+    // ===== Deserialization code generation =====
+
+    // Generate the parse expression for an attribute value
+    std::string
+    parse_expr(const std::string& text_expr, const qname& type_name,
+               const schema_set& schemas, const type_resolver& resolver) {
+      if (is_enum_type(schemas, type_name)) {
+        std::string enum_name = to_cpp_identifier(type_name.local_name());
+        return enum_name + "_from_string(" + text_expr + ")";
+      }
+      std::string cpp_type = resolver.resolve(type_name);
+      return "xb::parse<" + cpp_type + ">(" + text_expr + ")";
+    }
+
+    // Element read info
+    struct read_element_info {
+      std::string field_name;
+      qname element_name;
+      qname type_name;
+      occurrence occurs;
+      bool nillable;
+      bool is_recursive;
+    };
+
+    std::string
+    emit_read_element(const read_element_info& info, const schema_set& schemas,
+                      const type_resolver& resolver) {
+      std::string field = "result." + info.field_name;
+      bool is_complex = is_complex_type(schemas, info.type_name);
+      std::string cpp_type = resolver.resolve(info.type_name);
+
+      if (info.is_recursive && info.occurs.min_occurs == 0 &&
+          !info.occurs.is_unbounded() && info.occurs.max_occurs <= 1) {
+        // unique_ptr field
+        std::string read_fn =
+            "read_" + to_cpp_identifier(info.type_name.local_name());
+        return "      " + field + " = std::make_unique<" + cpp_type + ">(" +
+               read_fn + "(reader));\n";
+      }
+
+      if (info.occurs.is_unbounded() || info.occurs.max_occurs > 1) {
+        // vector field -> push_back
+        if (is_complex) {
+          std::string read_fn =
+              "read_" + to_cpp_identifier(info.type_name.local_name());
+          return "      " + field + ".push_back(" + read_fn + "(reader));\n";
+        }
+        return "      " + field + ".push_back(xb::read_simple<" + cpp_type +
+               ">(reader));\n";
+      }
+
+      // Required or optional (both assign directly — optional::operator= works)
+      if (is_complex) {
+        std::string read_fn =
+            "read_" + to_cpp_identifier(info.type_name.local_name());
+        return "      " + field + " = " + read_fn + "(reader);\n";
+      }
+      return "      " + field + " = xb::read_simple<" + cpp_type +
+             ">(reader);\n";
+    }
+
+    // Forward declare
+    void
+    emit_read_particles(std::string& body,
+                        const std::vector<particle>& particles,
+                        compositor_kind compositor,
+                        const type_resolver& resolver,
+                        const qname& containing_type_name);
+
+    void
+    emit_read_particle_match(std::string& body, const particle& p,
+                             const type_resolver& resolver,
+                             const qname& containing_type_name,
+                             bool& first_branch) {
+      std::visit(
+          [&](const auto& term) {
+            using T = std::decay_t<decltype(term)>;
+            if constexpr (std::is_same_v<T, element_decl>) {
+              bool is_recursive = (term.type_name() == containing_type_name);
+              std::string qn = "xb::qname{\"" + term.name().namespace_uri() +
+                               "\", \"" + term.name().local_name() + "\"}";
+              std::string kw = first_branch ? "if" : "else if";
+              body += "    " + kw + " (name == " + qn + ") {\n";
+              body += emit_read_element(
+                  {to_cpp_identifier(term.name().local_name()), term.name(),
+                   term.type_name(), p.occurs, term.nillable(), is_recursive},
+                  resolver.schemas, resolver);
+              body += "    }\n";
+              first_branch = false;
+            } else if constexpr (std::is_same_v<T, element_ref>) {
+              auto* elem = resolver.schemas.find_element(term.ref);
+              if (!elem) return;
+              std::string qn = "xb::qname{\"" + elem->name().namespace_uri() +
+                               "\", \"" + elem->name().local_name() + "\"}";
+              std::string kw = first_branch ? "if" : "else if";
+              body += "    " + kw + " (name == " + qn + ") {\n";
+              body += emit_read_element(
+                  {to_cpp_identifier(elem->name().local_name()), elem->name(),
+                   elem->type_name(), p.occurs, elem->nillable(), false},
+                  resolver.schemas, resolver);
+              body += "    }\n";
+              first_branch = false;
+            } else if constexpr (std::is_same_v<T, group_ref>) {
+              auto* group_def = resolver.schemas.find_model_group_def(term.ref);
+              if (group_def) {
+                for (const auto& gp : group_def->group().particles())
+                  emit_read_particle_match(body, gp, resolver,
+                                           containing_type_name, first_branch);
+              }
+            } else if constexpr (std::is_same_v<T,
+                                                std::unique_ptr<model_group>>) {
+              if (term) {
+                for (const auto& sp : term->particles())
+                  emit_read_particle_match(body, sp, resolver,
+                                           containing_type_name, first_branch);
+              }
+            } else if constexpr (std::is_same_v<T, wildcard>) {
+              std::string kw = first_branch ? "if" : "else if";
+              body += "    " + kw + " (true) {\n";
+              body +=
+                  "      result.any.emplace_back(xb::any_element(reader));\n";
+              body += "    }\n";
+              first_branch = false;
+            }
+          },
+          p.term);
+    }
+
+    void
+    emit_read_particles(std::string& body,
+                        const std::vector<particle>& particles,
+                        compositor_kind compositor,
+                        const type_resolver& resolver,
+                        const qname& containing_type_name) {
+      if (compositor == compositor_kind::choice) {
+        // Choice: element name selects variant alternative
+        bool first_branch = true;
+        for (const auto& p : particles) {
+          std::visit(
+              [&](const auto& term) {
+                using T = std::decay_t<decltype(term)>;
+                if constexpr (std::is_same_v<T, element_decl>) {
+                  std::string qn = "xb::qname{\"" +
+                                   term.name().namespace_uri() + "\", \"" +
+                                   term.name().local_name() + "\"}";
+                  std::string cpp_type = resolver.resolve(term.type_name());
+                  bool is_complex =
+                      is_complex_type(resolver.schemas, term.type_name());
+
+                  std::string kw = first_branch ? "if" : "else if";
+                  body += "    " + kw + " (name == " + qn + ") {\n";
+                  if (is_complex) {
+                    std::string read_fn =
+                        "read_" +
+                        to_cpp_identifier(term.type_name().local_name());
+                    body += "      result.choice = " + read_fn + "(reader);\n";
+                  } else {
+                    body += "      result.choice = xb::read_simple<" +
+                            cpp_type + ">(reader);\n";
+                  }
+                  body += "    }\n";
+                  first_branch = false;
+                } else if constexpr (std::is_same_v<T, element_ref>) {
+                  auto* elem = resolver.schemas.find_element(term.ref);
+                  if (!elem) return;
+                  std::string qn = "xb::qname{\"" +
+                                   elem->name().namespace_uri() + "\", \"" +
+                                   elem->name().local_name() + "\"}";
+                  std::string cpp_type = resolver.resolve(elem->type_name());
+                  std::string kw = first_branch ? "if" : "else if";
+                  body += "    " + kw + " (name == " + qn + ") {\n";
+                  body += "      result.choice = xb::read_simple<" + cpp_type +
+                          ">(reader);\n";
+                  body += "    }\n";
+                  first_branch = false;
+                }
+              },
+              p.term);
+        }
+        return;
+      }
+
+      // Sequence or all: dispatch by element name
+      bool first_branch = true;
+      for (const auto& p : particles)
+        emit_read_particle_match(body, p, resolver, containing_type_name,
+                                 first_branch);
+
+      // Skip unknown elements
+      if (!first_branch) {
+        body += "    else {\n";
+        body += "      xb::skip_element(reader);\n";
+        body += "    }\n";
+      }
+    }
+
+    void
+    emit_read_attributes(std::string& body,
+                         const std::vector<attribute_use>& attrs,
+                         const schema_set& schemas,
+                         const type_resolver& resolver) {
+      for (const auto& attr : attrs) {
+        std::string name = to_cpp_identifier(attr.name.local_name());
+        std::string qn = "xb::qname{\"" + attr.name.namespace_uri() + "\", \"" +
+                         attr.name.local_name() + "\"}";
+
+        if (attr.required) {
+          std::string expr = parse_expr("reader.attribute_value(" + qn + ")",
+                                        attr.type_name, schemas, resolver);
+          body += "  result." + name + " = " + expr + ";\n";
+        } else {
+          body += "  {\n";
+          body += "    auto attr_val__ = reader.attribute_value(" + qn + ");\n";
+          body += "    if (!attr_val__.empty()) {\n";
+          std::string expr =
+              parse_expr("attr_val__", attr.type_name, schemas, resolver);
+          body += "      result." + name + " = " + expr + ";\n";
+          body += "    }\n";
+          body += "  }\n";
+        }
+      }
+    }
+
+    void
+    emit_read_attribute_group_refs(std::string& body,
+                                   const std::vector<attribute_group_ref>& refs,
+                                   const schema_set& schemas,
+                                   const type_resolver& resolver) {
+      for (const auto& ref : refs) {
+        auto* group_def = schemas.find_attribute_group_def(ref.ref);
+        if (group_def) {
+          emit_read_attributes(body, group_def->attributes(), schemas,
+                               resolver);
+          emit_read_attribute_group_refs(
+              body, group_def->attribute_group_refs(), schemas, resolver);
+        }
+      }
+    }
+
+    void
+    emit_read_base_fields(std::string& body, const schema_set& schemas,
+                          const qname& base_name, const type_resolver& resolver,
+                          const qname& containing_type_name,
+                          bool& first_branch) {
+      auto* base_ct = schemas.find_complex_type(base_name);
+      if (!base_ct) return;
+
+      if (base_ct->content().kind == content_kind::element_only ||
+          base_ct->content().kind == content_kind::mixed) {
+        if (auto* cc =
+                std::get_if<complex_content>(&base_ct->content().detail)) {
+          if (!cc->base_type_name.namespace_uri().empty() ||
+              !cc->base_type_name.local_name().empty()) {
+            if (cc->derivation == derivation_method::extension)
+              emit_read_base_fields(body, schemas, cc->base_type_name, resolver,
+                                    containing_type_name, first_branch);
+          }
+          if (cc->content_model.has_value()) {
+            for (const auto& p : cc->content_model->particles())
+              emit_read_particle_match(body, p, resolver, containing_type_name,
+                                       first_branch);
+          }
+        }
+      }
+    }
+
+    cpp_function
+    generate_read_function(const complex_type& ct,
+                           const type_resolver& resolver) {
+      cpp_function fn;
+      std::string struct_name = to_cpp_identifier(ct.name().local_name());
+      fn.return_type = struct_name;
+      fn.name = "read_" + struct_name;
+      fn.parameters = "xb::xml_reader& reader";
+
+      std::string body;
+      body += "  " + struct_name + " result;\n";
+
+      // Handle simpleContent
+      if (ct.content().kind == content_kind::simple) {
+        emit_read_attributes(body, ct.attributes(), resolver.schemas, resolver);
+        emit_read_attribute_group_refs(body, ct.attribute_group_refs(),
+                                       resolver.schemas, resolver);
+
+        if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
+          std::string cpp_type = resolver.resolve(sc->base_type_name);
+          body += "  result.value = xb::parse<" + cpp_type +
+                  ">(xb::read_text(reader));\n";
+        }
+
+        body += "  return result;\n";
+        fn.body = body;
+        return fn;
+      }
+
+      // Read attributes from current start_element
+      emit_read_attributes(body, ct.attributes(), resolver.schemas, resolver);
+      emit_read_attribute_group_refs(body, ct.attribute_group_refs(),
+                                     resolver.schemas, resolver);
+
+      // Read child elements
+      bool has_children = false;
+      if (ct.content().kind == content_kind::element_only ||
+          ct.content().kind == content_kind::mixed) {
+        if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
+          bool has_particles = (cc->content_model.has_value() &&
+                                !cc->content_model->particles().empty());
+          bool has_extension = cc->derivation == derivation_method::extension &&
+                               (!cc->base_type_name.namespace_uri().empty() ||
+                                !cc->base_type_name.local_name().empty());
+          has_children = has_particles || has_extension;
+        }
+      }
+
+      if (has_children) {
+        body += "  auto start_depth = reader.depth();\n";
+        body += "  while (reader.read()) {\n";
+        body += "    if (reader.node_type() == xb::xml_node_type::end_element "
+                "&& reader.depth() == start_depth) break;\n";
+        body += "    if (reader.node_type() != "
+                "xb::xml_node_type::start_element) continue;\n";
+        body += "    auto& name = reader.name();\n";
+
+        if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
+          bool first_branch = true;
+
+          // Extension: read base fields first
+          if (cc->derivation == derivation_method::extension &&
+              (!cc->base_type_name.namespace_uri().empty() ||
+               !cc->base_type_name.local_name().empty())) {
+            emit_read_base_fields(body, resolver.schemas, cc->base_type_name,
+                                  resolver, ct.name(), first_branch);
+          }
+
+          if (cc->content_model.has_value()) {
+            emit_read_particles(body, cc->content_model->particles(),
+                                cc->content_model->compositor(), resolver,
+                                ct.name());
+          } else if (!first_branch) {
+            body += "    else {\n";
+            body += "      xb::skip_element(reader);\n";
+            body += "    }\n";
+          }
+        }
+
+        body += "  }\n";
+      }
+
+      body += "  return result;\n";
+      fn.body = body;
+      return fn;
+    }
+
   } // namespace
 
   std::vector<cpp_file>
@@ -698,9 +1430,33 @@ namespace xb {
       for (const auto& ct : s.complex_types())
         declarations.push_back(translate_complex_type(ct, resolver));
 
+      // Order type declarations first (structs, enums, aliases, forward decls)
+      auto ordered_types = order_declarations(std::move(declarations));
+
+      // Build a map from type name -> complex_type for ordered generation
+      std::unordered_map<std::string, const complex_type*> ct_by_name;
+      for (const auto& ct : s.complex_types())
+        ct_by_name[to_cpp_identifier(ct.name().local_name())] = &ct;
+
+      // Generate write_ functions in the same order as the sorted type decls
+      // (which respects dependencies: if A depends on B, B comes first)
+      // Collect struct names first, then generate to avoid iterator
+      // invalidation
+      std::vector<const complex_type*> ordered_cts;
+      for (const auto& decl : ordered_types) {
+        auto* st_decl = std::get_if<cpp_struct>(&decl);
+        if (!st_decl) continue;
+        auto it = ct_by_name.find(st_decl->name);
+        if (it != ct_by_name.end()) ordered_cts.push_back(it->second);
+      }
+      for (const auto* ct_ptr : ordered_cts) {
+        ordered_types.push_back(generate_read_function(*ct_ptr, resolver));
+        ordered_types.push_back(generate_write_function(*ct_ptr, resolver));
+      }
+
       cpp_namespace ns;
       ns.name = cpp_namespace_for(s.target_namespace(), options_);
-      ns.declarations = order_declarations(std::move(declarations));
+      ns.declarations = std::move(ordered_types);
 
       auto includes = compute_includes(referenced_namespaces,
                                        schemas_.schemas(), ns.declarations);

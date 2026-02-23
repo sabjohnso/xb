@@ -51,8 +51,9 @@ compile_generated_files(const std::vector<cpp_file>& files,
   }
 
   // Compile with the system C++ compiler
-  std::string cmd = "c++ -std=c++20 -fsyntax-only -I" + tmp_dir.string() + " " +
-                    main_path.string() + " 2>&1";
+  std::string include_dir = STRINGIFY(XB_INCLUDE_DIR);
+  std::string cmd = "c++ -std=c++20 -fsyntax-only -I" + tmp_dir.string() +
+                    " -I" + include_dir + " " + main_path.string() + " 2>&1";
   int rc = std::system(cmd.c_str());
 
   // Cleanup

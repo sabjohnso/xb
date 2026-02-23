@@ -99,6 +99,16 @@ namespace xb {
     }
 
     void
+    write_function(std::ostream& os, const cpp_function& f) {
+      if (f.is_inline) os << "inline ";
+      os << f.return_type << ' ' << f.name << '(';
+      os << f.parameters;
+      os << ") {\n";
+      os << f.body;
+      os << "}\n";
+    }
+
+    void
     write_decl(std::ostream& os, const cpp_decl& decl) {
       std::visit(
           [&os](const auto& d) {
@@ -111,6 +121,8 @@ namespace xb {
               write_type_alias(os, d);
             else if constexpr (std::is_same_v<T, cpp_forward_decl>)
               write_forward_decl(os, d);
+            else if constexpr (std::is_same_v<T, cpp_function>)
+              write_function(os, d);
           },
           decl);
     }
