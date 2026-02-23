@@ -1,5 +1,7 @@
 #include <xb/schema_parser.hpp>
 
+#include <xb/open_content.hpp>
+
 #include <algorithm>
 #include <memory>
 #include <sstream>
@@ -295,7 +297,8 @@ namespace xb {
                             std::optional<wildcard>& attr_wildcard,
                             bool& is_mixed,
                             std::vector<simple_type>& anon_simple_types,
-                            std::vector<complex_type>& anon_complex_types);
+                            std::vector<complex_type>& anon_complex_types,
+                            std::optional<open_content>& oc);
 
     particle
     parse_particle(xml_reader& reader, const std::string& tns,
@@ -349,15 +352,16 @@ namespace xb {
               std::vector<attribute_use> ct_attrs;
               std::vector<attribute_group_ref> ct_agrefs;
               std::optional<wildcard> ct_awild;
+              std::optional<open_content> ct_oc;
 
-              parse_complex_type_body(reader, tns, ct_content, ct_attrs,
-                                      ct_agrefs, ct_awild, mixed,
-                                      anon_simple_types, anon_complex_types);
+              parse_complex_type_body(
+                  reader, tns, ct_content, ct_attrs, ct_agrefs, ct_awild, mixed,
+                  anon_simple_types, anon_complex_types, ct_oc);
 
-              anon_complex_types.push_back(
-                  complex_type(qname(tns, synth_name), false, mixed,
-                               std::move(ct_content), std::move(ct_attrs),
-                               std::move(ct_agrefs), std::move(ct_awild)));
+              anon_complex_types.push_back(complex_type(
+                  qname(tns, synth_name), false, mixed, std::move(ct_content),
+                  std::move(ct_attrs), std::move(ct_agrefs),
+                  std::move(ct_awild), std::move(ct_oc)));
               found_anon = true;
             } else {
               skip_element(reader);
@@ -414,7 +418,8 @@ namespace xb {
                             std::optional<wildcard>& attr_wildcard,
                             bool& is_mixed,
                             std::vector<simple_type>& anon_simple_types,
-                            std::vector<complex_type>& anon_complex_types) {
+                            std::vector<complex_type>& anon_complex_types,
+                            std::optional<open_content>& oc) {
       std::size_t depth = reader.depth();
 
       while (read_skip_ws(reader)) {
@@ -607,6 +612,30 @@ namespace xb {
         } else if (local == "anyAttribute") {
           attr_wildcard = parse_wildcard_attrs(reader);
           skip_element(reader);
+        } else if (local == "openContent") {
+          auto mode_str = opt_attr(reader, "mode").value_or("interleave");
+          open_content_mode mode = open_content_mode::interleave;
+          if (mode_str == "suffix")
+            mode = open_content_mode::suffix;
+          else if (mode_str == "none")
+            mode = open_content_mode::none;
+
+          wildcard w;
+          std::size_t oc_depth = reader.depth();
+          while (read_skip_ws(reader)) {
+            if (reader.node_type() == xml_node_type::end_element &&
+                reader.depth() == oc_depth)
+              break;
+            if (reader.node_type() != xml_node_type::start_element) continue;
+            if (reader.name().namespace_uri() == xs_ns &&
+                reader.name().local_name() == "any") {
+              w = parse_wildcard_attrs(reader);
+              skip_element(reader);
+            } else {
+              skip_element(reader);
+            }
+          }
+          oc = open_content{mode, w};
         } else {
           skip_element(reader);
         }
@@ -699,15 +728,16 @@ namespace xb {
               std::vector<attribute_use> ct_attrs;
               std::vector<attribute_group_ref> ct_agrefs;
               std::optional<wildcard> ct_awild;
+              std::optional<open_content> ct_oc;
 
-              parse_complex_type_body(reader, target_ns, ct_content, ct_attrs,
-                                      ct_agrefs, ct_awild, mixed,
-                                      anon_simple_types, anon_complex_types);
+              parse_complex_type_body(
+                  reader, target_ns, ct_content, ct_attrs, ct_agrefs, ct_awild,
+                  mixed, anon_simple_types, anon_complex_types, ct_oc);
 
-              anon_complex_types.push_back(
-                  complex_type(qname(target_ns, synth_name), false, mixed,
-                               std::move(ct_content), std::move(ct_attrs),
-                               std::move(ct_agrefs), std::move(ct_awild)));
+              anon_complex_types.push_back(complex_type(
+                  qname(target_ns, synth_name), false, mixed,
+                  std::move(ct_content), std::move(ct_attrs),
+                  std::move(ct_agrefs), std::move(ct_awild), std::move(ct_oc)));
               has_anon_type = true;
             } else {
               skip_element(reader);
@@ -746,14 +776,16 @@ namespace xb {
         std::vector<attribute_use> ct_attrs;
         std::vector<attribute_group_ref> ct_agrefs;
         std::optional<wildcard> ct_awild;
+        std::optional<open_content> ct_oc;
 
         parse_complex_type_body(reader, target_ns, ct_content, ct_attrs,
                                 ct_agrefs, ct_awild, mixed, anon_simple_types,
-                                anon_complex_types);
+                                anon_complex_types, ct_oc);
 
         result.add_complex_type(complex_type(
             qname(target_ns, name), abstract, mixed, std::move(ct_content),
-            std::move(ct_attrs), std::move(ct_agrefs), std::move(ct_awild)));
+            std::move(ct_attrs), std::move(ct_agrefs), std::move(ct_awild),
+            std::move(ct_oc)));
       } else if (local == "group") {
         auto name = req_attr(reader, "name");
         // Parse the compositor child
@@ -842,6 +874,31 @@ namespace xb {
         auto loc = opt_attr(reader, "schemaLocation").value_or("");
         result.add_include(schema_include{loc});
         skip_element(reader);
+      } else if (local == "defaultOpenContent") {
+        auto mode_str = opt_attr(reader, "mode").value_or("interleave");
+        open_content_mode mode = open_content_mode::interleave;
+        if (mode_str == "suffix") mode = open_content_mode::suffix;
+
+        auto ate = opt_attr(reader, "appliesToEmpty").value_or("false");
+        bool applies_to_empty = (ate == "true" || ate == "1");
+
+        wildcard w;
+        std::size_t doc_depth = reader.depth();
+        while (read_skip_ws(reader)) {
+          if (reader.node_type() == xml_node_type::end_element &&
+              reader.depth() == doc_depth)
+            break;
+          if (reader.node_type() != xml_node_type::start_element) continue;
+          if (reader.name().namespace_uri() == xs_ns &&
+              reader.name().local_name() == "any") {
+            w = parse_wildcard_attrs(reader);
+            skip_element(reader);
+          } else {
+            skip_element(reader);
+          }
+        }
+        result.set_default_open_content(open_content{mode, w},
+                                        applies_to_empty);
       } else {
         // Skip annotation, notation, redefine, etc.
         skip_element(reader);

@@ -4,9 +4,11 @@
 #include <xb/complex_type.hpp>
 #include <xb/element_decl.hpp>
 #include <xb/model_group_def.hpp>
+#include <xb/open_content.hpp>
 #include <xb/qname.hpp>
 #include <xb/simple_type.hpp>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -37,6 +39,8 @@ namespace xb {
     std::vector<attribute_group_def> attribute_group_defs_;
     std::vector<schema_import> imports_;
     std::vector<schema_include> includes_;
+    std::optional<open_content> default_open_content_;
+    bool default_open_content_applies_to_empty_ = false;
 
   public:
     schema() = default;
@@ -129,6 +133,22 @@ namespace xb {
     const std::vector<schema_include>&
     includes() const {
       return includes_;
+    }
+
+    void
+    set_default_open_content(open_content oc, bool applies_to_empty = false) {
+      default_open_content_ = std::move(oc);
+      default_open_content_applies_to_empty_ = applies_to_empty;
+    }
+
+    const std::optional<open_content>&
+    default_open_content() const {
+      return default_open_content_;
+    }
+
+    bool
+    default_open_content_applies_to_empty() const {
+      return default_open_content_applies_to_empty_;
     }
   };
 

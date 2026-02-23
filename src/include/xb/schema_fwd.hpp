@@ -17,6 +17,8 @@ namespace xb {
 
   enum class process_contents { strict, lax, skip };
 
+  enum class open_content_mode { none, interleave, suffix };
+
   inline constexpr std::size_t unbounded = SIZE_MAX;
 
 } // namespace xb

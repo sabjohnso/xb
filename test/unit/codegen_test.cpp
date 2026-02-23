@@ -2313,3 +2313,335 @@ TEST_CASE("file_per_type source includes umbrella + runtime",
   CHECK(has_umbrella);
   CHECK(has_runtime);
 }
+
+// ===== Group: Open Content =====
+
+TEST_CASE("open content: type with open content gets open_content field",
+          "[codegen][open_content]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "data"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  open_content oc{
+      open_content_mode::interleave,
+      wildcard{wildcard_ns_constraint::other, {}, process_contents::lax}};
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "FlexType"},
+                                  false, false, std::move(ct), {}, {}, {},
+                                  std::move(oc)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "flex_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "open_content");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::vector<xb::any_element>");
+}
+
+TEST_CASE("open content: type with explicit wildcard + open content: no "
+          "duplicate open_content field",
+          "[codegen][open_content]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "data"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(wildcard{});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  open_content oc{open_content_mode::interleave, wildcard{}};
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "DupType"},
+                                  false, false, std::move(ct), {}, {}, {},
+                                  std::move(oc)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "dup_type");
+  REQUIRE(st != nullptr);
+  // Should have 'any' field from wildcard, but no 'open_content' field
+  auto* any_f = find_field(*st, "any");
+  CHECK(any_f != nullptr);
+  auto* oc_f = find_field(*st, "open_content");
+  CHECK(oc_f == nullptr);
+}
+
+TEST_CASE("open content: defaultOpenContent adds field to type without own "
+          "openContent",
+          "[codegen][open_content]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  s.set_default_open_content(
+      open_content{open_content_mode::interleave, wildcard{}});
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "data"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "DefType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "def_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "open_content");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::vector<xb::any_element>");
+}
+
+TEST_CASE("open content: mode=none opts out of schema default",
+          "[codegen][open_content]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  s.set_default_open_content(
+      open_content{open_content_mode::interleave, wildcard{}});
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "data"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  open_content oc{open_content_mode::none, wildcard{}};
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ClosedType"}, false, false,
+                   std::move(ct), {}, {}, {}, std::move(oc)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "closed_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "open_content");
+  CHECK(f == nullptr);
+}
+
+TEST_CASE("open content: appliesToEmpty=false, empty type: no open_content "
+          "field",
+          "[codegen][open_content]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  s.set_default_open_content(
+      open_content{open_content_mode::interleave, wildcard{}}, false);
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "EmptyType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "empty_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "open_content");
+  CHECK(f == nullptr);
+}
+
+TEST_CASE("open content: appliesToEmpty=true, empty type: gets open_content "
+          "field",
+          "[codegen][open_content]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  s.set_default_open_content(
+      open_content{open_content_mode::interleave, wildcard{}}, true);
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "EmptyOpenType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  auto* st = find_struct(files[0], "empty_open_type");
+  REQUIRE(st != nullptr);
+  auto* f = find_field(*st, "open_content");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::vector<xb::any_element>");
+}
+
+// ===== Open Content: Serialization & Deserialization =====
+
+TEST_CASE("open content: read function captures into open_content field",
+          "[codegen][open_content][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "data"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  open_content oc{
+      open_content_mode::interleave,
+      wildcard{wildcard_ns_constraint::other, {}, process_contents::lax}};
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "FlexType"},
+                                  false, false, std::move(ct), {}, {}, {},
+                                  std::move(oc)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_flex_type");
+  REQUIRE(fn != nullptr);
+  // Should capture unknown elements into open_content, not skip_element
+  CHECK(fn->body.find(
+            "result.open_content.emplace_back(xb::any_element(reader))") !=
+        std::string::npos);
+  CHECK(fn->body.find("xb::skip_element(reader)") == std::string::npos);
+}
+
+TEST_CASE("open content: read function without open content still skips",
+          "[codegen][open_content][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "data"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "PlainType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_plain_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("xb::skip_element(reader)") != std::string::npos);
+  CHECK(fn->body.find("open_content") == std::string::npos);
+}
+
+TEST_CASE("open content: write function writes open_content elements",
+          "[codegen][open_content][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "data"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  open_content oc{
+      open_content_mode::suffix,
+      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax}};
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "FlexType"},
+                                  false, false, std::move(ct), {}, {}, {},
+                                  std::move(oc)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_flex_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("for (const auto& e : value.open_content)") !=
+        std::string::npos);
+  CHECK(fn->body.find("e.write(writer)") != std::string::npos);
+}
+
+TEST_CASE("open content: empty type with open content gets read loop",
+          "[codegen][open_content][deserialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  s.set_default_open_content(
+      open_content{open_content_mode::interleave, wildcard{}}, true);
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "EmptyOpenType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_empty_open_type");
+  REQUIRE(fn != nullptr);
+  // Should have a read loop that captures unknown elements
+  CHECK(fn->body.find("reader.read()") != std::string::npos);
+  CHECK(fn->body.find(
+            "result.open_content.emplace_back(xb::any_element(reader))") !=
+        std::string::npos);
+}

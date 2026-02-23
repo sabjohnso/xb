@@ -327,6 +327,42 @@ TEST_CASE("split mode: sequence + attributes compiles",
   CHECK(compile_generated_files(files, "split_sequence_attrs"));
 }
 
+TEST_CASE("compile: complex type with open content",
+          "[codegen][compile][open_content]") {
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  schema s;
+  s.set_target_namespace("http://example.com/oc");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/oc", "data"},
+                                      qname{xs, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  open_content oc{
+      open_content_mode::interleave,
+      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax}};
+
+  s.add_complex_type(complex_type(qname{"http://example.com/oc", "FlexType"},
+                                  false, false, std::move(ct), {}, {}, {},
+                                  std::move(oc)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "open_content"));
+}
+
 TEST_CASE("split mode: xb-typemap.xsd compiles", "[codegen][compile][split]") {
   std::string schema_path =
       std::string(STRINGIFY(XB_SCHEMA_DIR)) + "/xb-typemap.xsd";

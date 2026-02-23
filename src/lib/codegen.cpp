@@ -1,5 +1,6 @@
 #include <xb/codegen.hpp>
 #include <xb/naming.hpp>
+#include <xb/open_content.hpp>
 
 #include <set>
 
@@ -325,12 +326,44 @@ namespace xb {
                                      resolver);
     }
 
+    bool
+    has_wildcard_particle(const complex_content& cc) {
+      if (!cc.content_model.has_value()) return false;
+      for (const auto& p : cc.content_model->particles())
+        if (std::holds_alternative<wildcard>(p.term)) return true;
+      return false;
+    }
+
+    std::optional<open_content>
+    effective_open_content(const complex_type& ct, const schema& s) {
+      if (ct.open_content_value().has_value()) {
+        if (ct.open_content_value()->mode == open_content_mode::none)
+          return std::nullopt;
+        return ct.open_content_value();
+      }
+      if (s.default_open_content().has_value()) {
+        if (ct.content().kind == content_kind::empty &&
+            !s.default_open_content_applies_to_empty())
+          return std::nullopt;
+        return s.default_open_content();
+      }
+      return std::nullopt;
+    }
+
     cpp_decl
     translate_complex_type(const complex_type& ct,
-                           const type_resolver& resolver) {
+                           const type_resolver& resolver,
+                           const schema& current_schema) {
       cpp_struct s;
       s.name = to_cpp_identifier(ct.name().local_name());
       s.generate_equality = true;
+
+      // Compute effective open content
+      auto eff_oc = effective_open_content(ct, current_schema);
+      bool content_has_wildcard = false;
+      if (auto* cc = std::get_if<complex_content>(&ct.content().detail))
+        content_has_wildcard = has_wildcard_particle(*cc);
+      bool needs_oc_field = eff_oc.has_value() && !content_has_wildcard;
 
       // Handle simpleContent
       if (ct.content().kind == content_kind::simple) {
@@ -376,6 +409,9 @@ namespace xb {
         if (ct.attribute_wildcard().has_value())
           s.fields.push_back(
               {"std::vector<xb::any_attribute>", "any_attribute", ""});
+        if (needs_oc_field)
+          s.fields.push_back(
+              {"std::vector<xb::any_element>", "open_content", ""});
         return s;
       }
 
@@ -406,6 +442,10 @@ namespace xb {
       if (ct.attribute_wildcard().has_value())
         s.fields.push_back(
             {"std::vector<xb::any_attribute>", "any_attribute", ""});
+
+      if (needs_oc_field)
+        s.fields.push_back(
+            {"std::vector<xb::any_element>", "open_content", ""});
 
       return s;
     }
@@ -1025,7 +1065,8 @@ namespace xb {
 
     cpp_function
     generate_write_function(const complex_type& ct,
-                            const type_resolver& resolver) {
+                            const type_resolver& resolver,
+                            const schema& current_schema) {
       cpp_function fn;
       std::string struct_name = to_cpp_identifier(ct.name().local_name());
       fn.return_type = "void";
@@ -1102,6 +1143,19 @@ namespace xb {
         }
       }
 
+      // Write open content elements (suffix position)
+      {
+        auto eff_oc = effective_open_content(ct, current_schema);
+        bool wc = false;
+        if (auto* cc = std::get_if<complex_content>(&ct.content().detail))
+          wc = has_wildcard_particle(*cc);
+        if (eff_oc.has_value() && !wc) {
+          body += "  for (const auto& e : value.open_content) {\n";
+          body += "    e.write(writer);\n";
+          body += "  }\n";
+        }
+      }
+
       fn.body = body;
       return fn;
     }
@@ -1173,7 +1227,8 @@ namespace xb {
                         const std::vector<particle>& particles,
                         compositor_kind compositor,
                         const type_resolver& resolver,
-                        const qname& containing_type_name);
+                        const qname& containing_type_name,
+                        bool has_open_content = false);
 
     void
     emit_read_particle_match(std::string& body, const particle& p,
@@ -1239,7 +1294,8 @@ namespace xb {
                         const std::vector<particle>& particles,
                         compositor_kind compositor,
                         const type_resolver& resolver,
-                        const qname& containing_type_name) {
+                        const qname& containing_type_name,
+                        bool has_open_content) {
       if (compositor == compositor_kind::choice) {
         // Choice: element name selects variant alternative
         bool first_branch = true;
@@ -1294,11 +1350,18 @@ namespace xb {
         emit_read_particle_match(body, p, resolver, containing_type_name,
                                  first_branch);
 
-      // Skip unknown elements
+      // Handle unknown elements
       if (!first_branch) {
-        body += "    else {\n";
-        body += "      xb::skip_element(reader);\n";
-        body += "    }\n";
+        if (has_open_content) {
+          body += "    else {\n";
+          body += "      result.open_content.emplace_back("
+                  "xb::any_element(reader));\n";
+          body += "    }\n";
+        } else {
+          body += "    else {\n";
+          body += "      xb::skip_element(reader);\n";
+          body += "    }\n";
+        }
       }
     }
 
@@ -1374,7 +1437,8 @@ namespace xb {
 
     cpp_function
     generate_read_function(const complex_type& ct,
-                           const type_resolver& resolver) {
+                           const type_resolver& resolver,
+                           const schema& current_schema) {
       cpp_function fn;
       std::string struct_name = to_cpp_identifier(ct.name().local_name());
       fn.return_type = struct_name;
@@ -1406,19 +1470,28 @@ namespace xb {
       emit_read_attribute_group_refs(body, ct.attribute_group_refs(),
                                      resolver.schemas, resolver);
 
+      // Compute effective open content
+      auto eff_oc = effective_open_content(ct, current_schema);
+      bool content_has_wildcard = false;
+      if (auto* cc = std::get_if<complex_content>(&ct.content().detail))
+        content_has_wildcard = has_wildcard_particle(*cc);
+      bool has_oc = eff_oc.has_value() && !content_has_wildcard;
+
       // Read child elements
       bool has_children = false;
+      bool has_particles = false;
       if (ct.content().kind == content_kind::element_only ||
           ct.content().kind == content_kind::mixed) {
         if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
-          bool has_particles = (cc->content_model.has_value() &&
-                                !cc->content_model->particles().empty());
+          has_particles = (cc->content_model.has_value() &&
+                           !cc->content_model->particles().empty());
           bool has_extension = cc->derivation == derivation_method::extension &&
                                (!cc->base_type_name.namespace_uri().empty() ||
                                 !cc->base_type_name.local_name().empty());
           has_children = has_particles || has_extension;
         }
       }
+      has_children = has_children || has_oc;
 
       if (has_children) {
         body += "  auto start_depth = reader.depth();\n";
@@ -1443,12 +1516,26 @@ namespace xb {
           if (cc->content_model.has_value()) {
             emit_read_particles(body, cc->content_model->particles(),
                                 cc->content_model->compositor(), resolver,
-                                ct.name());
+                                ct.name(), has_oc);
           } else if (!first_branch) {
-            body += "    else {\n";
-            body += "      xb::skip_element(reader);\n";
-            body += "    }\n";
+            if (has_oc) {
+              body += "    else {\n";
+              body += "      result.open_content.emplace_back("
+                      "xb::any_element(reader));\n";
+              body += "    }\n";
+            } else {
+              body += "    else {\n";
+              body += "      xb::skip_element(reader);\n";
+              body += "    }\n";
+            }
           }
+        }
+
+        // Open content on empty/simple type (no complex_content detail)
+        if (has_oc && !has_particles &&
+            !std::holds_alternative<complex_content>(ct.content().detail)) {
+          body += "    result.open_content.emplace_back("
+                  "xb::any_element(reader));\n";
         }
 
         body += "  }\n";
@@ -1477,7 +1564,7 @@ namespace xb {
         declarations.push_back(translate_simple_type(st, resolver));
 
       for (const auto& ct : s.complex_types())
-        declarations.push_back(translate_complex_type(ct, resolver));
+        declarations.push_back(translate_complex_type(ct, resolver, s));
 
       // Order type declarations first (structs, enums, aliases, forward decls)
       auto ordered_types = order_declarations(std::move(declarations));
@@ -1496,8 +1583,8 @@ namespace xb {
         if (it != ct_by_name.end()) ordered_cts.push_back(it->second);
       }
       for (const auto* ct_ptr : ordered_cts) {
-        ordered_types.push_back(generate_read_function(*ct_ptr, resolver));
-        ordered_types.push_back(generate_write_function(*ct_ptr, resolver));
+        ordered_types.push_back(generate_read_function(*ct_ptr, resolver, s));
+        ordered_types.push_back(generate_write_function(*ct_ptr, resolver, s));
       }
 
       // In split mode, mark read_/write_ functions as non-inline

@@ -741,3 +741,138 @@ TEST_CASE("schema_parser: complex type attribute with default/fixed",
   CHECK(s.complex_types()[0].attributes()[0].default_value.value() == "1.0");
   CHECK(s.complex_types()[0].attributes()[1].fixed_value.value() == "UTF-8");
 }
+
+// ===== XSD 1.1: Open Content =====
+
+TEST_CASE("schema_parser: openContent interleave mode", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="FlexType">
+        <xs:openContent mode="interleave">
+          <xs:any namespace="##other" processContents="lax"/>
+        </xs:openContent>
+        <xs:sequence>
+          <xs:element name="data" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& ct = s.complex_types()[0];
+  REQUIRE(ct.open_content_value().has_value());
+  CHECK(ct.open_content_value()->mode == open_content_mode::interleave);
+  CHECK(ct.open_content_value()->wc.ns_constraint ==
+        wildcard_ns_constraint::other);
+  CHECK(ct.open_content_value()->wc.process == process_contents::lax);
+}
+
+TEST_CASE("schema_parser: openContent suffix mode", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="SuffixType">
+        <xs:openContent mode="suffix">
+          <xs:any processContents="skip"/>
+        </xs:openContent>
+        <xs:sequence>
+          <xs:element name="data" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& ct = s.complex_types()[0];
+  REQUIRE(ct.open_content_value().has_value());
+  CHECK(ct.open_content_value()->mode == open_content_mode::suffix);
+  CHECK(ct.open_content_value()->wc.process == process_contents::skip);
+}
+
+TEST_CASE("schema_parser: openContent none mode", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="ClosedType">
+        <xs:openContent mode="none"/>
+        <xs:sequence>
+          <xs:element name="data" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& ct = s.complex_types()[0];
+  REQUIRE(ct.open_content_value().has_value());
+  CHECK(ct.open_content_value()->mode == open_content_mode::none);
+}
+
+TEST_CASE("schema_parser: openContent default mode is interleave",
+          "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="DefaultMode">
+        <xs:openContent>
+          <xs:any/>
+        </xs:openContent>
+        <xs:sequence>
+          <xs:element name="data" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& ct = s.complex_types()[0];
+  REQUIRE(ct.open_content_value().has_value());
+  CHECK(ct.open_content_value()->mode == open_content_mode::interleave);
+}
+
+TEST_CASE("schema_parser: defaultOpenContent at schema level",
+          "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:defaultOpenContent>
+        <xs:any namespace="##other" processContents="lax"/>
+      </xs:defaultOpenContent>
+      <xs:complexType name="MyType">
+        <xs:sequence>
+          <xs:element name="data" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.default_open_content().has_value());
+  CHECK(s.default_open_content()->mode == open_content_mode::interleave);
+  CHECK(s.default_open_content()->wc.ns_constraint ==
+        wildcard_ns_constraint::other);
+  CHECK(s.default_open_content()->wc.process == process_contents::lax);
+  CHECK_FALSE(s.default_open_content_applies_to_empty());
+}
+
+TEST_CASE("schema_parser: defaultOpenContent appliesToEmpty=true",
+          "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:defaultOpenContent appliesToEmpty="true">
+        <xs:any/>
+      </xs:defaultOpenContent>
+    </xs:schema>
+  )");
+  REQUIRE(s.default_open_content().has_value());
+  CHECK(s.default_open_content_applies_to_empty());
+}
+
+TEST_CASE("schema_parser: defaultOpenContent suffix mode", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:defaultOpenContent mode="suffix">
+        <xs:any/>
+      </xs:defaultOpenContent>
+    </xs:schema>
+  )");
+  REQUIRE(s.default_open_content().has_value());
+  CHECK(s.default_open_content()->mode == open_content_mode::suffix);
+}

@@ -595,3 +595,86 @@ int main() {
 
   CHECK(build_and_run(files, "split_typemap_xsd", test_code));
 }
+
+TEST_CASE("round-trip: open content elements are preserved",
+          "[serialization][round_trip][open_content]") {
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+  std::string ns = "http://example.com/oc";
+
+  schema s;
+  s.set_target_namespace(ns);
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{ns, "data"}, qname{xs, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  open_content oc{
+      open_content_mode::interleave,
+      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax}};
+
+  s.add_complex_type(complex_type(qname{ns, "FlexType"}, false, false,
+                                  std::move(ct), {}, {}, {}, std::move(oc)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 2);
+
+  std::string test_code = R"(
+int main() {
+  using namespace example::com::oc;
+
+  // Build a FlexType with an open content element
+  flex_type val;
+  val.data = "hello";
+
+  // Create an any_element from XML
+  std::string extra_xml = "<extra xmlns=\"http://other.com\">surprise</extra>";
+  xb::expat_reader extra_reader(extra_xml);
+  extra_reader.read();
+  val.open_content.emplace_back(xb::any_element(extra_reader));
+
+  // Serialize
+  std::ostringstream os;
+  {
+    xb::ostream_writer writer(os);
+    writer.start_element(xb::qname{"http://example.com/oc", "flex"});
+    writer.namespace_declaration("", "http://example.com/oc");
+    write_flex_type(val, writer);
+    writer.end_element();
+  }
+
+  // Deserialize
+  xb::expat_reader reader(os.str());
+  reader.read();
+  auto result = read_flex_type(reader);
+
+  assert(result.data == "hello");
+  assert(result.open_content.size() == 1);
+
+  // Verify the open content element round-tripped
+  std::ostringstream oc_os;
+  {
+    xb::ostream_writer writer(oc_os);
+    result.open_content[0].write(writer);
+  }
+  std::string oc_xml = oc_os.str();
+  assert(oc_xml.find("extra") != std::string::npos);
+  assert(oc_xml.find("surprise") != std::string::npos);
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "open_content_round_trip", test_code));
+}
