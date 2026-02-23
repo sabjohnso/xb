@@ -67,10 +67,17 @@ build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
   std::string lib_file = STRINGIFY(XB_LIB_FILE);
   auto exe_path = tmp_dir / "test_exe";
 
+  // When the library was built with sanitizers (RelWithDebInfo), pass
+  // the same flags to the subprocess so it can link the sanitizer runtime.
+  std::string sanitizer_flags;
+  if (XB_SANITIZERS)
+    sanitizer_flags = "-fsanitize=undefined -fsanitize=address ";
+
   // Compile and link
-  std::string cmd = "c++ -std=c++20 -I" + tmp_dir.string() + " -I" +
-                    include_dir + " -o " + exe_path.string() + " " +
-                    main_path.string() + " " + lib_file + " -lexpat 2>&1";
+  std::string cmd = "c++ -std=c++20 " + sanitizer_flags + "-I" +
+                    tmp_dir.string() + " -I" + include_dir + " -o " +
+                    exe_path.string() + " " + main_path.string() + " " +
+                    lib_file + " -lexpat 2>&1";
   int rc = std::system(cmd.c_str());
 
   if (rc != 0) {
