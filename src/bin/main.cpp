@@ -54,7 +54,7 @@ print_usage(std::ostream& os) {
 
 static void
 print_version(std::ostream& os) {
-  os << "xb 0.1.0\n";
+  os << "xb " << XB_VERSION << "\n";
 }
 
 static cli_options
