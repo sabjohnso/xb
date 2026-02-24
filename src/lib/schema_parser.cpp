@@ -273,11 +273,8 @@ namespace xb {
         }
         if (reader.name().local_name() == "alternative") {
           auto test = opt_attr(reader, "test");
-          auto type_str = opt_attr(reader, "type");
-          qname type_name;
-          if (type_str.has_value()) {
-            type_name = resolve_qname(reader, type_str.value());
-          }
+          auto type_str = req_attr(reader, "type");
+          qname type_name = resolve_qname(reader, type_str);
           skip_element(reader);
           alts.push_back({test, type_name});
         } else {
@@ -400,11 +397,8 @@ namespace xb {
               found_anon = true;
             } else if (reader.name().local_name() == "alternative") {
               auto test = opt_attr(reader, "test");
-              auto alt_type_str = opt_attr(reader, "type");
-              qname alt_type_name;
-              if (alt_type_str.has_value()) {
-                alt_type_name = resolve_qname(reader, alt_type_str.value());
-              }
+              auto alt_type_str = req_attr(reader, "type");
+              qname alt_type_name = resolve_qname(reader, alt_type_str);
               skip_element(reader);
               alts.push_back({test, alt_type_name});
             } else {
@@ -789,11 +783,8 @@ namespace xb {
               has_anon_type = true;
             } else if (reader.name().local_name() == "alternative") {
               auto test = opt_attr(reader, "test");
-              auto alt_type_str = opt_attr(reader, "type");
-              qname alt_type_name;
-              if (alt_type_str.has_value()) {
-                alt_type_name = resolve_qname(reader, alt_type_str.value());
-              }
+              auto alt_type_str = req_attr(reader, "type");
+              qname alt_type_name = resolve_qname(reader, alt_type_str);
               skip_element(reader);
               alts.push_back({test, alt_type_name});
             } else {

@@ -949,6 +949,19 @@ TEST_CASE("schema_parser: element without alternatives has empty vector",
   CHECK(s.elements()[0].type_alternatives().empty());
 }
 
+TEST_CASE("schema_parser: xs:alternative missing type attribute throws",
+          "[schema_parser][cta]") {
+  CHECK_THROWS_AS(parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:tns="urn:test">
+      <xs:element name="vehicle" type="tns:vehicleType">
+        <xs:alternative test="@kind = 'car'"/>
+      </xs:element>
+    </xs:schema>
+  )"),
+                  std::runtime_error);
+}
+
 TEST_CASE("schema_parser: default alternative has nullopt test",
           "[schema_parser][cta]") {
   auto s = parse_xsd(R"(
