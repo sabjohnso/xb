@@ -524,3 +524,124 @@ TEST_CASE("generate unsupported assertion compiles",
   REQUIRE(files.size() == 1);
   CHECK(compile_generated_files(files, "assertion_unsupported_compile"));
 }
+
+// ===== Facet & cardinality compile tests =====
+
+TEST_CASE("generate from simple type with range facets compiles",
+          "[codegen][compile][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/facet");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+  facets.max_exclusive = "100";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/facet", "Percent"},
+                                simple_type_variety::atomic, qname{xs, "int"},
+                                facets));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "facet_range_compile"));
+}
+
+TEST_CASE("generate from simple type with pattern facet compiles",
+          "[codegen][compile][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/facet");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  facet_set facets;
+  facets.pattern = "[A-Z]{3}";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/facet", "CurrCode"},
+                                simple_type_variety::atomic,
+                                qname{xs, "string"}, facets));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "facet_pattern_compile"));
+}
+
+TEST_CASE("generate from complex type with cardinality constraints compiles",
+          "[codegen][compile][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/card");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/card", "item"},
+                                      qname{xs, "string"}),
+                         occurrence{1, 10});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/card", "BoundedList"}, false,
+                   false, std::move(ct)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "cardinality_compile"));
+}
+
+TEST_CASE("generate from complex type with simple content facets compiles",
+          "[codegen][compile][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/facet");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+  facets.max_inclusive = "999";
+
+  content_type ct(
+      content_kind::simple,
+      simple_content{qname{xs, "int"}, derivation_method::restriction, facets});
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/facet", "PriceType"}, false, false,
+                   std::move(ct),
+                   {attribute_use{qname{"", "currency"}, qname{xs, "string"},
+                                  true, std::nullopt, std::nullopt}}));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "facet_simple_content_compile"));
+}

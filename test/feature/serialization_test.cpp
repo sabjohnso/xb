@@ -926,3 +926,173 @@ int main() {
 
   CHECK(build_and_run(files, "assertion_unsupported_validate", test_code));
 }
+
+// ===== Facet & cardinality runtime validation tests =====
+
+TEST_CASE("range-constrained simple type validates at runtime",
+          "[serialization][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/validation");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+  facets.max_inclusive = "100";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/validation", "Pct"},
+                                simple_type_variety::atomic, qname{xs, "int"},
+                                facets));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.namespace_map["http://example.com/validation"] = "validation";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  std::string test_code = R"(
+int main() {
+  // In-range: valid
+  assert(validation::validate_pct(50));
+
+  // At boundaries: valid
+  assert(validation::validate_pct(0));
+  assert(validation::validate_pct(100));
+
+  // Out of range: invalid
+  assert(!validation::validate_pct(-1));
+  assert(!validation::validate_pct(101));
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "facet_range_validate", test_code));
+}
+
+TEST_CASE("cardinality-constrained complex type validates at runtime",
+          "[serialization][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/validation");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/validation", "item"},
+                   qname{xs, "string"}),
+      occurrence{1, 3});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/validation", "BoundedList"}, false,
+                   false, std::move(ct)));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.namespace_map["http://example.com/validation"] = "validation";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  std::string test_code = R"(
+int main() {
+  using namespace validation;
+
+  // Valid: 1-3 items
+  bounded_list ok;
+  ok.item = {"a"};
+  assert(validate_bounded_list(ok));
+
+  bounded_list ok2;
+  ok2.item = {"a", "b", "c"};
+  assert(validate_bounded_list(ok2));
+
+  // Invalid: empty
+  bounded_list empty;
+  assert(!validate_bounded_list(empty));
+
+  // Invalid: too many
+  bounded_list too_many;
+  too_many.item = {"a", "b", "c", "d"};
+  assert(!validate_bounded_list(too_many));
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "cardinality_validate", test_code));
+}
+
+TEST_CASE("complex type with simple content facets validates at runtime",
+          "[serialization][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/validation");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+
+  content_type ct(
+      content_kind::simple,
+      simple_content{qname{xs, "int"}, derivation_method::restriction, facets});
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/validation", "Price"}, false,
+                   false, std::move(ct),
+                   {attribute_use{qname{"", "currency"}, qname{xs, "string"},
+                                  true, std::nullopt, std::nullopt}}));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.namespace_map["http://example.com/validation"] = "validation";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  std::string test_code = R"(
+int main() {
+  using namespace validation;
+
+  // Valid: positive value
+  price p;
+  p.value = 42;
+  p.currency = "USD";
+  assert(validate_price(p));
+
+  // Valid: zero (inclusive)
+  price zero;
+  zero.value = 0;
+  zero.currency = "EUR";
+  assert(validate_price(zero));
+
+  // Invalid: negative
+  price neg;
+  neg.value = -1;
+  neg.currency = "GBP";
+  assert(!validate_price(neg));
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "facet_simple_content_validate", test_code));
+}

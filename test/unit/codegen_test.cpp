@@ -3371,3 +3371,621 @@ TEST_CASE("unsupported XPath in assertion: WARNING comment, returns true",
   CHECK(fn->body.find("WARNING") != std::string::npos);
   CHECK(fn->body.find("return true") != std::string::npos);
 }
+
+// ===== Facet validation: range facets =====
+
+TEST_CASE("simple type with min_inclusive facet generates validate function",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "NonNegInt"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_non_neg_int");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->return_type == "bool");
+  CHECK(fn->body.find("value >= xb::parse<xb::integer>(\"0\")") !=
+        std::string::npos);
+}
+
+TEST_CASE("simple type with max_exclusive facet generates validate function",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.max_exclusive = "100";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "Under100"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "int"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_under100");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("value < xb::parse<int32_t>(\"100\")") !=
+        std::string::npos);
+}
+
+TEST_CASE("simple type with both min and max inclusive facets",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.min_inclusive = "1";
+  facets.max_inclusive = "10";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "OneToTen"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "int"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_one_to_ten");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("value >= xb::parse<int32_t>(\"1\")") !=
+        std::string::npos);
+  CHECK(fn->body.find("value <= xb::parse<int32_t>(\"10\")") !=
+        std::string::npos);
+  CHECK(fn->body.find("&&") != std::string::npos);
+}
+
+TEST_CASE("simple type with range facet AND assertion: both present",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "PosChecked"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets, std::nullopt,
+                                {}, {{"$value > 0"}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_pos_checked");
+  REQUIRE(fn != nullptr);
+  // Both assertion and facet should be present
+  CHECK(fn->body.find("value > 0") != std::string::npos);
+  CHECK(fn->body.find("value >= xb::parse<xb::integer>(\"0\")") !=
+        std::string::npos);
+  CHECK(fn->body.find("&&") != std::string::npos);
+}
+
+// ===== Facet validation: length facets =====
+
+TEST_CASE("simple type with length facet generates validate function",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.length = 5;
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "Code5"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_code5");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("xb::format(value).size() == 5") != std::string::npos);
+}
+
+TEST_CASE("simple type with min_length facet generates validate function",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.min_length = 2;
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "AtLeast2"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_at_least2");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("xb::format(value).size() >= 2") != std::string::npos);
+}
+
+TEST_CASE("simple type with max_length facet generates validate function",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.max_length = 10;
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "AtMost10"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_at_most10");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("xb::format(value).size() <= 10") != std::string::npos);
+}
+
+TEST_CASE("string type with length facet uses value.size() optimization",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.length = 3;
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "StrCode"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_str_code");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("value.size() == 3") != std::string::npos);
+  // Should NOT use xb::format for string types
+  CHECK(fn->body.find("xb::format") == std::string::npos);
+}
+
+// ===== Facet validation: pattern facet =====
+
+TEST_CASE("simple type with pattern facet generates regex_match check",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.pattern = "[A-Z]{3}";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "CurrCode"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_curr_code");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("std::regex_match(value, std::regex(\"^[A-Z]{3}$\"))") !=
+        std::string::npos);
+}
+
+TEST_CASE("non-string type with pattern uses xb::format", "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.pattern = "[0-9]+";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "DigitsOnly"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_digits_only");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find(
+            "std::regex_match(xb::format(value), std::regex(\"^[0-9]+$\"))") !=
+        std::string::npos);
+}
+
+TEST_CASE("pattern facet adds regex include to generated file",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.pattern = "[A-Z]+";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "UpperOnly"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  bool has_regex_include = false;
+  for (const auto& inc : files[0].includes) {
+    if (inc.path == "<regex>") has_regex_include = true;
+  }
+  CHECK(has_regex_include);
+}
+
+// ===== Facet validation: complex type with simple content =====
+
+TEST_CASE("complex type with simple content and min_inclusive facet",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+
+  content_type ct(content_kind::simple,
+                  simple_content{qname{xs_ns, "int"},
+                                 derivation_method::restriction, facets});
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "PriceType"}, false, false,
+                   std::move(ct),
+                   {attribute_use{qname{"", "currency"}, qname{xs_ns, "string"},
+                                  true, std::nullopt, std::nullopt}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_price_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->return_type == "bool");
+  CHECK(fn->parameters.find("const price_type&") != std::string::npos);
+  CHECK(fn->body.find("value.value >= xb::parse<int32_t>(\"0\")") !=
+        std::string::npos);
+}
+
+TEST_CASE("complex type with simple content facets AND assertions",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.max_inclusive = "100";
+
+  content_type ct(content_kind::simple,
+                  simple_content{qname{xs_ns, "int"},
+                                 derivation_method::restriction, facets});
+
+  s.add_complex_type(complex_type(
+      qname{"http://example.com/test", "ScoreType"}, false, false,
+      std::move(ct), {}, {}, std::nullopt, std::nullopt, {{"value >= 0"}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_score_type");
+  REQUIRE(fn != nullptr);
+  // Both assertion and facet check should be present
+  CHECK(fn->body.find("value.value >= 0") != std::string::npos);
+  CHECK(fn->body.find("value.value <= xb::parse<int32_t>(\"100\")") !=
+        std::string::npos);
+  CHECK(fn->body.find("&&") != std::string::npos);
+}
+
+TEST_CASE("complex type without simple content: no facet checks",
+          "[codegen][facet]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  model_group seq(compositor_kind::sequence);
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "x"},
+                                      qname{xs_ns, "string"}));
+  seq = model_group(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "PlainCt"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_plain_ct");
+  CHECK(fn == nullptr);
+}
+
+// ===== Cardinality validation =====
+
+TEST_CASE("complex type with minOccurs=2 maxOccurs=5 generates size checks",
+          "[codegen][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{2, 5});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ListType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_list_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("value.item.size() >= 2") != std::string::npos);
+  CHECK(fn->body.find("value.item.size() <= 5") != std::string::npos);
+}
+
+TEST_CASE("complex type with minOccurs=1 maxOccurs=unbounded: only min check",
+          "[codegen][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "entry"},
+                                      qname{xs_ns, "int"}),
+                         occurrence{1, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "NonEmptyList"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_non_empty_list");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("value.entry.size() >= 1") != std::string::npos);
+  // No max check for unbounded
+  CHECK(fn->body.find("value.entry.size() <=") == std::string::npos);
+}
+
+TEST_CASE("complex type with minOccurs=0 maxOccurs=3: only max check",
+          "[codegen][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "tag"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{0, 3});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "TaggedType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_tagged_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("value.tag.size() <= 3") != std::string::npos);
+  // No min check for 0
+  CHECK(fn->body.find("value.tag.size() >=") == std::string::npos);
+}
+
+TEST_CASE("complex type with default cardinality (1,1): no validate function",
+          "[codegen][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "x"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "DefaultCard"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_default_card");
+  CHECK(fn == nullptr);
+}
+
+TEST_CASE("complex type with minOccurs=0 maxOccurs=unbounded: no validate",
+          "[codegen][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{0, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "FreeList"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_free_list");
+  CHECK(fn == nullptr);
+}
+
+TEST_CASE("cardinality checks combined with assertions",
+          "[codegen][cardinality]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "value"},
+                                      qname{xs_ns, "int"}),
+                         occurrence{1, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(
+      qname{"http://example.com/test", "CheckedList"}, false, false,
+      std::move(ct), {}, {}, std::nullopt, std::nullopt, {{"value >= 0"}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_checked_list");
+  REQUIRE(fn != nullptr);
+  // Both assertion and cardinality check
+  CHECK(fn->body.find("value.value >= 0") != std::string::npos);
+  CHECK(fn->body.find("value.value.size() >= 1") != std::string::npos);
+  CHECK(fn->body.find("&&") != std::string::npos);
+}
+
+// ===== Validation mode configuration =====
+
+TEST_CASE("validation_mode::none suppresses validate functions",
+          "[codegen][validation_mode]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  // Type with assertion — would normally generate a validate function
+  model_group seq(compositor_kind::sequence);
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "x"}, qname{xs_ns, "int"}));
+  seq = model_group(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Checked"},
+                                  false, false, std::move(ct), {}, {},
+                                  std::nullopt, std::nullopt, {{"x > 0"}}));
+
+  // Type with facets — would also normally generate validate
+  facet_set facets;
+  facets.min_inclusive = "0";
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "NonNeg"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.validation = validation_mode::none;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  CHECK(find_function(files[0], "validate_checked") == nullptr);
+  CHECK(find_function(files[0], "validate_non_neg") == nullptr);
+}
+
+TEST_CASE("validation_mode::on_demand generates validate functions (default)",
+          "[codegen][validation_mode]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.min_inclusive = "0";
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "NonNeg"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  // Default options (on_demand is default)
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  CHECK(find_function(files[0], "validate_non_neg") != nullptr);
+}

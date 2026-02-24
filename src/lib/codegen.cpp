@@ -674,6 +674,15 @@ namespace xb {
                          });
     }
 
+    bool
+    has_regex_usage(const std::vector<cpp_decl>& declarations) {
+      return std::any_of(
+          declarations.begin(), declarations.end(), [](const cpp_decl& d) {
+            auto* fn = std::get_if<cpp_function>(&d);
+            return fn && fn->body.find("std::regex") != std::string::npos;
+          });
+    }
+
     std::vector<cpp_include>
     compute_includes(const std::set<std::string>& referenced_namespaces,
                      const std::vector<schema>& schemas,
@@ -735,6 +744,8 @@ namespace xb {
             includes.insert("\"xb/xml_io.hpp\"");
           }
         }
+
+        if (has_regex_usage(declarations)) includes.insert("<regex>");
 
         add_cross_namespace_includes(includes, referenced_namespaces, schemas);
       }
@@ -1788,11 +1799,149 @@ namespace xb {
       return fn;
     }
 
-    // Generate a validate_<type>() function for a complex type with assertions.
-    // Returns nullopt if the type has no assertions.
+    // Returns true if the facet_set has any constraining facets that we
+    // generate validation checks for (excludes enumeration, which is
+    // type-safe via enum codegen, and total_digits/fraction_digits which
+    // are deferred).
+    bool
+    has_constraining_facets(const facet_set& f) {
+      return f.min_inclusive.has_value() || f.max_inclusive.has_value() ||
+             f.min_exclusive.has_value() || f.max_exclusive.has_value() ||
+             f.length.has_value() || f.min_length.has_value() ||
+             f.max_length.has_value() || f.pattern.has_value();
+    }
+
+    // Generate C++ boolean expressions for facet checks.
+    // value_expr: the C++ expression for the value being validated
+    // cpp_type: the resolved C++ type name (for xb::parse<T>)
+    std::vector<std::string>
+    generate_facet_checks(const facet_set& facets,
+                          const std::string& value_expr,
+                          const std::string& cpp_type) {
+      std::vector<std::string> checks;
+
+      if (facets.min_inclusive.has_value())
+        checks.push_back(value_expr + " >= xb::parse<" + cpp_type + ">(\"" +
+                         facets.min_inclusive.value() + "\")");
+
+      if (facets.max_inclusive.has_value())
+        checks.push_back(value_expr + " <= xb::parse<" + cpp_type + ">(\"" +
+                         facets.max_inclusive.value() + "\")");
+
+      if (facets.min_exclusive.has_value())
+        checks.push_back(value_expr + " > xb::parse<" + cpp_type + ">(\"" +
+                         facets.min_exclusive.value() + "\")");
+
+      if (facets.max_exclusive.has_value())
+        checks.push_back(value_expr + " < xb::parse<" + cpp_type + ">(\"" +
+                         facets.max_exclusive.value() + "\")");
+
+      // Length facets: use value.size() for std::string,
+      // xb::format(value).size() otherwise (length applies to lexical
+      // representation per XSD spec)
+      bool is_string = (cpp_type == "std::string");
+      auto size_expr = [&]() {
+        return is_string ? value_expr + ".size()"
+                         : "xb::format(" + value_expr + ").size()";
+      };
+
+      if (facets.length.has_value())
+        checks.push_back(size_expr() +
+                         " == " + std::to_string(facets.length.value()));
+
+      if (facets.min_length.has_value())
+        checks.push_back(size_expr() +
+                         " >= " + std::to_string(facets.min_length.value()));
+
+      if (facets.max_length.has_value())
+        checks.push_back(size_expr() +
+                         " <= " + std::to_string(facets.max_length.value()));
+
+      if (facets.pattern.has_value()) {
+        std::string format_expr =
+            is_string ? value_expr : "xb::format(" + value_expr + ")";
+        checks.push_back("std::regex_match(" + format_expr +
+                         ", std::regex(\"^" + facets.pattern.value() + "$\"))");
+      }
+
+      return checks;
+    }
+
+    // Collect cardinality validation checks for particles in a content model.
+    // Returns boolean expressions checking size constraints on vector/optional
+    // fields. Skips default (1,1) and unconstrained (0,unbounded) cardinality.
+    std::vector<std::string>
+    collect_cardinality_checks(const model_group& mg,
+                               const std::string& struct_prefix) {
+      std::vector<std::string> checks;
+
+      for (const auto& p : mg.particles()) {
+        std::visit(
+            [&](const auto& term) {
+              using T = std::decay_t<decltype(term)>;
+              if constexpr (std::is_same_v<T, element_decl>) {
+                std::string field =
+                    struct_prefix + to_cpp_identifier(term.name().local_name());
+                bool is_collection =
+                    p.occurs.is_unbounded() || p.occurs.max_occurs > 1;
+                bool is_optional =
+                    p.occurs.min_occurs == 0 && p.occurs.max_occurs == 1;
+
+                if (is_collection) {
+                  // vector field: check min/max size
+                  if (p.occurs.min_occurs > 0)
+                    checks.push_back(field + ".size() >= " +
+                                     std::to_string(p.occurs.min_occurs));
+                  if (!p.occurs.is_unbounded())
+                    checks.push_back(field + ".size() <= " +
+                                     std::to_string(p.occurs.max_occurs));
+                } else if (is_optional && p.occurs.min_occurs == 1) {
+                  // optional with min=1: must have value (shouldn't occur
+                  // in practice, but handle defensively)
+                  checks.push_back(field + ".has_value()");
+                }
+                // Required (1,1): no check needed — always present by
+                // construction. Unconstrained (0,unbounded): no check needed.
+              }
+            },
+            p.term);
+      }
+
+      return checks;
+    }
+
+    // Returns true if any particle has non-trivial cardinality that requires
+    // validation (i.e., not default (1,1) and not unconstrained (0,unbounded)).
+    bool
+    has_cardinality_constraints(const model_group& mg) {
+      return !collect_cardinality_checks(mg, "").empty();
+    }
+
+    // Generate a validate_<type>() function for a complex type with assertions,
+    // simple content facets, or cardinality constraints.
+    // Returns nullopt if none are present.
     std::optional<cpp_function>
-    generate_validate_function(const complex_type& ct) {
-      if (ct.assertions().empty()) return std::nullopt;
+    generate_validate_function(const complex_type& ct,
+                               const type_resolver& resolver) {
+      // Check for simple content facets
+      bool has_sc_facets = false;
+      const simple_content* sc = nullptr;
+      if (auto* sc_ptr = std::get_if<simple_content>(&ct.content().detail)) {
+        sc = sc_ptr;
+        has_sc_facets = has_constraining_facets(sc_ptr->facets);
+      }
+
+      // Check for cardinality constraints in element_only/mixed content
+      bool has_card = false;
+      const complex_content* cc = nullptr;
+      if (auto* cc_ptr = std::get_if<complex_content>(&ct.content().detail)) {
+        cc = cc_ptr;
+        if (cc_ptr->content_model.has_value())
+          has_card = has_cardinality_constraints(cc_ptr->content_model.value());
+      }
+
+      if (ct.assertions().empty() && !has_sc_facets && !has_card)
+        return std::nullopt;
 
       std::string struct_name = to_cpp_identifier(ct.name().local_name());
       xpath_context ctx{"value."};
@@ -1818,17 +1967,39 @@ namespace xb {
         first = false;
       }
 
+      // Add facet checks for simple content
+      if (sc && has_sc_facets) {
+        std::string cpp_type = resolver.resolve(sc->base_type_name);
+        for (const auto& check :
+             generate_facet_checks(sc->facets, "value.value", cpp_type)) {
+          if (!first) body += "\n      && ";
+          body += check;
+          first = false;
+        }
+      }
+
+      // Add cardinality checks for element_only/mixed content
+      if (cc && cc->content_model.has_value()) {
+        for (const auto& check :
+             collect_cardinality_checks(cc->content_model.value(), "value.")) {
+          if (!first) body += "\n      && ";
+          body += check;
+          first = false;
+        }
+      }
+
       body += ";\n";
       fn.body = body;
       return fn;
     }
 
-    // Generate a validate_<type>() function for a simple type with assertions.
-    // Returns nullopt if the type has no assertions.
+    // Generate a validate_<type>() function for a simple type with assertions
+    // and/or constraining facets. Returns nullopt if neither is present.
     std::optional<cpp_function>
     generate_simple_validate_function(const simple_type& st,
                                       const type_resolver& resolver) {
-      if (st.assertions().empty()) return std::nullopt;
+      bool has_facets = has_constraining_facets(st.facets());
+      if (st.assertions().empty() && !has_facets) return std::nullopt;
 
       std::string type_name = to_cpp_identifier(st.name().local_name());
       std::string cpp_type = resolver.resolve(st.base_type_name());
@@ -1851,6 +2022,13 @@ namespace xb {
         }
         if (!first) body += "\n      && ";
         body += translated.value();
+        first = false;
+      }
+
+      for (const auto& check :
+           generate_facet_checks(st.facets(), "value", cpp_type)) {
+        if (!first) body += "\n      && ";
+        body += check;
         first = false;
       }
 
@@ -1900,16 +2078,16 @@ namespace xb {
         ordered_types.push_back(generate_write_function(*ct_ptr, resolver, s));
       }
 
-      // Generate validate_ functions for complex types with assertions
-      for (const auto* ct_ptr : ordered_cts) {
-        if (auto vf = generate_validate_function(*ct_ptr))
-          ordered_types.push_back(std::move(*vf));
-      }
-
-      // Generate validate_ functions for simple types with assertions
-      for (const auto& st : s.simple_types()) {
-        if (auto vf = generate_simple_validate_function(st, resolver))
-          ordered_types.push_back(std::move(*vf));
+      // Generate validate_ functions (unless validation is disabled)
+      if (options_.validation != validation_mode::none) {
+        for (const auto* ct_ptr : ordered_cts) {
+          if (auto vf = generate_validate_function(*ct_ptr, resolver))
+            ordered_types.push_back(std::move(*vf));
+        }
+        for (const auto& st : s.simple_types()) {
+          if (auto vf = generate_simple_validate_function(st, resolver))
+            ordered_types.push_back(std::move(*vf));
+        }
       }
 
       // In split mode, mark read_/write_ functions as non-inline
