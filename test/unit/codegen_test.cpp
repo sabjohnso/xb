@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <set>
 #include <string>
 
 using namespace xb;
@@ -1234,8 +1235,8 @@ TEST_CASE("codegen generates write function for sequence type",
   CHECK(fn->return_type == "void");
   CHECK(fn->parameters.find("const person_type&") != std::string::npos);
   CHECK(fn->parameters.find("xb::xml_writer&") != std::string::npos);
-  // Body should contain write_simple calls for each element
-  CHECK(fn->body.find("write_simple") != std::string::npos);
+  // Body should contain element writes for each element
+  CHECK(fn->body.find("writer.start_element") != std::string::npos);
   CHECK(fn->body.find("\"name\"") != std::string::npos);
   CHECK(fn->body.find("\"age\"") != std::string::npos);
 }
@@ -1267,8 +1268,8 @@ TEST_CASE("write function required element is unconditional",
   auto* fn = find_function(files[0], "write_simple");
   REQUIRE(fn != nullptr);
   // Required element: no "if" guard
-  CHECK(fn->body.find("xb::write_simple(writer") != std::string::npos);
-  CHECK(fn->body.find("value.name") != std::string::npos);
+  CHECK(fn->body.find("writer.start_element") != std::string::npos);
+  CHECK(fn->body.find("xb::format(value.name)") != std::string::npos);
 }
 
 // Serialization TDD step 3: Optional element -> conditional write
@@ -3988,4 +3989,45 @@ TEST_CASE("validation_mode::on_demand generates validate functions (default)",
   auto files = gen.generate();
 
   CHECK(find_function(files[0], "validate_non_neg") != nullptr);
+}
+
+// ===== Enum value deduplication =====
+
+TEST_CASE("enum values with case-only difference are disambiguated",
+          "[codegen][enum]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Enum with both uppercase and lowercase single-char values
+  // (like FIXML's ExecInst_enum_t which has A-Z and a-z)
+  facet_set facets;
+  facets.enumeration = {"A", "B", "a", "b"};
+  s.add_simple_type(simple_type(qname{"urn:test", "Side_t"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(!files.empty());
+  auto* e = find_enum(files[0], "side_t");
+  REQUIRE(e != nullptr);
+  REQUIRE(e->values.size() == 4);
+
+  // All four enum values must have unique C++ identifiers
+  std::set<std::string> identifiers;
+  for (const auto& v : e->values)
+    identifiers.insert(v.name);
+  CHECK(identifiers.size() == 4);
+
+  // The original string values must be preserved for serialization
+  std::set<std::string> originals;
+  for (const auto& v : e->values)
+    originals.insert(v.xml_value);
+  CHECK(originals.count("A") == 1);
+  CHECK(originals.count("B") == 1);
+  CHECK(originals.count("a") == 1);
+  CHECK(originals.count("b") == 1);
 }

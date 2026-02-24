@@ -3,6 +3,7 @@
 #include <xb/open_content.hpp>
 #include <xb/xpath_expr.hpp>
 
+#include <map>
 #include <set>
 
 namespace xb {
@@ -19,6 +20,9 @@ namespace xb {
       const codegen_options& options;
       const std::string& current_ns;
       std::set<std::string>& referenced_namespaces;
+      // Maps variant key (resolved member types) -> canonical C++ type name
+      // for deduplicating independent union types with identical members.
+      const std::map<std::string, std::string>* union_variant_map = nullptr;
 
       std::string
       resolve(const qname& type_name) const {
@@ -206,10 +210,49 @@ namespace xb {
       return base_type;
     }
 
+    // Check if a raw XSD default/fixed value is a valid C++ literal.
+    // Rejects dates ("2010-11-16"), durations, etc. that would be
+    // misinterpreted as arithmetic expressions.
+    bool
+    is_safe_cpp_literal(const std::string& val) {
+      if (val.empty()) return false;
+      if (val == "true" || val == "false") return true;
+
+      // Numeric: optional sign, digits, optional decimal, optional exponent
+      std::size_t i = 0;
+      if (val[i] == '+' || val[i] == '-') ++i;
+      if (i >= val.size()) return false;
+
+      bool has_digits = false;
+      while (i < val.size() &&
+             std::isdigit(static_cast<unsigned char>(val[i]))) {
+        has_digits = true;
+        ++i;
+      }
+      if (i < val.size() && val[i] == '.') {
+        ++i;
+        while (i < val.size() &&
+               std::isdigit(static_cast<unsigned char>(val[i])))
+          ++i;
+      }
+      if (i < val.size() && (val[i] == 'e' || val[i] == 'E')) {
+        ++i;
+        if (i < val.size() && (val[i] == '+' || val[i] == '-')) ++i;
+        while (i < val.size() &&
+               std::isdigit(static_cast<unsigned char>(val[i])))
+          ++i;
+      }
+      return has_digits && i == val.size();
+    }
+
     std::string
     default_value_for_element(const element_decl& elem) {
-      if (elem.default_value().has_value()) return elem.default_value().value();
-      if (elem.fixed_value().has_value()) return elem.fixed_value().value();
+      std::string val;
+      if (elem.default_value().has_value())
+        val = elem.default_value().value();
+      else if (elem.fixed_value().has_value())
+        val = elem.fixed_value().value();
+      if (is_safe_cpp_literal(val)) return val;
       return "";
     }
 
@@ -331,19 +374,36 @@ namespace xb {
         std::string variant_type = "std::variant<";
         bool first = true;
 
+        auto add_alt = [&](const std::string& type) {
+          if (!first) variant_type += ", ";
+          variant_type += type;
+          first = false;
+        };
+
         for (const auto& p : particles) {
           std::visit(
               [&](const auto& term) {
                 using T = std::decay_t<decltype(term)>;
                 if constexpr (std::is_same_v<T, element_decl>) {
-                  if (!first) variant_type += ", ";
-                  variant_type += resolver.resolve(term.type_name());
-                  first = false;
+                  std::string type = resolver.resolve(term.type_name());
+                  if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                    type = "std::vector<" + type + ">";
+                  add_alt(type);
                 } else if constexpr (std::is_same_v<T, element_ref>) {
-                  if (!first) variant_type += ", ";
                   auto* elem = resolver.schemas.find_element(term.ref);
-                  if (elem) variant_type += resolver.resolve(elem->type_name());
-                  first = false;
+                  if (!elem) return;
+                  // Abstract element -> expand substitution group members
+                  if (elem->abstract()) {
+                    auto members =
+                        find_substitution_members(resolver.schemas, term.ref);
+                    for (const auto* m : members)
+                      add_alt(resolver.resolve(m->type_name()));
+                  } else {
+                    std::string type = resolver.resolve(elem->type_name());
+                    if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                      type = "std::vector<" + type + ">";
+                    add_alt(type);
+                  }
                 }
               },
               p.term);
@@ -366,9 +426,17 @@ namespace xb {
         // String types need quoting
         if (cpp_type == "std::string")
           return "\"" + attr.fixed_value.value() + "\"";
-        return attr.fixed_value.value();
+        if (is_safe_cpp_literal(attr.fixed_value.value()))
+          return attr.fixed_value.value();
+        return "";
       }
-      if (attr.default_value.has_value()) return attr.default_value.value();
+      if (attr.default_value.has_value()) {
+        std::string cpp_type = resolver.resolve(attr.type_name);
+        if (cpp_type == "std::string")
+          return "\"" + attr.default_value.value() + "\"";
+        if (is_safe_cpp_literal(attr.default_value.value()))
+          return attr.default_value.value();
+      }
       return "";
     }
 
@@ -563,13 +631,27 @@ namespace xb {
     }
 
     cpp_decl
-    translate_simple_type(const simple_type& st,
-                          const type_resolver& resolver) {
+    translate_simple_type(
+        const simple_type& st, const type_resolver& resolver,
+        std::map<std::string, std::string>& union_variant_map) {
       if (!st.facets().enumeration.empty()) {
         cpp_enum e;
         e.name = to_cpp_identifier(st.name().local_name());
         for (const auto& val : st.facets().enumeration)
           e.values.push_back({to_cpp_identifier(val), val});
+
+        // Disambiguate case-only collisions (e.g. "A" and "a" both map
+        // to "a"). Append "_upper" to the uppercase variant.
+        std::unordered_map<std::string, std::size_t> id_count;
+        for (const auto& v : e.values)
+          id_count[v.name]++;
+
+        for (auto& v : e.values) {
+          if (id_count[v.name] > 1 && !v.xml_value.empty() &&
+              v.xml_value[0] >= 'A' && v.xml_value[0] <= 'Z')
+            v.name += "_upper";
+        }
+
         return e;
       }
 
@@ -582,20 +664,184 @@ namespace xb {
       }
 
       if (st.variety() == simple_type_variety::union_type) {
+        // If this union is a restriction of another union type (not an XSD
+        // builtin), alias the base type's C++ name. This avoids generating
+        // duplicate std::variant expansions and duplicate format() overloads.
+        auto base = st.base_type_name();
+        if (!base.namespace_uri().empty() &&
+            base.namespace_uri() != "http://www.w3.org/2001/XMLSchema") {
+          auto* base_st = resolver.schemas.find_simple_type(base);
+          if (base_st &&
+              base_st->variety() == simple_type_variety::union_type) {
+            std::string base_cpp = resolver.resolve(base);
+            return cpp_type_alias{to_cpp_identifier(st.name().local_name()),
+                                  base_cpp};
+          }
+        }
+        // Build variant type; deduplicate independent unions with identical
+        // resolved member types by aliasing to the first one seen.
         std::string variant = "std::variant<";
+        std::string variant_key;
         bool first = true;
         for (const auto& member : st.member_type_names()) {
-          if (!first) variant += ", ";
-          variant += resolver.resolve(member);
+          if (!first) {
+            variant += ", ";
+            variant_key += ",";
+          }
+          std::string cpp = resolver.resolve(member);
+          variant += cpp;
+          variant_key += cpp;
           first = false;
         }
         variant += ">";
-        return cpp_type_alias{to_cpp_identifier(st.name().local_name()),
-                              variant};
+
+        auto it = union_variant_map.find(variant_key);
+        if (it != union_variant_map.end()) {
+          // Alias to the first union with this variant signature
+          return cpp_type_alias{to_cpp_identifier(st.name().local_name()),
+                                it->second};
+        }
+        std::string name = to_cpp_identifier(st.name().local_name());
+        union_variant_map[variant_key] = name;
+        return cpp_type_alias{name, variant};
       }
 
       std::string base = resolver.resolve(st.base_type_name());
       return cpp_type_alias{to_cpp_identifier(st.name().local_name()), base};
+    }
+
+    // Generate a format() overload for a union simple type.
+    // Placed in the generated namespace so unqualified format() calls
+    // find it (from emit_simple_element_write and format_expr).
+    std::optional<cpp_function>
+    generate_format_function(const simple_type& st,
+                             const type_resolver& resolver,
+                             std::set<std::string>& seen_variant_types) {
+      std::string name = to_cpp_identifier(st.name().local_name());
+
+      // Union type: std::visit over member types.
+      // Skip if this is a restriction of another union type (it's a type
+      // alias, so the base type's format function already applies).
+      if (st.variety() == simple_type_variety::union_type &&
+          !st.member_type_names().empty()) {
+        auto base = st.base_type_name();
+        if (!base.namespace_uri().empty() &&
+            base.namespace_uri() != "http://www.w3.org/2001/XMLSchema") {
+          auto* base_st = resolver.schemas.find_simple_type(base);
+          if (base_st && base_st->variety() == simple_type_variety::union_type)
+            return std::nullopt;
+        }
+
+        // Build variant type string to check for duplicates: independent
+        // union types with identical member types produce the same C++
+        // std::variant, so only the first needs a format() overload.
+        std::string variant_key;
+        for (const auto& member : st.member_type_names()) {
+          if (!variant_key.empty()) variant_key += ",";
+          variant_key += resolver.resolve(member);
+        }
+        if (seen_variant_types.count(variant_key)) return std::nullopt;
+        seen_variant_types.insert(variant_key);
+        cpp_function fn;
+        fn.return_type = "std::string";
+        fn.name = "format";
+        fn.parameters = "const " + name + "& v";
+
+        std::string body;
+        body += "  return std::visit([](const auto& x) -> std::string {\n";
+        body += "    using V = std::decay_t<decltype(x)>;\n";
+        bool first = true;
+        for (const auto& member : st.member_type_names()) {
+          std::string cpp_type = resolver.resolve(member);
+          std::string kw = first ? "if" : "else if";
+          body += "    " + kw + " constexpr (std::is_same_v<V, " + cpp_type +
+                  ">) {\n";
+          auto* member_st = resolver.schemas.find_simple_type(member);
+          if (member_st && !member_st->facets().enumeration.empty())
+            body += "      return std::string(to_string(x));\n";
+          else
+            body += "      return xb::format(x);\n";
+          body += "    }\n";
+          first = false;
+        }
+        body += "    else { return std::string{}; }\n";
+        body += "  }, v);\n";
+
+        fn.body = body;
+        return fn;
+      }
+
+      return std::nullopt;
+    }
+
+    // Generate a parse function for a union simple type.
+    // Tries each member type in order; the first successful parse wins.
+    // For enum members, uses from_string; for others, uses xb::parse<T>.
+    std::optional<cpp_function>
+    generate_parse_function(const simple_type& st,
+                            const type_resolver& resolver,
+                            std::set<std::string>& seen_variant_types) {
+      std::string name = to_cpp_identifier(st.name().local_name());
+
+      if (st.variety() == simple_type_variety::union_type &&
+          !st.member_type_names().empty()) {
+        // Skip restrictions of other union types (type alias)
+        auto base = st.base_type_name();
+        if (!base.namespace_uri().empty() &&
+            base.namespace_uri() != "http://www.w3.org/2001/XMLSchema") {
+          auto* base_st = resolver.schemas.find_simple_type(base);
+          if (base_st && base_st->variety() == simple_type_variety::union_type)
+            return std::nullopt;
+        }
+
+        // Deduplicate by variant type string
+        std::string variant_key = "parse:";
+        for (const auto& member : st.member_type_names()) {
+          variant_key += resolver.resolve(member) + ",";
+        }
+        if (seen_variant_types.count(variant_key)) return std::nullopt;
+        seen_variant_types.insert(variant_key);
+
+        cpp_function fn;
+        fn.return_type = name;
+        fn.name = "parse_" + name;
+        fn.parameters = "std::string_view text";
+
+        std::string body;
+        auto members = st.member_type_names();
+        for (std::size_t i = 0; i < members.size(); ++i) {
+          std::string cpp_type = resolver.resolve(members[i]);
+          auto* member_st = resolver.schemas.find_simple_type(members[i]);
+          bool is_last = (i == members.size() - 1);
+
+          if (is_last) {
+            // Last member: no try/catch, just return
+            if (member_st && !member_st->facets().enumeration.empty()) {
+              std::string enum_name =
+                  to_cpp_identifier(member_st->name().local_name());
+              body += "  return " + enum_name + "_from_string(text);\n";
+            } else {
+              body += "  return xb::parse<" + cpp_type + ">(text);\n";
+            }
+          } else {
+            // Try this member type; on failure, try next
+            body += "  try {\n";
+            if (member_st && !member_st->facets().enumeration.empty()) {
+              std::string enum_name =
+                  to_cpp_identifier(member_st->name().local_name());
+              body += "    return " + enum_name + "_from_string(text);\n";
+            } else {
+              body += "    return xb::parse<" + cpp_type + ">(text);\n";
+            }
+            body += "  } catch (...) {}\n";
+          }
+        }
+
+        fn.body = body;
+        return fn;
+      }
+
+      return std::nullopt;
     }
 
     void
@@ -904,11 +1150,32 @@ namespace xb {
 
     // ===== Serialization code generation =====
 
-    // Determine if a type name resolves to an enum
+    // Determine if a type name resolves to an enum, following restriction
+    // chains (e.g. CommType_t → CommType_enum_t → has enumerations).
     bool
     is_enum_type(const schema_set& schemas, const qname& type_name) {
       auto* st = schemas.find_simple_type(type_name);
-      return st && !st->facets().enumeration.empty();
+      while (st) {
+        if (!st->facets().enumeration.empty()) return true;
+        auto base = st->base_type_name();
+        if (base.namespace_uri() == "http://www.w3.org/2001/XMLSchema") break;
+        st = schemas.find_simple_type(base);
+      }
+      return false;
+    }
+
+    // Determine if a type name resolves to a union type, following
+    // restriction chains.
+    bool
+    is_union_type(const schema_set& schemas, const qname& type_name) {
+      auto* st = schemas.find_simple_type(type_name);
+      while (st) {
+        if (st->variety() == simple_type_variety::union_type) return true;
+        auto base = st->base_type_name();
+        if (base.namespace_uri() == "http://www.w3.org/2001/XMLSchema") break;
+        st = schemas.find_simple_type(base);
+      }
+      return false;
     }
 
     // Determine if a type name resolves to a complex type
@@ -917,12 +1184,17 @@ namespace xb {
       return schemas.find_complex_type(type_name) != nullptr;
     }
 
-    // Generate the format expression for a value, considering type
+    // Generate the format expression for a value, considering type.
+    // Enums use to_string(), union types use unqualified format() (found
+    // via ADL on the generated format overload), built-in types use
+    // xb::format().
     std::string
     format_expr(const std::string& value_expr, const qname& type_name,
                 const schema_set& schemas, const type_resolver& /*resolver*/) {
       if (is_enum_type(schemas, type_name))
-        return "to_string(" + value_expr + ")";
+        return "std::string(to_string(" + value_expr + "))";
+      if (is_union_type(schemas, type_name))
+        return "format(" + value_expr + ")";
       return "xb::format(" + value_expr + ")";
     }
 
@@ -935,6 +1207,26 @@ namespace xb {
       bool nillable;
       bool is_recursive;
     };
+
+    // Emit inline write code for a simple-typed element value.
+    // Uses to_string() for enums, unqualified format() for unions (ADL),
+    // and xb::format() for built-in types.
+    void
+    emit_simple_element_write(std::string& body, const std::string& indent,
+                              const std::string& qn,
+                              const std::string& val_expr,
+                              const qname& type_name,
+                              const schema_set& schemas) {
+      body += indent + "writer.start_element(" + qn + ");\n";
+      if (is_enum_type(schemas, type_name))
+        body += indent + "writer.characters(std::string(to_string(" + val_expr +
+                ")));\n";
+      else if (is_union_type(schemas, type_name))
+        body += indent + "writer.characters(format(" + val_expr + "));\n";
+      else
+        body += indent + "writer.characters(xb::format(" + val_expr + "));\n";
+      body += indent + "writer.end_element();\n";
+    }
 
     void
     emit_write_element(std::string& body, const write_element_info& info,
@@ -969,7 +1261,8 @@ namespace xb {
           body += "    " + write_fn + "(item, writer);\n";
           body += "    writer.end_element();\n";
         } else {
-          body += "    xb::write_simple(writer, " + qn + ", item);\n";
+          emit_simple_element_write(body, "    ", qn, "item", info.type_name,
+                                    schemas);
         }
         body += "  }\n";
         return;
@@ -985,7 +1278,8 @@ namespace xb {
           body += "    " + write_fn + "(*" + field + ", writer);\n";
           body += "    writer.end_element();\n";
         } else {
-          body += "    xb::write_simple(writer, " + qn + ", *" + field + ");\n";
+          emit_simple_element_write(body, "    ", qn, "*" + field,
+                                    info.type_name, schemas);
         }
         body += "  }\n";
         return;
@@ -999,7 +1293,8 @@ namespace xb {
         body += "  " + write_fn + "(" + field + ", writer);\n";
         body += "  writer.end_element();\n";
       } else {
-        body += "  xb::write_simple(writer, " + qn + ", " + field + ");\n";
+        emit_simple_element_write(body, "  ", qn, field, info.type_name,
+                                  schemas);
       }
     }
 
@@ -1082,6 +1377,53 @@ namespace xb {
             } else if constexpr (std::is_same_v<T, element_ref>) {
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
+
+              // Abstract element -> substitution group variant
+              if (elem->abstract()) {
+                auto members =
+                    find_substitution_members(resolver.schemas, term.ref);
+                if (!members.empty()) {
+                  std::string field =
+                      "value." + to_cpp_identifier(elem->name().local_name());
+                  auto emit_visit = [&](const std::string& val_expr) {
+                    body += "  std::visit([&](const auto& v) {\n";
+                    body += "    using V = std::decay_t<decltype(v)>;\n";
+                    bool first = true;
+                    for (const auto* m : members) {
+                      std::string cpp_type = resolver.resolve(m->type_name());
+                      std::string kw = first ? "if" : "else if";
+                      body += "    " + kw + " constexpr (std::is_same_v<V, " +
+                              cpp_type + ">) {\n";
+                      std::string mqn = "xb::qname{\"" +
+                                        m->name().namespace_uri() + "\", \"" +
+                                        m->name().local_name() + "\"}";
+                      body += "      writer.start_element(" + mqn + ");\n";
+                      std::string write_fn =
+                          "write_" +
+                          to_cpp_identifier(m->type_name().local_name());
+                      body += "      " + write_fn + "(v, writer);\n";
+                      body += "      writer.end_element();\n";
+                      body += "    }\n";
+                      first = false;
+                    }
+                    body += "  }, " + val_expr + ");\n";
+                  };
+
+                  if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
+                    body += "  for (const auto& item : " + field + ") {\n";
+                    emit_visit("item");
+                    body += "  }\n";
+                  } else if (p.occurs.min_occurs == 0) {
+                    body += "  if (" + field + ") {\n";
+                    emit_visit("*" + field);
+                    body += "  }\n";
+                  } else {
+                    emit_visit(field);
+                  }
+                  return;
+                }
+              }
+
               emit_write_element(body,
                                  {to_cpp_identifier(elem->name().local_name()),
                                   elem->name(), elem->type_name(), p.occurs,
@@ -1126,13 +1468,34 @@ namespace xb {
                 using TermT = std::decay_t<decltype(term)>;
                 if constexpr (std::is_same_v<TermT, element_decl>) {
                   std::string cpp_type = resolver.resolve(term.type_name());
+                  std::string match_type = cpp_type;
+                  if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                    match_type = "std::vector<" + cpp_type + ">";
                   std::string qn = "xb::qname{\"" +
                                    term.name().namespace_uri() + "\", \"" +
                                    term.name().local_name() + "\"}";
                   std::string kw = first ? "if" : "else if";
                   body += "    " + kw + " constexpr (std::is_same_v<T, " +
-                          cpp_type + ">) {\n";
-                  if (is_complex_type(resolver.schemas, term.type_name())) {
+                          match_type + ">) {\n";
+                  bool is_complex =
+                      is_complex_type(resolver.schemas, term.type_name());
+                  if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
+                    // Vector alternative: iterate and write each
+                    body += "      for (const auto& item : v) {\n";
+                    if (is_complex) {
+                      std::string write_fn =
+                          "write_" +
+                          to_cpp_identifier(term.type_name().local_name());
+                      body += "        writer.start_element(" + qn + ");\n";
+                      body += "        " + write_fn + "(item, writer);\n";
+                      body += "        writer.end_element();\n";
+                    } else {
+                      emit_simple_element_write(body, "        ", qn, "item",
+                                                term.type_name(),
+                                                resolver.schemas);
+                    }
+                    body += "      }\n";
+                  } else if (is_complex) {
                     std::string write_fn =
                         "write_" +
                         to_cpp_identifier(term.type_name().local_name());
@@ -1140,23 +1503,59 @@ namespace xb {
                     body += "      " + write_fn + "(v, writer);\n";
                     body += "      writer.end_element();\n";
                   } else {
-                    body += "      xb::write_simple(writer, " + qn + ", v);\n";
+                    emit_simple_element_write(body, "      ", qn, "v",
+                                              term.type_name(),
+                                              resolver.schemas);
                   }
                   body += "    }\n";
                   first = false;
                 } else if constexpr (std::is_same_v<TermT, element_ref>) {
                   auto* elem = resolver.schemas.find_element(term.ref);
                   if (!elem) return;
-                  std::string cpp_type = resolver.resolve(elem->type_name());
-                  std::string qn = "xb::qname{\"" +
-                                   elem->name().namespace_uri() + "\", \"" +
-                                   elem->name().local_name() + "\"}";
-                  std::string kw = first ? "if" : "else if";
-                  body += "    " + kw + " constexpr (std::is_same_v<T, " +
-                          cpp_type + ">) {\n";
-                  body += "      xb::write_simple(writer, " + qn + ", v);\n";
-                  body += "    }\n";
-                  first = false;
+                  // Abstract element -> expand substitution group members
+                  if (elem->abstract()) {
+                    auto members =
+                        find_substitution_members(resolver.schemas, term.ref);
+                    for (const auto* m : members) {
+                      std::string cpp_type = resolver.resolve(m->type_name());
+                      std::string mqn = "xb::qname{\"" +
+                                        m->name().namespace_uri() + "\", \"" +
+                                        m->name().local_name() + "\"}";
+                      std::string kw = first ? "if" : "else if";
+                      body += "    " + kw + " constexpr (std::is_same_v<T, " +
+                              cpp_type + ">) {\n";
+                      std::string write_fn =
+                          "write_" +
+                          to_cpp_identifier(m->type_name().local_name());
+                      body += "      writer.start_element(" + mqn + ");\n";
+                      body += "      " + write_fn + "(v, writer);\n";
+                      body += "      writer.end_element();\n";
+                      body += "    }\n";
+                      first = false;
+                    }
+                  } else {
+                    std::string cpp_type = resolver.resolve(elem->type_name());
+                    std::string qn = "xb::qname{\"" +
+                                     elem->name().namespace_uri() + "\", \"" +
+                                     elem->name().local_name() + "\"}";
+                    std::string kw = first ? "if" : "else if";
+                    body += "    " + kw + " constexpr (std::is_same_v<T, " +
+                            cpp_type + ">) {\n";
+                    if (is_complex_type(resolver.schemas, elem->type_name())) {
+                      std::string write_fn =
+                          "write_" +
+                          to_cpp_identifier(elem->type_name().local_name());
+                      body += "      writer.start_element(" + qn + ");\n";
+                      body += "      " + write_fn + "(v, writer);\n";
+                      body += "      writer.end_element();\n";
+                    } else {
+                      emit_simple_element_write(body, "      ", qn, "v",
+                                                elem->type_name(),
+                                                resolver.schemas);
+                    }
+                    body += "    }\n";
+                    first = false;
+                  }
                 }
               },
               p.term);
@@ -1344,8 +1743,44 @@ namespace xb {
     parse_expr(const std::string& text_expr, const qname& type_name,
                const schema_set& schemas, const type_resolver& resolver) {
       if (is_enum_type(schemas, type_name)) {
-        std::string enum_name = to_cpp_identifier(type_name.local_name());
+        // Follow restriction chain to find the actual enum type name,
+        // since from_string is generated for the enum, not its aliases.
+        auto* st = schemas.find_simple_type(type_name);
+        while (st && st->facets().enumeration.empty())
+          st = schemas.find_simple_type(st->base_type_name());
+        std::string enum_name = st ? to_cpp_identifier(st->name().local_name())
+                                   : to_cpp_identifier(type_name.local_name());
         return enum_name + "_from_string(" + text_expr + ")";
+      }
+      if (is_union_type(schemas, type_name)) {
+        // Find the canonical parse function name for this union type.
+        // Independent unions with identical resolved member types share a
+        // single parse function (named after the first one seen).
+        auto* st = schemas.find_simple_type(type_name);
+        // Follow restriction chain to find a type with member types
+        while (st && st->member_type_names().empty()) {
+          auto base = st->base_type_name();
+          if (base.namespace_uri() == "http://www.w3.org/2001/XMLSchema") break;
+          st = schemas.find_simple_type(base);
+        }
+        std::string union_name;
+        if (st && !st->member_type_names().empty() &&
+            resolver.union_variant_map) {
+          // Build variant key to find canonical name
+          std::string variant_key;
+          bool first = true;
+          for (const auto& member : st->member_type_names()) {
+            if (!first) variant_key += ",";
+            variant_key += resolver.resolve(member);
+            first = false;
+          }
+          auto it = resolver.union_variant_map->find(variant_key);
+          if (it != resolver.union_variant_map->end()) union_name = it->second;
+        }
+        if (union_name.empty())
+          union_name = st ? to_cpp_identifier(st->name().local_name())
+                          : to_cpp_identifier(type_name.local_name());
+        return "parse_" + union_name + "(" + text_expr + ")";
       }
       std::string cpp_type = resolver.resolve(type_name);
       return "xb::parse<" + cpp_type + ">(" + text_expr + ")";
@@ -1506,6 +1941,40 @@ namespace xb {
             } else if constexpr (std::is_same_v<T, element_ref>) {
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
+
+              // Abstract element -> match substitution group member names
+              if (elem->abstract()) {
+                auto members =
+                    find_substitution_members(resolver.schemas, term.ref);
+                if (!members.empty()) {
+                  std::string field =
+                      "result." + to_cpp_identifier(elem->name().local_name());
+                  for (const auto* m : members) {
+                    std::string mqn = "xb::qname{\"" +
+                                      m->name().namespace_uri() + "\", \"" +
+                                      m->name().local_name() + "\"}";
+                    std::string kw = first_branch ? "if" : "else if";
+                    body += "    " + kw + " (name == " + mqn + ") {\n";
+                    std::string read_fn =
+                        "read_" +
+                        to_cpp_identifier(m->type_name().local_name());
+                    if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
+                      body += "      " + field + ".push_back(" + read_fn +
+                              "(reader));\n";
+                    } else if (p.occurs.min_occurs == 0) {
+                      body +=
+                          "      " + field + " = " + read_fn + "(reader);\n";
+                    } else {
+                      body +=
+                          "      " + field + " = " + read_fn + "(reader);\n";
+                    }
+                    body += "    }\n";
+                    first_branch = false;
+                  }
+                  return;
+                }
+              }
+
               std::string qn = "xb::qname{\"" + elem->name().namespace_uri() +
                                "\", \"" + elem->name().local_name() + "\"}";
               std::string kw = first_branch ? "if" : "else if";
@@ -1563,10 +2032,30 @@ namespace xb {
                   std::string cpp_type = resolver.resolve(term.type_name());
                   bool is_complex =
                       is_complex_type(resolver.schemas, term.type_name());
+                  bool is_repeating =
+                      p.occurs.is_unbounded() || p.occurs.max_occurs > 1;
 
                   std::string kw = first_branch ? "if" : "else if";
                   body += "    " + kw + " (name == " + qn + ") {\n";
-                  if (is_complex) {
+                  if (is_repeating) {
+                    // Vector alternative: push_back each occurrence
+                    std::string vec_type = "std::vector<" + cpp_type + ">";
+                    std::string read_expr;
+                    if (is_complex)
+                      read_expr =
+                          "read_" +
+                          to_cpp_identifier(term.type_name().local_name()) +
+                          "(reader)";
+                    else
+                      read_expr = "xb::read_simple<" + cpp_type + ">(reader)";
+                    body += "      if (auto* vec = std::get_if<" + vec_type +
+                            ">(&result.choice)) {\n";
+                    body += "        vec->push_back(" + read_expr + ");\n";
+                    body += "      } else {\n";
+                    body += "        result.choice = " + vec_type + "{" +
+                            read_expr + "};\n";
+                    body += "      }\n";
+                  } else if (is_complex) {
                     std::string read_fn =
                         "read_" +
                         to_cpp_identifier(term.type_name().local_name());
@@ -1580,16 +2069,46 @@ namespace xb {
                 } else if constexpr (std::is_same_v<T, element_ref>) {
                   auto* elem = resolver.schemas.find_element(term.ref);
                   if (!elem) return;
-                  std::string qn = "xb::qname{\"" +
-                                   elem->name().namespace_uri() + "\", \"" +
-                                   elem->name().local_name() + "\"}";
-                  std::string cpp_type = resolver.resolve(elem->type_name());
-                  std::string kw = first_branch ? "if" : "else if";
-                  body += "    " + kw + " (name == " + qn + ") {\n";
-                  body += "      result.choice = xb::read_simple<" + cpp_type +
-                          ">(reader);\n";
-                  body += "    }\n";
-                  first_branch = false;
+                  // Abstract element -> match substitution group members
+                  if (elem->abstract()) {
+                    auto members =
+                        find_substitution_members(resolver.schemas, term.ref);
+                    for (const auto* m : members) {
+                      std::string mqn = "xb::qname{\"" +
+                                        m->name().namespace_uri() + "\", \"" +
+                                        m->name().local_name() + "\"}";
+                      std::string kw = first_branch ? "if" : "else if";
+                      body += "    " + kw + " (name == " + mqn + ") {\n";
+                      std::string read_fn =
+                          "read_" +
+                          to_cpp_identifier(m->type_name().local_name());
+                      body +=
+                          "      result.choice = " + read_fn + "(reader);\n";
+                      body += "    }\n";
+                      first_branch = false;
+                    }
+                  } else {
+                    std::string qn = "xb::qname{\"" +
+                                     elem->name().namespace_uri() + "\", \"" +
+                                     elem->name().local_name() + "\"}";
+                    std::string cpp_type = resolver.resolve(elem->type_name());
+                    bool is_complex =
+                        is_complex_type(resolver.schemas, elem->type_name());
+                    std::string kw = first_branch ? "if" : "else if";
+                    body += "    " + kw + " (name == " + qn + ") {\n";
+                    if (is_complex) {
+                      std::string read_fn =
+                          "read_" +
+                          to_cpp_identifier(elem->type_name().local_name());
+                      body +=
+                          "      result.choice = " + read_fn + "(reader);\n";
+                    } else {
+                      body += "      result.choice = xb::read_simple<" +
+                              cpp_type + ">(reader);\n";
+                    }
+                    body += "    }\n";
+                    first_branch = false;
+                  }
                 }
               },
               p.term);
@@ -1860,8 +2379,19 @@ namespace xb {
       if (facets.pattern.has_value()) {
         std::string format_expr =
             is_string ? value_expr : "xb::format(" + value_expr + ")";
+        // Escape backslashes for C++ string literal (XSD patterns use \d,
+        // \s etc. which must become \\d, \\s in C++)
+        std::string pat;
+        for (char c : facets.pattern.value()) {
+          if (c == '\\')
+            pat += "\\\\";
+          else if (c == '"')
+            pat += "\\\"";
+          else
+            pat += c;
+        }
         checks.push_back("std::regex_match(" + format_expr +
-                         ", std::regex(\"^" + facets.pattern.value() + "$\"))");
+                         ", std::regex(\"^" + pat + "$\"))");
       }
 
       return checks;
@@ -1870,10 +2400,16 @@ namespace xb {
     // Collect cardinality validation checks for particles in a content model.
     // Returns boolean expressions checking size constraints on vector/optional
     // fields. Skips default (1,1) and unconstrained (0,unbounded) cardinality.
+    // Choice groups are skipped — their cardinality is encoded in the variant
+    // type, not as separate fields.
     std::vector<std::string>
     collect_cardinality_checks(const model_group& mg,
                                const std::string& struct_prefix) {
       std::vector<std::string> checks;
+
+      // Choice groups map to a single variant field; individual particle
+      // cardinality is embedded in the variant alternative types.
+      if (mg.compositor() == compositor_kind::choice) return checks;
 
       for (const auto& p : mg.particles()) {
         std::visit(
@@ -2037,22 +2573,117 @@ namespace xb {
       return fn;
     }
 
+    // Merge files that share the same filename and kind.
+    // When multiple schemas share a namespace, each produces a file with
+    // the same name. Merging combines their declarations and re-orders
+    // type declarations to resolve cross-schema dependencies.
+    std::vector<cpp_file>
+    merge_same_name_files(std::vector<cpp_file> files) {
+      std::vector<std::string> key_order;
+      std::map<std::string, cpp_file> by_key;
+
+      for (auto& f : files) {
+        std::string key =
+            f.filename + (f.kind == file_kind::header ? ":h" : ":s");
+        auto it = by_key.find(key);
+        if (it == by_key.end()) {
+          key_order.push_back(key);
+          by_key.emplace(key, std::move(f));
+        } else {
+          // Merge includes (deduplicated)
+          std::set<std::string> existing;
+          for (const auto& inc : it->second.includes)
+            existing.insert(inc.path);
+          for (const auto& inc : f.includes) {
+            if (!existing.count(inc.path)) {
+              it->second.includes.push_back(inc);
+              existing.insert(inc.path);
+            }
+          }
+          // Merge namespaces: combine declarations for same-named namespaces
+          for (auto& ns : f.namespaces) {
+            bool found = false;
+            for (auto& existing_ns : it->second.namespaces) {
+              if (existing_ns.name == ns.name) {
+                for (auto& decl : ns.declarations)
+                  existing_ns.declarations.push_back(std::move(decl));
+                found = true;
+                break;
+              }
+            }
+            if (!found) it->second.namespaces.push_back(std::move(ns));
+          }
+        }
+      }
+
+      // Re-order type declarations and deduplicate functions
+      for (auto& [key, file] : by_key) {
+        for (auto& ns : file.namespaces) {
+          std::vector<cpp_decl> types;
+          std::vector<cpp_decl> functions;
+          std::set<std::string> seen_fn_sigs;
+          for (auto& decl : ns.declarations) {
+            if (auto* fn = std::get_if<cpp_function>(&decl)) {
+              // Deduplicate functions by name + parameters
+              std::string sig = fn->name + "(" + fn->parameters + ")";
+              if (seen_fn_sigs.insert(sig).second)
+                functions.push_back(std::move(decl));
+            } else {
+              types.push_back(std::move(decl));
+            }
+          }
+
+          auto ordered = order_declarations(std::move(types));
+
+          ns.declarations.clear();
+          ns.declarations.reserve(ordered.size() + functions.size());
+          for (auto& d : ordered)
+            ns.declarations.push_back(std::move(d));
+          for (auto& d : functions)
+            ns.declarations.push_back(std::move(d));
+        }
+      }
+
+      std::vector<cpp_file> result;
+      result.reserve(key_order.size());
+      for (const auto& key : key_order)
+        result.push_back(std::move(by_key[key]));
+      return result;
+    }
+
   } // namespace
 
   std::vector<cpp_file>
   codegen::generate() const {
     std::vector<cpp_file> files;
 
+    // Track union variant deduplication across all schemas so that
+    // read functions in one schema can find parse functions from another.
+    std::map<std::string, std::string> union_variant_map;
+
     for (const auto& s : schemas_.schemas()) {
       std::set<std::string> referenced_namespaces;
 
-      type_resolver resolver{schemas_, types_, options_, s.target_namespace(),
-                             referenced_namespaces};
+      type_resolver resolver{schemas_,
+                             types_,
+                             options_,
+                             s.target_namespace(),
+                             referenced_namespaces,
+                             &union_variant_map};
 
       std::vector<cpp_decl> declarations;
+      std::set<std::string> seen_variant_types;
 
-      for (const auto& st : s.simple_types())
-        declarations.push_back(translate_simple_type(st, resolver));
+      for (const auto& st : s.simple_types()) {
+        declarations.push_back(
+            translate_simple_type(st, resolver, union_variant_map));
+        if (auto fmt =
+                generate_format_function(st, resolver, seen_variant_types))
+          declarations.push_back(std::move(*fmt));
+        if (auto pfn =
+                generate_parse_function(st, resolver, seen_variant_types))
+          declarations.push_back(std::move(*pfn));
+      }
 
       for (const auto& ct : s.complex_types())
         declarations.push_back(translate_complex_type(ct, resolver, s));
@@ -2266,7 +2897,7 @@ namespace xb {
       }
     }
 
-    return files;
+    return merge_same_name_files(std::move(files));
   }
 
 } // namespace xb

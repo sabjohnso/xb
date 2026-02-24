@@ -1,0 +1,13 @@
+FIXML 5.0 SP2 Schema Files
+==========================
+
+Source: https://github.com/xgp/fixml
+Version: FIX.5.0SP2 (generated 2011-08-19)
+Copyright: FIX Protocol Limited. All rights reserved.
+
+These 55 XSD files define the FIXML 5.0 SP2 schema, the XML representation
+of the FIX protocol for financial messaging. They are used as integration
+test inputs for the xb XML databinding library.
+
+Entry point: fixml-main-5-0-SP2.xsd
+Namespace: http://www.fixprotocol.org/FIXML-5-0-SP2

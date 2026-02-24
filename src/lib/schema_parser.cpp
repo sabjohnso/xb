@@ -69,8 +69,9 @@ namespace xb {
     resolve_qname(xml_reader& reader, const std::string& prefixed_name) {
       auto colon = prefixed_name.find(':');
       if (colon == std::string::npos) {
-        // No prefix — unqualified name
-        return qname("", prefixed_name);
+        // No prefix — resolve against the default namespace (xmlns="...")
+        auto default_uri = reader.namespace_uri_for_prefix("");
+        return qname(std::string(default_uri), prefixed_name);
       }
       std::string prefix = prefixed_name.substr(0, colon);
       std::string local = prefixed_name.substr(colon + 1);

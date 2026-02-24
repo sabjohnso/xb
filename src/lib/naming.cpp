@@ -1,6 +1,7 @@
 #include <xb/naming.hpp>
 
 #include <cctype>
+#include <cstdio>
 #include <unordered_set>
 
 namespace xb {
@@ -105,9 +106,44 @@ namespace xb {
     return result;
   }
 
+  namespace {
+
+    bool
+    is_identifier_char(char c) {
+      return is_lower(c) || is_upper(c) || is_digit(c) || c == '_';
+    }
+
+  } // namespace
+
   std::string
   to_cpp_identifier(std::string_view xsd_name) {
     std::string result = to_snake_case(xsd_name);
+
+    // Replace non-identifier characters with hex escape (_xNN)
+    std::string sanitized;
+    sanitized.reserve(result.size());
+    for (char c : result) {
+      if (is_identifier_char(c)) {
+        sanitized += c;
+      } else {
+        char buf[8];
+        std::snprintf(buf, sizeof(buf), "_x%02x",
+                      static_cast<unsigned char>(c));
+        sanitized += buf;
+      }
+    }
+    result = std::move(sanitized);
+
+    // If the result is empty (all special chars removed), use full hex
+    // encoding of the original
+    if (result.empty()) {
+      for (char c : xsd_name) {
+        char buf[8];
+        std::snprintf(buf, sizeof(buf), "_x%02x",
+                      static_cast<unsigned char>(c));
+        result += buf;
+      }
+    }
 
     // Prefix with underscore if starts with a digit
     if (!result.empty() && is_digit(result[0]))

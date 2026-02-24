@@ -82,3 +82,21 @@ TEST_CASE("empty namespace", "[naming]") {
   codegen_options opts;
   CHECK(cpp_namespace_for("", opts) == "");
 }
+
+TEST_CASE("to_cpp_identifier: special characters become valid identifiers",
+          "[naming]") {
+  // Question mark (FIXML SecurityType_enum_t has "?" as a value)
+  auto q = to_cpp_identifier("?");
+  CHECK(!q.empty());
+  CHECK(q.find('?') == std::string::npos);
+
+  // Plus sign
+  auto plus = to_cpp_identifier("+");
+  CHECK(!plus.empty());
+  CHECK(plus.find('+') == std::string::npos);
+
+  // Mixed: alphanumeric + special
+  auto mixed = to_cpp_identifier("A+B");
+  CHECK(mixed.find('+') == std::string::npos);
+  CHECK(!mixed.empty());
+}

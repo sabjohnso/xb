@@ -1072,3 +1072,31 @@ TEST_CASE("schema_parser: default alternative has nullopt test",
   CHECK(s.elements()[0].type_alternatives()[0].test.has_value());
   CHECK_FALSE(s.elements()[0].type_alternatives()[1].test.has_value());
 }
+
+// Unqualified type reference resolves against default namespace
+TEST_CASE("schema_parser: unqualified type base resolves to default namespace",
+          "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               xmlns="urn:test"
+               targetNamespace="urn:test">
+      <xs:simpleType name="char">
+        <xs:restriction base="xs:string">
+          <xs:pattern value=".{1}"/>
+        </xs:restriction>
+      </xs:simpleType>
+      <xs:simpleType name="Side_t">
+        <xs:restriction base="char">
+          <xs:enumeration value="1"/>
+          <xs:enumeration value="2"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:schema>
+  )");
+  REQUIRE(s.simple_types().size() == 2);
+  // Side_t's base should be {urn:test}char, not {""}char
+  auto& side = s.simple_types()[1];
+  CHECK(side.name().local_name() == "Side_t");
+  CHECK(side.base_type_name().namespace_uri() == "urn:test");
+  CHECK(side.base_type_name().local_name() == "char");
+}
