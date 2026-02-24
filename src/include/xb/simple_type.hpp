@@ -1,5 +1,6 @@
 #pragma once
 
+#include <xb/assertion.hpp>
 #include <xb/facet_set.hpp>
 #include <xb/qname.hpp>
 #include <xb/schema_fwd.hpp>
@@ -16,6 +17,7 @@ namespace xb {
     facet_set facets_;
     std::optional<qname> item_type_name_;
     std::vector<qname> member_type_names_;
+    std::vector<assertion> assertions_;
 
   public:
     simple_type() = default;
@@ -23,12 +25,14 @@ namespace xb {
     simple_type(qname name, simple_type_variety variety, qname base_type_name,
                 facet_set facets = {},
                 std::optional<qname> item_type_name = std::nullopt,
-                std::vector<qname> member_type_names = {})
+                std::vector<qname> member_type_names = {},
+                std::vector<assertion> assertions = {})
         : name_(std::move(name)), variety_(variety),
           base_type_name_(std::move(base_type_name)),
           facets_(std::move(facets)),
           item_type_name_(std::move(item_type_name)),
-          member_type_names_(std::move(member_type_names)) {}
+          member_type_names_(std::move(member_type_names)),
+          assertions_(std::move(assertions)) {}
 
     const qname&
     name() const {
@@ -58,6 +62,11 @@ namespace xb {
     const std::vector<qname>&
     member_type_names() const {
       return member_type_names_;
+    }
+
+    const std::vector<assertion>&
+    assertions() const {
+      return assertions_;
     }
 
     bool

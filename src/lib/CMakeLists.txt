@@ -18,7 +18,8 @@ add_library(xb STATIC
   naming.cpp
   codegen.cpp
   xml_value.cpp
-  xml_io.cpp)
+  xml_io.cpp
+  xpath_expr.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

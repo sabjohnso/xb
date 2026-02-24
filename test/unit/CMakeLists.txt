@@ -121,3 +121,8 @@ add_executable(xb_xml_io_test xml_io_test.cpp)
 target_link_libraries(xb_xml_io_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_xml_io_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xml_io_test COMMAND xb_xml_io_test)
+
+add_executable(xb_xpath_expr_test xpath_expr_test.cpp)
+target_link_libraries(xb_xpath_expr_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_xpath_expr_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xpath_expr_test COMMAND xb_xpath_expr_test)

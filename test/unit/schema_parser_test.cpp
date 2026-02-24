@@ -962,6 +962,100 @@ TEST_CASE("schema_parser: xs:alternative missing type attribute throws",
                   std::runtime_error);
 }
 
+// ===== XSD 1.1: Assertions =====
+
+TEST_CASE("schema_parser: complexType with xs:assert",
+          "[schema_parser][assertion]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="DateRange">
+        <xs:sequence>
+          <xs:element name="start" type="xs:date"/>
+          <xs:element name="end" type="xs:date"/>
+        </xs:sequence>
+        <xs:assert test="end >= start"/>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& ct = s.complex_types()[0];
+  REQUIRE(ct.assertions().size() == 1);
+  CHECK(ct.assertions()[0].test == "end >= start");
+}
+
+TEST_CASE("schema_parser: complexType with multiple xs:assert",
+          "[schema_parser][assertion]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="ValidRange">
+        <xs:sequence>
+          <xs:element name="min" type="xs:int"/>
+          <xs:element name="max" type="xs:int"/>
+        </xs:sequence>
+        <xs:assert test="max >= min"/>
+        <xs:assert test="min >= 0"/>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& ct = s.complex_types()[0];
+  REQUIRE(ct.assertions().size() == 2);
+  CHECK(ct.assertions()[0].test == "max >= min");
+  CHECK(ct.assertions()[1].test == "min >= 0");
+}
+
+TEST_CASE("schema_parser: simpleType with xs:assertion in restriction",
+          "[schema_parser][assertion]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:simpleType name="PositiveInt">
+        <xs:restriction base="xs:integer">
+          <xs:assertion test="$value > 0"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:schema>
+  )");
+  REQUIRE(s.simple_types().size() == 1);
+  const auto& st = s.simple_types()[0];
+  REQUIRE(st.assertions().size() == 1);
+  CHECK(st.assertions()[0].test == "$value > 0");
+}
+
+TEST_CASE("schema_parser: xs:assert with no test attribute throws",
+          "[schema_parser][assertion]") {
+  CHECK_THROWS_AS(parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="Bad">
+        <xs:sequence>
+          <xs:element name="x" type="xs:int"/>
+        </xs:sequence>
+        <xs:assert/>
+      </xs:complexType>
+    </xs:schema>
+  )"),
+                  std::runtime_error);
+}
+
+TEST_CASE("schema_parser: complexType without assertions has empty vector",
+          "[schema_parser][assertion]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="Plain">
+        <xs:sequence>
+          <xs:element name="x" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  CHECK(s.complex_types()[0].assertions().empty());
+}
+
 TEST_CASE("schema_parser: default alternative has nullopt test",
           "[schema_parser][cta]") {
   auto s = parse_xsd(R"(

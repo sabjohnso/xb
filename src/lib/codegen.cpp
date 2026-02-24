@@ -1,6 +1,7 @@
 #include <xb/codegen.hpp>
 #include <xb/naming.hpp>
 #include <xb/open_content.hpp>
+#include <xb/xpath_expr.hpp>
 
 #include <set>
 
@@ -1787,6 +1788,77 @@ namespace xb {
       return fn;
     }
 
+    // Generate a validate_<type>() function for a complex type with assertions.
+    // Returns nullopt if the type has no assertions.
+    std::optional<cpp_function>
+    generate_validate_function(const complex_type& ct) {
+      if (ct.assertions().empty()) return std::nullopt;
+
+      std::string struct_name = to_cpp_identifier(ct.name().local_name());
+      xpath_context ctx{"value."};
+
+      cpp_function fn;
+      fn.return_type = "bool";
+      fn.name = "validate_" + struct_name;
+      fn.parameters = "const " + struct_name + "& value";
+
+      std::string body = "  return ";
+      bool first = true;
+
+      for (const auto& a : ct.assertions()) {
+        auto translated = translate_xpath_assertion(a.test, ctx);
+        if (!translated.has_value()) {
+          // Unsupported expression: emit warning, function returns true
+          fn.body = "  // WARNING: unsupported assertion: '" + a.test + "'\n";
+          fn.body += "  return true;\n";
+          return fn;
+        }
+        if (!first) body += "\n      && ";
+        body += translated.value();
+        first = false;
+      }
+
+      body += ";\n";
+      fn.body = body;
+      return fn;
+    }
+
+    // Generate a validate_<type>() function for a simple type with assertions.
+    // Returns nullopt if the type has no assertions.
+    std::optional<cpp_function>
+    generate_simple_validate_function(const simple_type& st,
+                                      const type_resolver& resolver) {
+      if (st.assertions().empty()) return std::nullopt;
+
+      std::string type_name = to_cpp_identifier(st.name().local_name());
+      std::string cpp_type = resolver.resolve(st.base_type_name());
+      xpath_context ctx{"value"};
+
+      cpp_function fn;
+      fn.return_type = "bool";
+      fn.name = "validate_" + type_name;
+      fn.parameters = "const " + cpp_type + "& value";
+
+      std::string body = "  return ";
+      bool first = true;
+
+      for (const auto& a : st.assertions()) {
+        auto translated = translate_xpath_assertion(a.test, ctx);
+        if (!translated.has_value()) {
+          fn.body = "  // WARNING: unsupported assertion: '" + a.test + "'\n";
+          fn.body += "  return true;\n";
+          return fn;
+        }
+        if (!first) body += "\n      && ";
+        body += translated.value();
+        first = false;
+      }
+
+      body += ";\n";
+      fn.body = body;
+      return fn;
+    }
+
   } // namespace
 
   std::vector<cpp_file>
@@ -1826,6 +1898,18 @@ namespace xb {
       for (const auto* ct_ptr : ordered_cts) {
         ordered_types.push_back(generate_read_function(*ct_ptr, resolver, s));
         ordered_types.push_back(generate_write_function(*ct_ptr, resolver, s));
+      }
+
+      // Generate validate_ functions for complex types with assertions
+      for (const auto* ct_ptr : ordered_cts) {
+        if (auto vf = generate_validate_function(*ct_ptr))
+          ordered_types.push_back(std::move(*vf));
+      }
+
+      // Generate validate_ functions for simple types with assertions
+      for (const auto& st : s.simple_types()) {
+        if (auto vf = generate_simple_validate_function(st, resolver))
+          ordered_types.push_back(std::move(*vf));
       }
 
       // In split mode, mark read_/write_ functions as non-inline

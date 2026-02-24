@@ -3218,3 +3218,156 @@ TEST_CASE("CTA default-only alternative: unconditional read",
   // expressions
   CHECK(fn->body.find("attribute_value") == std::string::npos);
 }
+
+// ===== Assertion validation function generation =====
+
+TEST_CASE("complex type with assertion generates validate function",
+          "[codegen][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  model_group seq(compositor_kind::sequence);
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "start"},
+                                      qname{xs_ns, "int"}));
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "end"},
+                                      qname{xs_ns, "int"}));
+  seq = model_group(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(
+      qname{"http://example.com/test", "DateRange"}, false, false,
+      std::move(ct), {}, {}, std::nullopt, std::nullopt, {{"end >= start"}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_date_range");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->return_type == "bool");
+  CHECK(fn->parameters.find("const date_range&") != std::string::npos);
+  CHECK(fn->body.find("value.end >= value.start") != std::string::npos);
+}
+
+TEST_CASE("complex type without assertions: no validate function",
+          "[codegen][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  model_group seq(compositor_kind::sequence);
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "x"},
+                                      qname{xs_ns, "string"}));
+  seq = model_group(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "PlainType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_plain_type");
+  CHECK(fn == nullptr);
+}
+
+TEST_CASE("complex type with multiple assertions: &&-chained",
+          "[codegen][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  model_group seq(compositor_kind::sequence);
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "min"},
+                                      qname{xs_ns, "int"}));
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "max"},
+                                      qname{xs_ns, "int"}));
+  seq = model_group(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "RangeType"},
+                                  false, false, std::move(ct), {}, {},
+                                  std::nullopt, std::nullopt,
+                                  {{"max >= min"}, {"min >= 0"}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_range_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("value.max >= value.min") != std::string::npos);
+  CHECK(fn->body.find("value.min >= 0") != std::string::npos);
+  CHECK(fn->body.find("&&") != std::string::npos);
+}
+
+TEST_CASE("simple type with assertion generates validate function",
+          "[codegen][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "PositiveInt"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "integer"}, {}, std::nullopt, {},
+                                {{"$value > 0"}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_positive_int");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->return_type == "bool");
+  CHECK(fn->body.find("value > 0") != std::string::npos);
+}
+
+TEST_CASE("unsupported XPath in assertion: WARNING comment, returns true",
+          "[codegen][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  model_group seq(compositor_kind::sequence);
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "x"},
+                                      qname{xs_ns, "string"}));
+  seq = model_group(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "FancyType"},
+                                  false, false, std::move(ct), {}, {},
+                                  std::nullopt, std::nullopt,
+                                  {{"fn:string-length($value) > 5"}}));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "validate_fancy_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("WARNING") != std::string::npos);
+  CHECK(fn->body.find("return true") != std::string::npos);
+}

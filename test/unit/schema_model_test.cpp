@@ -1,3 +1,4 @@
+#include <xb/assertion.hpp>
 #include <xb/attribute_decl.hpp>
 #include <xb/attribute_group_def.hpp>
 #include <xb/complex_type.hpp>
@@ -475,4 +476,98 @@ TEST_CASE("attribute_group_def with wildcard", "[attribute_group_def]") {
 
   CHECK(def.attribute_wildcard().has_value());
   CHECK(def.attribute_wildcard()->process == xb::process_contents::skip);
+}
+
+// -- assertion ----------------------------------------------------------------
+
+TEST_CASE("assertion construction and equality", "[assertion]") {
+  xb::assertion a{"end >= start"};
+  CHECK(a.test == "end >= start");
+
+  xb::assertion b{"end >= start"};
+  CHECK(a == b);
+
+  xb::assertion c{"$value > 0"};
+  CHECK_FALSE(a == c);
+}
+
+// -- complex_type with assertions ---------------------------------------------
+
+TEST_CASE("complex_type with assertions", "[complex_type][assertion]") {
+  xb::content_type ct;
+  std::vector<xb::assertion> asserts = {{"end >= start"}, {"start > 0"}};
+
+  xb::complex_type ctype(xb::qname(tns, "DateRange"), false, false,
+                         std::move(ct), {}, {}, std::nullopt, std::nullopt,
+                         std::move(asserts));
+
+  REQUIRE(ctype.assertions().size() == 2);
+  CHECK(ctype.assertions()[0].test == "end >= start");
+  CHECK(ctype.assertions()[1].test == "start > 0");
+}
+
+TEST_CASE("complex_type assertions default to empty",
+          "[complex_type][assertion]") {
+  xb::content_type ct;
+  xb::complex_type ctype(xb::qname(tns, "NoAssert"), false, false,
+                         std::move(ct));
+
+  CHECK(ctype.assertions().empty());
+}
+
+TEST_CASE("complex_type equality includes assertions",
+          "[complex_type][assertion]") {
+  xb::content_type ct1;
+  xb::complex_type a(xb::qname(tns, "T"), false, false, std::move(ct1), {}, {},
+                     std::nullopt, std::nullopt, {{"x > 0"}});
+
+  xb::content_type ct2;
+  xb::complex_type b(xb::qname(tns, "T"), false, false, std::move(ct2), {}, {},
+                     std::nullopt, std::nullopt, {{"x > 0"}});
+
+  CHECK(a == b);
+
+  xb::content_type ct3;
+  xb::complex_type c(xb::qname(tns, "T"), false, false, std::move(ct3), {}, {},
+                     std::nullopt, std::nullopt, {{"y > 0"}});
+
+  CHECK_FALSE(a == c);
+}
+
+// -- simple_type with assertions ----------------------------------------------
+
+TEST_CASE("simple_type with assertions", "[simple_type][assertion]") {
+  xb::simple_type st(xb::qname(tns, "PositiveInt"),
+                     xb::simple_type_variety::atomic, xb::qname(xs, "integer"),
+                     {}, std::nullopt, {}, {{"$value > 0"}});
+
+  REQUIRE(st.assertions().size() == 1);
+  CHECK(st.assertions()[0].test == "$value > 0");
+}
+
+TEST_CASE("simple_type assertions default to empty",
+          "[simple_type][assertion]") {
+  xb::simple_type st(xb::qname(tns, "Plain"), xb::simple_type_variety::atomic,
+                     xb::qname(xs, "string"));
+
+  CHECK(st.assertions().empty());
+}
+
+TEST_CASE("simple_type equality includes assertions",
+          "[simple_type][assertion]") {
+  xb::simple_type a(xb::qname(tns, "T"), xb::simple_type_variety::atomic,
+                    xb::qname(xs, "int"), {}, std::nullopt, {},
+                    {{"$value > 0"}});
+
+  xb::simple_type b(xb::qname(tns, "T"), xb::simple_type_variety::atomic,
+                    xb::qname(xs, "int"), {}, std::nullopt, {},
+                    {{"$value > 0"}});
+
+  CHECK(a == b);
+
+  xb::simple_type c(xb::qname(tns, "T"), xb::simple_type_variety::atomic,
+                    xb::qname(xs, "int"), {}, std::nullopt, {},
+                    {{"$value < 0"}});
+
+  CHECK_FALSE(a == c);
 }

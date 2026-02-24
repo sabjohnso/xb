@@ -813,3 +813,116 @@ int main() {
 
   CHECK(build_and_run(files, "cta_round_trip", test_code));
 }
+
+// ===== XSD 1.1: Assertion runtime validation tests =====
+
+TEST_CASE("validate function returns true for valid instance",
+          "[serialization][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/validation");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/validation", "start"}, qname{xs, "int"}));
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/validation", "end"}, qname{xs, "int"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(
+      qname{"http://example.com/validation", "DateRange"}, false, false,
+      std::move(ct), {}, {}, std::nullopt, std::nullopt, {{"end >= start"}}));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.namespace_map["http://example.com/validation"] = "validation";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  std::string test_code = R"(
+int main() {
+  using namespace validation;
+
+  // Valid: end >= start
+  date_range v;
+  v.start = 1;
+  v.end = 10;
+  assert(validate_date_range(v));
+
+  // Invalid: end < start
+  date_range inv;
+  inv.start = 10;
+  inv.end = 1;
+  assert(!validate_date_range(inv));
+
+  // Boundary: end == start
+  date_range bnd;
+  bnd.start = 5;
+  bnd.end = 5;
+  assert(validate_date_range(bnd));
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "assertion_validate", test_code));
+}
+
+TEST_CASE("unsupported assertion generates compilable code that returns true",
+          "[serialization][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/validation");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/validation", "x"}, qname{xs, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/validation", "FancyType"}, false,
+                   false, std::move(ct), {}, {}, std::nullopt, std::nullopt,
+                   {{"fn:string-length($value) > 5"}}));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.namespace_map["http://example.com/validation"] = "validation";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  std::string test_code = R"(
+int main() {
+  using namespace validation;
+
+  fancy_type val;
+  val.x = "hello";
+
+  // Unsupported assertion should always return true (degraded gracefully)
+  assert(validate_fancy_type(val));
+
+  return 0;
+}
+)";
+
+  CHECK(build_and_run(files, "assertion_unsupported_validate", test_code));
+}

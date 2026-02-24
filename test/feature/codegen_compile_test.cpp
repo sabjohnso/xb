@@ -455,3 +455,72 @@ TEST_CASE("split mode: xb-typemap.xsd compiles", "[codegen][compile][split]") {
   REQUIRE(files.size() == 2);
   CHECK(compile_generated_files(files, "split_typemap_xsd"));
 }
+
+// ===== XSD 1.1: Assertion compile tests =====
+
+TEST_CASE("generate from complex type with assertion compiles",
+          "[codegen][compile][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/assert");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/assert", "start"}, qname{xs, "int"}));
+  particles.emplace_back(element_decl(qname{"http://example.com/assert", "end"},
+                                      qname{xs, "int"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(
+      qname{"http://example.com/assert", "DateRange"}, false, false,
+      std::move(ct), {}, {}, std::nullopt, std::nullopt, {{"end >= start"}}));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "assertion_compile"));
+}
+
+TEST_CASE("generate unsupported assertion compiles",
+          "[codegen][compile][assertion]") {
+  schema s;
+  s.set_target_namespace("http://example.com/assert");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/assert", "x"},
+                                      qname{xs, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/assert", "FancyType"}, false,
+                   false, std::move(ct), {}, {}, std::nullopt, std::nullopt,
+                   {{"fn:string-length($value) > 5"}}));
+
+  schema_set ss;
+  ss.add(std::move(s));
+  ss.resolve();
+
+  auto types = type_map::defaults();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 1);
+  CHECK(compile_generated_files(files, "assertion_unsupported_compile"));
+}

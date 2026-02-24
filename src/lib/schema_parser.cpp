@@ -1,5 +1,6 @@
 #include <xb/schema_parser.hpp>
 
+#include <xb/assertion.hpp>
 #include <xb/open_content.hpp>
 #include <xb/type_alternative.hpp>
 
@@ -173,13 +174,20 @@ namespace xb {
       }
     }
 
+    // Result of parsing an xs:restriction element for a simple type.
+    struct restriction_result {
+      qname base_type;
+      facet_set facets;
+      std::vector<assertion> assertions;
+    };
+
     // Parse the children of an xs:restriction element for a simple type
-    // Returns {base_type_name, facets}
-    std::pair<qname, facet_set>
+    restriction_result
     parse_restriction(xml_reader& reader) {
       auto base_str = req_attr(reader, "base");
       qname base_type = resolve_qname(reader, base_str);
       facet_set facets;
+      std::vector<assertion> assertions;
 
       std::size_t depth = reader.depth();
       while (read_skip_ws(reader)) {
@@ -189,12 +197,18 @@ namespace xb {
         }
         if (reader.node_type() == xml_node_type::start_element &&
             reader.name().namespace_uri() == xs_ns) {
-          parse_facet(reader, facets);
-          skip_element(reader);
+          if (reader.name().local_name() == "assertion") {
+            auto test = req_attr(reader, "test");
+            assertions.push_back({std::move(test)});
+            skip_element(reader);
+          } else {
+            parse_facet(reader, facets);
+            skip_element(reader);
+          }
         }
       }
 
-      return {base_type, facets};
+      return {std::move(base_type), std::move(facets), std::move(assertions)};
     }
 
     // Parse xs:simpleType
@@ -208,6 +222,7 @@ namespace xb {
       facet_set facets;
       std::optional<qname> item_type;
       std::vector<qname> member_types;
+      std::vector<assertion> assertions;
 
       while (read_skip_ws(reader)) {
         if (reader.node_type() == xml_node_type::end_element &&
@@ -224,9 +239,10 @@ namespace xb {
 
         if (local == "restriction") {
           variety = simple_type_variety::atomic;
-          auto [bt, fs] = parse_restriction(reader);
-          base_type = std::move(bt);
-          facets = std::move(fs);
+          auto result = parse_restriction(reader);
+          base_type = std::move(result.base_type);
+          facets = std::move(result.facets);
+          assertions = std::move(result.assertions);
         } else if (local == "list") {
           variety = simple_type_variety::list;
           auto item_str = opt_attr(reader, "itemType");
@@ -252,7 +268,7 @@ namespace xb {
 
       return simple_type(qname(tns, name), variety, std::move(base_type),
                          std::move(facets), std::move(item_type),
-                         std::move(member_types));
+                         std::move(member_types), std::move(assertions));
     }
 
     // Parse xs:alternative children of an element declaration.
@@ -328,7 +344,8 @@ namespace xb {
                             bool& is_mixed,
                             std::vector<simple_type>& anon_simple_types,
                             std::vector<complex_type>& anon_complex_types,
-                            std::optional<open_content>& oc);
+                            std::optional<open_content>& oc,
+                            std::vector<assertion>& assertions);
 
     particle
     parse_particle(xml_reader& reader, const std::string& tns,
@@ -385,15 +402,17 @@ namespace xb {
               std::vector<attribute_group_ref> ct_agrefs;
               std::optional<wildcard> ct_awild;
               std::optional<open_content> ct_oc;
+              std::vector<assertion> ct_asserts;
 
               parse_complex_type_body(
                   reader, tns, ct_content, ct_attrs, ct_agrefs, ct_awild, mixed,
-                  anon_simple_types, anon_complex_types, ct_oc);
+                  anon_simple_types, anon_complex_types, ct_oc, ct_asserts);
 
-              anon_complex_types.push_back(complex_type(
-                  qname(tns, synth_name), false, mixed, std::move(ct_content),
-                  std::move(ct_attrs), std::move(ct_agrefs),
-                  std::move(ct_awild), std::move(ct_oc)));
+              anon_complex_types.push_back(
+                  complex_type(qname(tns, synth_name), false, mixed,
+                               std::move(ct_content), std::move(ct_attrs),
+                               std::move(ct_agrefs), std::move(ct_awild),
+                               std::move(ct_oc), std::move(ct_asserts)));
               found_anon = true;
             } else if (reader.name().local_name() == "alternative") {
               auto test = opt_attr(reader, "test");
@@ -459,7 +478,8 @@ namespace xb {
                             bool& is_mixed,
                             std::vector<simple_type>& anon_simple_types,
                             std::vector<complex_type>& anon_complex_types,
-                            std::optional<open_content>& oc) {
+                            std::optional<open_content>& oc,
+                            std::vector<assertion>& assertions) {
       std::size_t depth = reader.depth();
 
       while (read_skip_ws(reader)) {
@@ -652,6 +672,10 @@ namespace xb {
         } else if (local == "anyAttribute") {
           attr_wildcard = parse_wildcard_attrs(reader);
           skip_element(reader);
+        } else if (local == "assert") {
+          auto test = req_attr(reader, "test");
+          assertions.push_back({std::move(test)});
+          skip_element(reader);
         } else if (local == "openContent") {
           auto mode_str = opt_attr(reader, "mode").value_or("interleave");
           open_content_mode mode = open_content_mode::interleave;
@@ -771,15 +795,18 @@ namespace xb {
               std::vector<attribute_group_ref> ct_agrefs;
               std::optional<wildcard> ct_awild;
               std::optional<open_content> ct_oc;
+              std::vector<assertion> ct_asserts;
 
-              parse_complex_type_body(
-                  reader, target_ns, ct_content, ct_attrs, ct_agrefs, ct_awild,
-                  mixed, anon_simple_types, anon_complex_types, ct_oc);
+              parse_complex_type_body(reader, target_ns, ct_content, ct_attrs,
+                                      ct_agrefs, ct_awild, mixed,
+                                      anon_simple_types, anon_complex_types,
+                                      ct_oc, ct_asserts);
 
-              anon_complex_types.push_back(complex_type(
-                  qname(target_ns, synth_name), false, mixed,
-                  std::move(ct_content), std::move(ct_attrs),
-                  std::move(ct_agrefs), std::move(ct_awild), std::move(ct_oc)));
+              anon_complex_types.push_back(
+                  complex_type(qname(target_ns, synth_name), false, mixed,
+                               std::move(ct_content), std::move(ct_attrs),
+                               std::move(ct_agrefs), std::move(ct_awild),
+                               std::move(ct_oc), std::move(ct_asserts)));
               has_anon_type = true;
             } else if (reader.name().local_name() == "alternative") {
               auto test = opt_attr(reader, "test");
@@ -825,15 +852,16 @@ namespace xb {
         std::vector<attribute_group_ref> ct_agrefs;
         std::optional<wildcard> ct_awild;
         std::optional<open_content> ct_oc;
+        std::vector<assertion> ct_asserts;
 
         parse_complex_type_body(reader, target_ns, ct_content, ct_attrs,
                                 ct_agrefs, ct_awild, mixed, anon_simple_types,
-                                anon_complex_types, ct_oc);
+                                anon_complex_types, ct_oc, ct_asserts);
 
         result.add_complex_type(complex_type(
             qname(target_ns, name), abstract, mixed, std::move(ct_content),
             std::move(ct_attrs), std::move(ct_agrefs), std::move(ct_awild),
-            std::move(ct_oc)));
+            std::move(ct_oc), std::move(ct_asserts)));
       } else if (local == "group") {
         auto name = req_attr(reader, "name");
         // Parse the compositor child
