@@ -4150,7 +4150,8 @@ TEST_CASE("cross-namespace include uses URN stem for filename", "[codegen]") {
   codegen_options opts;
   opts.namespace_map[urn_a] = "ubl::cbc";
   opts.namespace_map[urn_b] = "ubl::invoice";
-  codegen gen(ss, type_map::defaults(), opts);
+  auto types = default_types();
+  codegen gen(ss, types, opts);
   auto files = gen.generate();
 
   // Find the Invoice file — it should include the CBC header

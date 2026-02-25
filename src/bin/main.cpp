@@ -7,8 +7,10 @@
 
 #include <xb/codegen.hpp>
 #include <xb/cpp_writer.hpp>
+#include <xb/doc_generator.hpp>
 #include <xb/expat_reader.hpp>
 #include <xb/naming.hpp>
+#include <xb/ostream_writer.hpp>
 #include <xb/schema_parser.hpp>
 #include <xb/schema_set.hpp>
 #include <xb/type_map.hpp>
@@ -244,8 +246,202 @@ run(const cli_options& opts) {
   return exit_success;
 }
 
+// ---------------------------------------------------------------------------
+// sample-doc subcommand
+// ---------------------------------------------------------------------------
+
+struct sample_doc_options {
+  std::string element_name;
+  std::string namespace_uri;
+  std::vector<std::string> schema_files;
+  std::string output_file;
+  bool populate_optional = false;
+  std::size_t max_depth = 20;
+  bool show_help = false;
+};
+
+static void
+print_sample_doc_usage(std::ostream& os) {
+  os << "Usage: xb sample-doc --element <name> [options] <schema.xsd> "
+        "[...]\n"
+     << "\n"
+     << "Options:\n"
+     << "  --element <name>       Target element local name (required)\n"
+     << "  --namespace <uri>      Target element namespace URI\n"
+     << "  --populate-optional    Include optional elements and attributes\n"
+     << "  --max-depth <N>        Recursion depth limit (default: 20)\n"
+     << "  --output <file>        Output file (default: stdout)\n"
+     << "  -h, --help             Show this help message\n";
+}
+
+static sample_doc_options
+parse_sample_doc_args(int argc, char* argv[]) {
+  sample_doc_options opts;
+
+  // argv[0] is "xb", argv[1] is "sample-doc", start at 2
+  for (int i = 2; i < argc; ++i) {
+    std::string arg = argv[i];
+
+    if (arg == "-h" || arg == "--help") {
+      opts.show_help = true;
+      return opts;
+    }
+
+    if (arg == "--element") {
+      if (i + 1 >= argc) {
+        std::cerr << "xb sample-doc: --element requires an argument\n";
+        std::exit(exit_usage);
+      }
+      opts.element_name = argv[++i];
+      continue;
+    }
+
+    if (arg == "--namespace") {
+      if (i + 1 >= argc) {
+        std::cerr << "xb sample-doc: --namespace requires an argument\n";
+        std::exit(exit_usage);
+      }
+      opts.namespace_uri = argv[++i];
+      continue;
+    }
+
+    if (arg == "--populate-optional") {
+      opts.populate_optional = true;
+      continue;
+    }
+
+    if (arg == "--max-depth") {
+      if (i + 1 >= argc) {
+        std::cerr << "xb sample-doc: --max-depth requires an argument\n";
+        std::exit(exit_usage);
+      }
+      opts.max_depth = std::stoul(argv[++i]);
+      continue;
+    }
+
+    if (arg == "--output") {
+      if (i + 1 >= argc) {
+        std::cerr << "xb sample-doc: --output requires an argument\n";
+        std::exit(exit_usage);
+      }
+      opts.output_file = argv[++i];
+      continue;
+    }
+
+    if (arg[0] == '-') {
+      std::cerr << "xb sample-doc: unknown option: " << arg << "\n";
+      std::exit(exit_usage);
+    }
+
+    opts.schema_files.push_back(arg);
+  }
+
+  return opts;
+}
+
+static int
+run_sample_doc(const sample_doc_options& opts) {
+  // Parse all schema files
+  xb::schema_set schemas;
+  for (const auto& file : opts.schema_files) {
+    std::string xml = read_file(file);
+    try {
+      xb::expat_reader reader(xml);
+      xb::schema_parser parser;
+      schemas.add(parser.parse(reader));
+    } catch (const std::exception& e) {
+      std::cerr << "xb sample-doc: error parsing schema " << file << ": "
+                << e.what() << "\n";
+      return exit_parse;
+    }
+  }
+
+  // Resolve cross-references
+  try {
+    schemas.resolve();
+  } catch (const std::exception& e) {
+    std::cerr << "xb sample-doc: schema resolution error: " << e.what() << "\n";
+    return exit_parse;
+  }
+
+  // Find the target element's namespace if not specified
+  std::string ns_uri = opts.namespace_uri;
+  if (ns_uri.empty()) {
+    const xb::element_decl* found = nullptr;
+    for (const auto& s : schemas.schemas()) {
+      for (const auto& e : s.elements()) {
+        if (e.name().local_name() == opts.element_name) {
+          found = &e;
+          ns_uri = e.name().namespace_uri();
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (!found) {
+      std::cerr << "xb sample-doc: element '" << opts.element_name
+                << "' not found in any schema\n";
+      return exit_codegen;
+    }
+  }
+
+  xb::qname element_qname{ns_uri, opts.element_name};
+  xb::doc_generator_options gen_opts;
+  gen_opts.populate_optional = opts.populate_optional;
+  gen_opts.max_depth = opts.max_depth;
+
+  try {
+    if (opts.output_file.empty()) {
+      xb::ostream_writer writer(std::cout);
+      xb::doc_generator gen(schemas, gen_opts);
+      gen.generate(element_qname, writer);
+      std::cout << "\n";
+    } else {
+      std::ofstream out(opts.output_file);
+      if (!out) {
+        std::cerr << "xb sample-doc: cannot write file: " << opts.output_file
+                  << "\n";
+        return exit_io;
+      }
+      xb::ostream_writer writer(out);
+      xb::doc_generator gen(schemas, gen_opts);
+      gen.generate(element_qname, writer);
+      out << "\n";
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "xb sample-doc: generation error: " << e.what() << "\n";
+    return exit_codegen;
+  }
+
+  return exit_success;
+}
+
 int
 main(int argc, char* argv[]) {
+  // Check for subcommand
+  if (argc >= 2 && std::string(argv[1]) == "sample-doc") {
+    auto opts = parse_sample_doc_args(argc, argv);
+
+    if (opts.show_help) {
+      print_sample_doc_usage(std::cerr);
+      return exit_success;
+    }
+
+    if (opts.element_name.empty()) {
+      std::cerr << "xb sample-doc: --element is required\n";
+      print_sample_doc_usage(std::cerr);
+      return exit_usage;
+    }
+
+    if (opts.schema_files.empty()) {
+      std::cerr << "xb sample-doc: no input files\n";
+      print_sample_doc_usage(std::cerr);
+      return exit_usage;
+    }
+
+    return run_sample_doc(opts);
+  }
+
   cli_options opts = parse_args(argc, argv);
 
   if (opts.show_help) {
