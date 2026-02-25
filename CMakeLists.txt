@@ -18,6 +18,7 @@ include(xb_deps)
 add_subdirectory(src)
 
 include(${PROJECT_SOURCE_DIR}/cmake/xbGenerateCpp.cmake)
+include(${PROJECT_SOURCE_DIR}/cmake/xbFetchSchemas.cmake)
 
 if(xb_BUILD_TESTING)
   include(CTest)
@@ -38,7 +39,7 @@ install(EXPORT xb_EXPORTS
   FILE xb-exports.cmake
   DESTINATION ${xb_INSTALL_CONFDIR})
 
-install(FILES cmake/xbGenerateCpp.cmake
+install(FILES cmake/xbGenerateCpp.cmake cmake/xbFetchSchemas.cmake
   DESTINATION ${xb_INSTALL_CONFDIR})
 
 configure_file(xb-config.cmake.in xb-config.cmake)
