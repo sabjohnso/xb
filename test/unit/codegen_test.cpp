@@ -4031,3 +4031,144 @@ TEST_CASE("enum values with case-only difference are disambiguated",
   CHECK(originals.count("a") == 1);
   CHECK(originals.count("b") == 1);
 }
+
+// ===== URN namespace stem extraction =====
+// stem_for_namespace must produce valid filenames from URN-style namespaces
+// (colon-separated), not just URL-style (slash-separated).
+
+TEST_CASE("URN namespace produces valid filename stem", "[codegen]") {
+  schema s;
+  std::string urn = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
+  s.set_target_namespace(urn);
+
+  // Need at least one type so codegen emits a file
+  facet_set facets;
+  facets.enumeration = {"A", "B"};
+  s.add_simple_type(simple_type(qname{urn, "StatusCode"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.namespace_map[urn] = "ubl::invoice";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  REQUIRE(!files.empty());
+  // The filename stem should be derived from the last segment after ':'
+  // i.e. "Invoice-2" -> "invoice_2.hpp", NOT the full URN
+  for (const auto& f : files) {
+    CHECK(f.filename.find(':') == std::string::npos);
+    CHECK(f.filename == "invoice_2.hpp");
+  }
+}
+
+TEST_CASE("URL namespace still produces valid filename stem", "[codegen]") {
+  schema s;
+  std::string url = "http://example.com/order";
+  s.set_target_namespace(url);
+
+  facet_set facets;
+  facets.enumeration = {"X", "Y"};
+  s.add_simple_type(simple_type(qname{url, "OrderCode"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(!files.empty());
+  for (const auto& f : files) {
+    CHECK(f.filename == "order.hpp");
+  }
+}
+
+TEST_CASE("fragment URI namespace produces valid filename stem", "[codegen]") {
+  schema s;
+  std::string uri = "http://uri.etsi.org/01903/v1.3.2#";
+  s.set_target_namespace(uri);
+
+  facet_set facets;
+  facets.enumeration = {"P", "Q"};
+  s.add_simple_type(simple_type(qname{uri, "HashCode"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.namespace_map[uri] = "etsi::xades132";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  REQUIRE(!files.empty());
+  for (const auto& f : files) {
+    CHECK(f.filename.find('#') == std::string::npos);
+    // "v1.3.2#" -> strip '#' -> "v1.3.2" -> to_snake_case -> "v1_3_2"
+    CHECK(f.filename == "v1_3_2.hpp");
+  }
+}
+
+TEST_CASE("cross-namespace include uses URN stem for filename", "[codegen]") {
+  // Schema A in a URN namespace, Schema B references types from A
+  std::string urn_a =
+      "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2";
+  std::string urn_b = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2";
+
+  schema sa;
+  sa.set_target_namespace(urn_a);
+  sa.add_simple_type(simple_type(qname{urn_a, "IDType"},
+                                 simple_type_variety::atomic,
+                                 qname{xs_ns, "string"}));
+
+  schema sb;
+  sb.set_target_namespace(urn_b);
+  // Complex type referencing a type from urn_a
+  model_group seq(compositor_kind::sequence);
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{urn_b, "ID"}, qname{urn_a, "IDType"}));
+  seq = model_group(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+  sb.add_complex_type(
+      complex_type(qname{urn_b, "InvoiceType"}, false, false, std::move(ct)));
+
+  schema_set ss;
+  ss.add(std::move(sa));
+  ss.add(std::move(sb));
+  ss.resolve();
+
+  codegen_options opts;
+  opts.namespace_map[urn_a] = "ubl::cbc";
+  opts.namespace_map[urn_b] = "ubl::invoice";
+  codegen gen(ss, type_map::defaults(), opts);
+  auto files = gen.generate();
+
+  // Find the Invoice file — it should include the CBC header
+  const cpp_file* invoice_file = nullptr;
+  for (const auto& f : files) {
+    if (f.filename == "invoice_2.hpp") {
+      invoice_file = &f;
+      break;
+    }
+  }
+  REQUIRE(invoice_file != nullptr);
+
+  // The include path should use the URN stem, not the full URN
+  bool has_cbc_include = false;
+  for (const auto& inc : invoice_file->includes) {
+    CHECK(inc.path.find(':') == std::string::npos);
+    if (inc.path.find("common_basic_components_2") != std::string::npos)
+      has_cbc_include = true;
+  }
+  CHECK(has_cbc_include);
+}

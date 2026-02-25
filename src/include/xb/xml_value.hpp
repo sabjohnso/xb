@@ -64,6 +64,10 @@ namespace xb {
   std::string
   format(const xb::day_time_duration& value);
 
+  // Binary data (xsd:base64Binary default encoding)
+  std::string
+  format(const std::vector<std::byte>& value);
+
   // Whitespace modes (per XSD type)
   enum class whitespace_mode { preserve, replace, collapse };
 

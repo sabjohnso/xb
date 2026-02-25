@@ -52,7 +52,10 @@ namespace xb {
 
       if (s.generate_equality) {
         if (!s.fields.empty()) os << '\n';
-        os << "  bool operator==(const " << s.name << "&) const = default;\n";
+        // Use elaborated type specifier (const struct X&) to prevent
+        // shadowing when a field name matches the struct name.
+        os << "  bool operator==(const struct " << s.name
+           << "&) const = default;\n";
       }
 
       os << "};\n";

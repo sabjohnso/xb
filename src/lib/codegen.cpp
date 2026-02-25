@@ -14,6 +14,134 @@ namespace xb {
 
   namespace {
 
+    // Collect qnames of complex types that participate in dependency cycles.
+    // A cycle exists when type A references type B (directly or via extension)
+    // and B (transitively) references A.  Fields referencing cycle types need
+    // std::unique_ptr to break the cycle at the C++ level.
+    std::set<qname>
+    find_cycle_types(const schema_set& schemas) {
+      // Build type dependency graph
+      std::vector<qname> type_names;
+      std::unordered_map<std::string, std::size_t> name_to_idx;
+
+      for (const auto& s : schemas.schemas()) {
+        for (const auto& ct : s.complex_types()) {
+          auto key = ct.name().namespace_uri() + "#" + ct.name().local_name();
+          if (name_to_idx.find(key) == name_to_idx.end()) {
+            name_to_idx[key] = type_names.size();
+            type_names.push_back(ct.name());
+          }
+        }
+      }
+
+      std::size_t n = type_names.size();
+      std::vector<std::set<std::size_t>> adj(n);
+
+      // Helper to collect type references from a content model
+      auto collect_refs = [&](const complex_type& ct,
+                              [[maybe_unused]] auto& self) -> void {
+        auto add_ref = [&](const qname& ref) {
+          auto key = ref.namespace_uri() + "#" + ref.local_name();
+          auto it = name_to_idx.find(key);
+          if (it != name_to_idx.end()) {
+            auto src_key =
+                ct.name().namespace_uri() + "#" + ct.name().local_name();
+            auto src_it = name_to_idx.find(src_key);
+            if (src_it != name_to_idx.end())
+              adj[src_it->second].insert(it->second);
+          }
+        };
+
+        // Check base type (extension/restriction)
+        if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
+          add_ref(cc->base_type_name);
+
+          // Check element particles
+          if (cc->content_model.has_value()) {
+            std::function<void(const std::vector<particle>&)> scan_particles;
+            scan_particles = [&](const std::vector<particle>& particles) {
+              for (const auto& p : particles) {
+                std::visit(
+                    [&](const auto& term) {
+                      using T = std::decay_t<decltype(term)>;
+                      if constexpr (std::is_same_v<T, element_decl>) {
+                        add_ref(term.type_name());
+                      } else if constexpr (std::is_same_v<T, element_ref>) {
+                        auto* elem = schemas.find_element(term.ref);
+                        if (elem) add_ref(elem->type_name());
+                      } else if constexpr (std::is_same_v<T, group_ref>) {
+                        auto* g = schemas.find_model_group_def(term.ref);
+                        if (g) scan_particles(g->group().particles());
+                      } else if constexpr (std::is_same_v<
+                                               T,
+                                               std::unique_ptr<model_group>>) {
+                        if (term) scan_particles(term->particles());
+                      }
+                    },
+                    p.term);
+              }
+            };
+            scan_particles(cc->content_model->particles());
+          }
+        }
+        if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
+          add_ref(sc->base_type_name);
+        }
+      };
+
+      for (const auto& s : schemas.schemas())
+        for (const auto& ct : s.complex_types())
+          collect_refs(ct, collect_refs);
+
+      // Tarjan's SCC algorithm
+      std::vector<int> index_arr(n, -1);
+      std::vector<int> lowlink(n, -1);
+      std::vector<bool> on_stack(n, false);
+      std::vector<std::size_t> stack;
+      int current_index = 0;
+      std::set<qname> cycle_types;
+
+      std::function<void(std::size_t)> strongconnect = [&](std::size_t v) {
+        index_arr[v] = lowlink[v] = current_index++;
+        stack.push_back(v);
+        on_stack[v] = true;
+
+        for (auto w : adj[v]) {
+          if (index_arr[w] == -1) {
+            strongconnect(w);
+            lowlink[v] = std::min(lowlink[v], lowlink[w]);
+          } else if (on_stack[w]) {
+            lowlink[v] = std::min(lowlink[v], index_arr[w]);
+          }
+        }
+
+        if (lowlink[v] == index_arr[v]) {
+          std::vector<std::size_t> scc;
+          std::size_t w;
+          do {
+            w = stack.back();
+            stack.pop_back();
+            on_stack[w] = false;
+            scc.push_back(w);
+          } while (w != v);
+
+          // SCCs with more than one node, or self-loops, are cycles
+          if (scc.size() > 1) {
+            for (auto idx : scc)
+              cycle_types.insert(type_names[idx]);
+          } else if (adj[scc[0]].count(scc[0])) {
+            cycle_types.insert(type_names[scc[0]]);
+          }
+        }
+      };
+
+      for (std::size_t i = 0; i < n; ++i) {
+        if (index_arr[i] == -1) strongconnect(i);
+      }
+
+      return cycle_types;
+    }
+
     struct type_resolver {
       const schema_set& schemas;
       const type_map& types;
@@ -23,6 +151,29 @@ namespace xb {
       // Maps variant key (resolved member types) -> canonical C++ type name
       // for deduplicating independent union types with identical members.
       const std::map<std::string, std::string>* union_variant_map = nullptr;
+      // Types that participate in dependency cycles, requiring unique_ptr
+      // to break the cycle in C++.
+      const std::set<qname>* cycle_types = nullptr;
+
+      bool
+      is_cycle_type(const qname& type_name) const {
+        return cycle_types && cycle_types->count(type_name) > 0;
+      }
+
+      // Produce a qualified function name for cross-namespace calls.
+      // Returns "ns::fn_name" when the type is in a different namespace,
+      // or just "fn_name" when it's in the current namespace.
+      std::string
+      qualify_fn(const std::string& prefix, const qname& type_name) const {
+        std::string fn = prefix + to_cpp_identifier(type_name.local_name());
+        if (!type_name.namespace_uri().empty() &&
+            type_name.namespace_uri() != current_ns) {
+          std::string ns =
+              cpp_namespace_for(type_name.namespace_uri(), options);
+          if (!ns.empty()) return ns + "::" + fn;
+        }
+        return fn;
+      }
 
       std::string
       resolve(const qname& type_name) const {
@@ -190,8 +341,9 @@ namespace xb {
                            const qname& containing_type_name) {
       std::string base_type = resolver.resolve(elem.type_name());
 
-      // Check for recursive self-reference
-      bool is_recursive = (elem.type_name() == containing_type_name);
+      // Check for recursive self-reference or mutual recursion (cycle)
+      bool is_recursive = (elem.type_name() == containing_type_name) ||
+                          resolver.is_cycle_type(elem.type_name());
 
       // Nillable -> optional
       if (elem.nillable() && !is_recursive)
@@ -201,9 +353,8 @@ namespace xb {
       if (occurs.is_unbounded() || occurs.max_occurs > 1)
         return "std::vector<" + base_type + ">";
 
-      // Self-reference with optional cardinality -> unique_ptr
-      if (is_recursive && occurs.min_occurs == 0)
-        return "std::unique_ptr<" + base_type + ">";
+      // Cycle/self-reference -> unique_ptr to break the cycle
+      if (is_recursive) return "std::unique_ptr<" + base_type + ">";
 
       if (occurs.min_occurs == 0) return "std::optional<" + base_type + ">";
 
@@ -410,7 +561,16 @@ namespace xb {
         }
 
         variant_type += ">";
-        fields.push_back({variant_type, "choice", ""});
+        if (!first) { // Only add choice field if there are alternatives
+          // Ensure unique field name when multiple choice groups exist
+          std::string name = "choice";
+          int suffix = 2;
+          while (
+              std::any_of(fields.begin(), fields.end(),
+                          [&](const cpp_field& f) { return f.name == name; }))
+            name = "choice_" + std::to_string(suffix++);
+          fields.push_back({variant_type, name, ""});
+        }
         return;
       }
 
@@ -530,6 +690,46 @@ namespace xb {
       return std::nullopt;
     }
 
+    // Follow a simpleContent base type chain to find the ultimate simple
+    // value type.  For example, CBC AmountType extends UDT AmountType which
+    // restricts CCTS AmountType (complexType/simpleContent over xsd:decimal).
+    // This function returns xsd:decimal — the leaf type that can be formatted
+    // with xb::format() and parsed with xb::parse<>().
+    qname
+    resolve_simple_content_value_type(const schema_set& schemas,
+                                      const qname& base_type_name) {
+      auto* ct = schemas.find_complex_type(base_type_name);
+      if (ct && ct->content().kind == content_kind::simple) {
+        if (auto* sc = std::get_if<simple_content>(&ct->content().detail))
+          return resolve_simple_content_value_type(schemas, sc->base_type_name);
+      }
+      return base_type_name;
+    }
+
+    // Collect attributes from a simpleContent base type chain.
+    // For extension: inherit base attributes.  Called before translating
+    // the current type's own attributes.
+    void
+    collect_simple_content_base_attrs(const schema_set& schemas,
+                                      const qname& base_name,
+                                      std::vector<cpp_field>& fields,
+                                      const type_resolver& resolver) {
+      auto* base_ct = schemas.find_complex_type(base_name);
+      if (!base_ct) return;
+      if (base_ct->content().kind != content_kind::simple) return;
+
+      // Recurse into the base's base first
+      if (auto* sc = std::get_if<simple_content>(&base_ct->content().detail)) {
+        if (sc->derivation == derivation_method::extension)
+          collect_simple_content_base_attrs(schemas, sc->base_type_name, fields,
+                                            resolver);
+      }
+
+      translate_attributes(base_ct->attributes(), fields, resolver);
+      translate_attribute_group_refs(base_ct->attribute_group_refs(), fields,
+                                     resolver);
+    }
+
     cpp_decl
     translate_complex_type(const complex_type& ct,
                            const type_resolver& resolver,
@@ -548,8 +748,17 @@ namespace xb {
       // Handle simpleContent
       if (ct.content().kind == content_kind::simple) {
         if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
-          std::string value_type = resolver.resolve(sc->base_type_name);
-          s.fields.push_back({value_type, "value", ""});
+          // Resolve through the simpleContent chain to find the ultimate
+          // simple value type (e.g., xsd:decimal for CBC AmountType ->
+          // UDT AmountType -> CCTS AmountType -> xsd:decimal).
+          qname value_qname = resolve_simple_content_value_type(
+              resolver.schemas, sc->base_type_name);
+          s.fields.push_back({resolver.resolve(value_qname), "value", ""});
+
+          // For extensions, inherit base type attributes
+          if (sc->derivation == derivation_method::extension)
+            collect_simple_content_base_attrs(
+                resolver.schemas, sc->base_type_name, s.fields, resolver);
         }
 
         translate_attributes(ct.attributes(), s.fields, resolver);
@@ -889,6 +1098,32 @@ namespace xb {
         includes.insert("<cstddef>");
     }
 
+    // Extract the last segment of a namespace URI, treating both '/' and ':'
+    // as separators.  This handles URL-style namespaces
+    // (http://example.com/order) and URN-style namespaces
+    // (urn:oasis:...:Invoice-2) uniformly. Trailing '#' (fragment identifiers)
+    // are stripped before extracting.
+    std::string
+    ns_stem(const std::string& ns) {
+      std::string cleaned = ns;
+      while (!cleaned.empty() && cleaned.back() == '#')
+        cleaned.pop_back();
+
+      auto last_slash = cleaned.rfind('/');
+      auto last_colon = cleaned.rfind(':');
+      auto last_sep = std::string::npos;
+      if (last_slash != std::string::npos && last_colon != std::string::npos)
+        last_sep = std::max(last_slash, last_colon);
+      else if (last_slash != std::string::npos)
+        last_sep = last_slash;
+      else
+        last_sep = last_colon;
+
+      if (last_sep != std::string::npos)
+        return to_snake_case(cleaned.substr(last_sep + 1));
+      return to_snake_case(cleaned);
+    }
+
     void
     add_cross_namespace_includes(std::set<std::string>& includes,
                                  const std::set<std::string>& referenced_ns,
@@ -896,8 +1131,7 @@ namespace xb {
       for (const auto& ref_ns : referenced_ns) {
         for (const auto& s : schemas) {
           if (s.target_namespace() == ref_ns) {
-            std::string filename =
-                to_snake_case(ref_ns.substr(ref_ns.rfind('/') + 1)) + ".hpp";
+            std::string filename = ns_stem(ref_ns) + ".hpp";
             includes.insert("\"" + filename + "\"");
           }
         }
@@ -1006,15 +1240,7 @@ namespace xb {
     std::string
     stem_for_namespace(const std::string& target_ns) {
       if (target_ns.empty()) return "generated";
-
-      auto last_sep = target_ns.rfind('/');
-      std::string segment;
-      if (last_sep != std::string::npos)
-        segment = target_ns.substr(last_sep + 1);
-      else
-        segment = target_ns;
-
-      return to_snake_case(segment);
+      return ns_stem(target_ns);
     }
 
     // Get the name of a declaration (for dependency resolution)
@@ -1045,35 +1271,44 @@ namespace xb {
       std::set<std::string> deps;
 
       auto extract_type_refs = [&](const std::string& type_expr) {
-        // Extract identifiers that could be type names
-        // Look for bare identifiers (not in std:: or xb:: namespaces)
+        // Extract unqualified identifiers that could be local type names.
+        // Skip namespace-qualified names (preceded by ::) since those refer
+        // to types in other namespaces and aren't local ordering deps.
         std::string token;
+        std::size_t token_start = 0;
         for (std::size_t i = 0; i < type_expr.size(); ++i) {
           char c = type_expr[i];
           if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') {
+            if (token.empty()) token_start = i;
             token += c;
           } else {
-            if (!token.empty() && token != "std" && token != "xb" &&
-                token != "const" && token != "bool" && token != "int" &&
-                token != "float" && token != "double" && token != "void" &&
-                token != "char")
-              deps.insert(token);
+            if (!token.empty()) {
+              bool qualified = token_start >= 2 &&
+                               type_expr[token_start - 1] == ':' &&
+                               type_expr[token_start - 2] == ':';
+              if (!qualified) deps.insert(token);
+            }
             token.clear();
           }
         }
-        if (!token.empty() && token != "std" && token != "xb" &&
-            token != "const" && token != "bool" && token != "int" &&
-            token != "float" && token != "double" && token != "void" &&
-            token != "char")
-          deps.insert(token);
+        if (!token.empty()) {
+          bool qualified = token_start >= 2 &&
+                           type_expr[token_start - 1] == ':' &&
+                           type_expr[token_start - 2] == ':';
+          if (!qualified) deps.insert(token);
+        }
       };
 
       std::visit(
           [&](const auto& d) {
             using T = std::decay_t<decltype(d)>;
             if constexpr (std::is_same_v<T, cpp_struct>) {
-              for (const auto& f : d.fields)
+              for (const auto& f : d.fields) {
+                // Skip unique_ptr fields — they only need a forward
+                // declaration of T, not a complete type definition.
+                if (f.type.find("unique_ptr") != std::string::npos) continue;
                 extract_type_refs(f.type);
+              }
             } else if constexpr (std::is_same_v<T, cpp_type_alias>) {
               extract_type_refs(d.target);
             }
@@ -1083,9 +1318,14 @@ namespace xb {
       return deps;
     }
 
-    // Topological sort of declarations based on type dependencies
+    // Topological sort of declarations based on type dependencies.
+    // Since unique_ptr fields are excluded from dependency extraction
+    // (they only need forward declarations), the dependency graph is
+    // acyclic after cycle-breaking. Cycle types get forward declarations
+    // at the top, then all types are emitted in topological order.
     std::vector<cpp_decl>
-    order_declarations(std::vector<cpp_decl> decls) {
+    order_declarations(std::vector<cpp_decl> decls,
+                       const std::set<std::string>& cycle_type_names = {}) {
       if (decls.size() <= 1) return decls;
 
       // Build name -> index map
@@ -1093,7 +1333,15 @@ namespace xb {
       for (std::size_t i = 0; i < decls.size(); ++i)
         name_to_idx[decl_name(decls[i])] = i;
 
-      // Build adjacency list (dependency edges)
+      // Identify which indices are cycle types
+      std::set<std::size_t> cycle_indices;
+      for (std::size_t i = 0; i < decls.size(); ++i) {
+        if (cycle_type_names.count(decl_name(decls[i])))
+          cycle_indices.insert(i);
+      }
+
+      // Build adjacency list (hard dependency edges only — unique_ptr
+      // fields are already excluded by decl_dependencies)
       std::vector<std::set<std::size_t>> deps(decls.size());
       for (std::size_t i = 0; i < decls.size(); ++i) {
         for (const auto& dep_name : decl_dependencies(decls[i])) {
@@ -1103,48 +1351,160 @@ namespace xb {
         }
       }
 
-      // Kahn's algorithm for topological sort
-      std::vector<std::size_t> in_degree(decls.size(), 0);
+      // Kahn's topological sort on all declarations
+      std::vector<std::size_t> all_nodes;
+      all_nodes.reserve(decls.size());
       for (std::size_t i = 0; i < decls.size(); ++i)
-        for (auto dep : deps[i])
-          (void)dep; // deps[i] are the nodes i depends on
+        all_nodes.push_back(i);
 
-      // Recompute: for each node, count how many others depend on it
-      std::vector<std::vector<std::size_t>> reverse_deps(decls.size());
-      for (std::size_t i = 0; i < decls.size(); ++i) {
-        for (auto dep : deps[i])
-          reverse_deps[dep].push_back(i);
-        in_degree[i] = deps[i].size();
-      }
+      std::set<std::size_t> node_set(all_nodes.begin(), all_nodes.end());
+      std::unordered_map<std::size_t, std::size_t> in_deg;
+      std::unordered_map<std::size_t, std::vector<std::size_t>> rev;
 
-      std::vector<std::size_t> order;
-      std::vector<std::size_t> queue;
-      for (std::size_t i = 0; i < decls.size(); ++i) {
-        if (in_degree[i] == 0) queue.push_back(i);
-      }
-
-      while (!queue.empty()) {
-        auto idx = queue.front();
-        queue.erase(queue.begin());
-        order.push_back(idx);
-
-        for (auto dependent : reverse_deps[idx]) {
-          if (--in_degree[dependent] == 0) queue.push_back(dependent);
+      for (auto i : all_nodes) {
+        in_deg[i] = 0;
+        for (auto dep : deps[i]) {
+          if (node_set.count(dep)) {
+            in_deg[i]++;
+            rev[dep].push_back(i);
+          }
         }
       }
 
-      // If cycle detected (not all nodes visited), append remaining
-      if (order.size() < decls.size()) {
-        std::set<std::size_t> visited(order.begin(), order.end());
-        for (std::size_t i = 0; i < decls.size(); ++i) {
-          if (visited.find(i) == visited.end()) order.push_back(i);
+      std::vector<std::size_t> sorted;
+      std::vector<std::size_t> q;
+      for (auto i : all_nodes) {
+        if (in_deg[i] == 0) q.push_back(i);
+      }
+
+      while (!q.empty()) {
+        auto idx = q.front();
+        q.erase(q.begin());
+        sorted.push_back(idx);
+        for (auto dependent : rev[idx]) {
+          if (--in_deg[dependent] == 0) q.push_back(dependent);
         }
       }
 
+      // Collect any remaining types not reached by Kahn's (hard-dep
+      // cycles, e.g. party_type <-> power_of_attorney_type via vector).
+      std::set<std::size_t> sorted_set(sorted.begin(), sorted.end());
+      std::vector<std::size_t> remaining;
+      for (auto i : all_nodes) {
+        if (!sorted_set.count(i)) remaining.push_back(i);
+      }
+
+      // For remaining types, find the actual cycle members using Tarjan's
+      // SCC, then re-sort with cycle-to-cycle edges removed.
+      std::set<std::size_t> hard_cycle_members;
+      if (!remaining.empty()) {
+        // Build subgraph for remaining types
+        std::set<std::size_t> rem_set(remaining.begin(), remaining.end());
+
+        // Tarjan's SCC on remaining subgraph
+        std::unordered_map<std::size_t, int> idx_arr, ll;
+        std::unordered_map<std::size_t, bool> on_stk;
+        std::vector<std::size_t> stk;
+        int cur_idx = 0;
+
+        std::function<void(std::size_t)> scc_visit = [&](std::size_t v) {
+          idx_arr[v] = ll[v] = cur_idx++;
+          stk.push_back(v);
+          on_stk[v] = true;
+          for (auto w : deps[v]) {
+            if (!rem_set.count(w)) continue;
+            if (idx_arr.find(w) == idx_arr.end()) {
+              scc_visit(w);
+              ll[v] = std::min(ll[v], ll[w]);
+            } else if (on_stk[w]) {
+              ll[v] = std::min(ll[v], idx_arr[w]);
+            }
+          }
+          if (ll[v] == idx_arr[v]) {
+            std::vector<std::size_t> scc;
+            std::size_t w;
+            do {
+              w = stk.back();
+              stk.pop_back();
+              on_stk[w] = false;
+              scc.push_back(w);
+            } while (w != v);
+            if (scc.size() > 1) {
+              for (auto x : scc)
+                hard_cycle_members.insert(x);
+            } else if (deps[scc[0]].count(scc[0]) && rem_set.count(scc[0])) {
+              hard_cycle_members.insert(scc[0]);
+            }
+          }
+        };
+
+        for (auto i : remaining) {
+          if (idx_arr.find(i) == idx_arr.end()) scc_visit(i);
+        }
+
+        // Re-sort remaining types with cycle-to-cycle edges removed
+        std::unordered_map<std::size_t, std::size_t> rem_in_deg;
+        std::unordered_map<std::size_t, std::vector<std::size_t>> rem_rev;
+        for (auto i : remaining) {
+          rem_in_deg[i] = 0;
+          for (auto dep : deps[i]) {
+            if (rem_set.count(dep)) {
+              // Skip edges between hard cycle members
+              if (hard_cycle_members.count(i) && hard_cycle_members.count(dep))
+                continue;
+              rem_in_deg[i]++;
+              rem_rev[dep].push_back(i);
+            }
+          }
+        }
+
+        std::vector<std::size_t> rem_sorted;
+        std::vector<std::size_t> rem_q;
+        for (auto i : remaining) {
+          if (rem_in_deg[i] == 0) rem_q.push_back(i);
+        }
+        while (!rem_q.empty()) {
+          auto x = rem_q.front();
+          rem_q.erase(rem_q.begin());
+          rem_sorted.push_back(x);
+          for (auto dependent : rem_rev[x]) {
+            if (--rem_in_deg[dependent] == 0) rem_q.push_back(dependent);
+          }
+        }
+        // Append any still-remaining (deep cascading cycles)
+        for (auto i : remaining) {
+          if (std::find(rem_sorted.begin(), rem_sorted.end(), i) ==
+              rem_sorted.end())
+            rem_sorted.push_back(i);
+        }
+        remaining = std::move(rem_sorted);
+      }
+
+      // Build result
       std::vector<cpp_decl> result;
-      result.reserve(decls.size());
-      for (auto idx : order)
+      result.reserve(decls.size() + cycle_indices.size() +
+                     hard_cycle_members.size());
+
+      // Forward declare XSD-identified cycle types
+      for (auto idx : cycle_indices) {
+        if (auto* s = std::get_if<cpp_struct>(&decls[idx]))
+          result.push_back(cpp_forward_decl{s->name});
+      }
+
+      // Forward declare hard-dep cycle types (not already forward-declared)
+      for (auto idx : hard_cycle_members) {
+        if (!cycle_indices.count(idx)) {
+          if (auto* s = std::get_if<cpp_struct>(&decls[idx]))
+            result.push_back(cpp_forward_decl{s->name});
+        }
+      }
+
+      // Emit Kahn-sorted types, then re-sorted remaining types
+      for (auto idx : sorted)
         result.push_back(std::move(decls[idx]));
+      for (auto idx : remaining)
+        result.push_back(std::move(decls[idx]));
+
       return result;
     }
 
@@ -1231,18 +1591,17 @@ namespace xb {
     void
     emit_write_element(std::string& body, const write_element_info& info,
                        const schema_set& schemas,
-                       const type_resolver& /*resolver*/) {
+                       const type_resolver& resolver) {
       std::string qn = "xb::qname{\"" + info.element_name.namespace_uri() +
                        "\", \"" + info.element_name.local_name() + "\"}";
       std::string field = "value." + info.field_name;
 
       bool is_complex = is_complex_type(schemas, info.type_name);
 
-      if (info.is_recursive && info.occurs.min_occurs == 0 &&
-          !info.occurs.is_unbounded() && info.occurs.max_occurs <= 1) {
-        // unique_ptr field
-        std::string write_fn =
-            "write_" + to_cpp_identifier(info.type_name.local_name());
+      if (info.is_recursive && !info.occurs.is_unbounded() &&
+          info.occurs.max_occurs <= 1) {
+        // unique_ptr field (cycle-breaking)
+        std::string write_fn = resolver.qualify_fn("write_", info.type_name);
         body += "  if (" + field + ") {\n";
         body += "    writer.start_element(" + qn + ");\n";
         body += "    " + write_fn + "(*" + field + ", writer);\n";
@@ -1255,8 +1614,7 @@ namespace xb {
         // vector field
         body += "  for (const auto& item : " + field + ") {\n";
         if (is_complex) {
-          std::string write_fn =
-              "write_" + to_cpp_identifier(info.type_name.local_name());
+          std::string write_fn = resolver.qualify_fn("write_", info.type_name);
           body += "    writer.start_element(" + qn + ");\n";
           body += "    " + write_fn + "(item, writer);\n";
           body += "    writer.end_element();\n";
@@ -1272,8 +1630,7 @@ namespace xb {
         // optional field
         body += "  if (" + field + ") {\n";
         if (is_complex) {
-          std::string write_fn =
-              "write_" + to_cpp_identifier(info.type_name.local_name());
+          std::string write_fn = resolver.qualify_fn("write_", info.type_name);
           body += "    writer.start_element(" + qn + ");\n";
           body += "    " + write_fn + "(*" + field + ", writer);\n";
           body += "    writer.end_element();\n";
@@ -1287,8 +1644,7 @@ namespace xb {
 
       // Required field
       if (is_complex) {
-        std::string write_fn =
-            "write_" + to_cpp_identifier(info.type_name.local_name());
+        std::string write_fn = resolver.qualify_fn("write_", info.type_name);
         body += "  writer.start_element(" + qn + ");\n";
         body += "  " + write_fn + "(" + field + ", writer);\n";
         body += "  writer.end_element();\n";
@@ -1334,8 +1690,7 @@ namespace xb {
                     body += "      writer.start_element(" + qn + ");\n";
                     if (is_complex_type(resolver.schemas, alt.type_name)) {
                       std::string write_fn =
-                          "write_" +
-                          to_cpp_identifier(alt.type_name.local_name());
+                          resolver.qualify_fn("write_", alt.type_name);
                       body += "      " + write_fn + "(v, writer);\n";
                     } else {
                       body +=
@@ -1367,7 +1722,9 @@ namespace xb {
                                     term.nillable(), false},
                                    resolver.schemas, resolver);
               } else {
-                bool is_recursive = (term.type_name() == containing_type_name);
+                bool is_recursive =
+                    (term.type_name() == containing_type_name) ||
+                    resolver.is_cycle_type(term.type_name());
                 emit_write_element(body,
                                    {to_cpp_identifier(term.name().local_name()),
                                     term.name(), term.type_name(), p.occurs,
@@ -1399,8 +1756,7 @@ namespace xb {
                                         m->name().local_name() + "\"}";
                       body += "      writer.start_element(" + mqn + ");\n";
                       std::string write_fn =
-                          "write_" +
-                          to_cpp_identifier(m->type_name().local_name());
+                          resolver.qualify_fn("write_", m->type_name());
                       body += "      " + write_fn + "(v, writer);\n";
                       body += "      writer.end_element();\n";
                       body += "    }\n";
@@ -1427,7 +1783,8 @@ namespace xb {
               emit_write_element(body,
                                  {to_cpp_identifier(elem->name().local_name()),
                                   elem->name(), elem->type_name(), p.occurs,
-                                  elem->nillable(), false},
+                                  elem->nillable(),
+                                  resolver.is_cycle_type(elem->type_name())},
                                  resolver.schemas, resolver);
             } else if constexpr (std::is_same_v<T, group_ref>) {
               auto* group_def = resolver.schemas.find_model_group_def(term.ref);
@@ -1484,8 +1841,7 @@ namespace xb {
                     body += "      for (const auto& item : v) {\n";
                     if (is_complex) {
                       std::string write_fn =
-                          "write_" +
-                          to_cpp_identifier(term.type_name().local_name());
+                          resolver.qualify_fn("write_", term.type_name());
                       body += "        writer.start_element(" + qn + ");\n";
                       body += "        " + write_fn + "(item, writer);\n";
                       body += "        writer.end_element();\n";
@@ -1497,8 +1853,7 @@ namespace xb {
                     body += "      }\n";
                   } else if (is_complex) {
                     std::string write_fn =
-                        "write_" +
-                        to_cpp_identifier(term.type_name().local_name());
+                        resolver.qualify_fn("write_", term.type_name());
                     body += "      writer.start_element(" + qn + ");\n";
                     body += "      " + write_fn + "(v, writer);\n";
                     body += "      writer.end_element();\n";
@@ -1525,8 +1880,7 @@ namespace xb {
                       body += "    " + kw + " constexpr (std::is_same_v<T, " +
                               cpp_type + ">) {\n";
                       std::string write_fn =
-                          "write_" +
-                          to_cpp_identifier(m->type_name().local_name());
+                          resolver.qualify_fn("write_", m->type_name());
                       body += "      writer.start_element(" + mqn + ");\n";
                       body += "      " + write_fn + "(v, writer);\n";
                       body += "      writer.end_element();\n";
@@ -1543,8 +1897,7 @@ namespace xb {
                             cpp_type + ">) {\n";
                     if (is_complex_type(resolver.schemas, elem->type_name())) {
                       std::string write_fn =
-                          "write_" +
-                          to_cpp_identifier(elem->type_name().local_name());
+                          resolver.qualify_fn("write_", elem->type_name());
                       body += "      writer.start_element(" + qn + ");\n";
                       body += "      " + write_fn + "(v, writer);\n";
                       body += "      writer.end_element();\n";
@@ -1639,6 +1992,27 @@ namespace xb {
                                       schemas, resolver);
     }
 
+    // Emit attribute writes from a simpleContent base type chain.
+    void
+    emit_write_simple_content_base_attrs(std::string& body,
+                                         const schema_set& schemas,
+                                         const qname& base_name,
+                                         const type_resolver& resolver) {
+      auto* base_ct = schemas.find_complex_type(base_name);
+      if (!base_ct) return;
+      if (base_ct->content().kind != content_kind::simple) return;
+
+      if (auto* sc = std::get_if<simple_content>(&base_ct->content().detail)) {
+        if (sc->derivation == derivation_method::extension)
+          emit_write_simple_content_base_attrs(body, schemas,
+                                               sc->base_type_name, resolver);
+      }
+
+      emit_write_attributes(body, base_ct->attributes(), schemas, resolver);
+      emit_write_attribute_group_refs(body, base_ct->attribute_group_refs(),
+                                      schemas, resolver);
+    }
+
     cpp_function
     generate_write_function(const complex_type& ct,
                             const type_resolver& resolver,
@@ -1654,13 +2028,22 @@ namespace xb {
 
       // Handle simpleContent
       if (ct.content().kind == content_kind::simple) {
+        if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
+          // For extensions, write base type attributes first
+          if (sc->derivation == derivation_method::extension)
+            emit_write_simple_content_base_attrs(body, resolver.schemas,
+                                                 sc->base_type_name, resolver);
+        }
         emit_write_attributes(body, ct.attributes(), resolver.schemas,
                               resolver);
         emit_write_attribute_group_refs(body, ct.attribute_group_refs(),
                                         resolver.schemas, resolver);
 
         if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
-          std::string fmt = format_expr("value.value", sc->base_type_name,
+          // Resolve through the chain to get the ultimate simple type
+          qname value_qname = resolve_simple_content_value_type(
+              resolver.schemas, sc->base_type_name);
+          std::string fmt = format_expr("value.value", value_qname,
                                         resolver.schemas, resolver);
           body += "  writer.characters(" + fmt + ");\n";
         }
@@ -1803,11 +2186,10 @@ namespace xb {
       bool is_complex = is_complex_type(schemas, info.type_name);
       std::string cpp_type = resolver.resolve(info.type_name);
 
-      if (info.is_recursive && info.occurs.min_occurs == 0 &&
-          !info.occurs.is_unbounded() && info.occurs.max_occurs <= 1) {
-        // unique_ptr field
-        std::string read_fn =
-            "read_" + to_cpp_identifier(info.type_name.local_name());
+      if (info.is_recursive && !info.occurs.is_unbounded() &&
+          info.occurs.max_occurs <= 1) {
+        // unique_ptr field (cycle-breaking)
+        std::string read_fn = resolver.qualify_fn("read_", info.type_name);
         return "      " + field + " = std::make_unique<" + cpp_type + ">(" +
                read_fn + "(reader));\n";
       }
@@ -1815,8 +2197,7 @@ namespace xb {
       if (info.occurs.is_unbounded() || info.occurs.max_occurs > 1) {
         // vector field -> push_back
         if (is_complex) {
-          std::string read_fn =
-              "read_" + to_cpp_identifier(info.type_name.local_name());
+          std::string read_fn = resolver.qualify_fn("read_", info.type_name);
           return "      " + field + ".push_back(" + read_fn + "(reader));\n";
         }
         return "      " + field + ".push_back(xb::read_simple<" + cpp_type +
@@ -1825,8 +2206,7 @@ namespace xb {
 
       // Required or optional (both assign directly — optional::operator= works)
       if (is_complex) {
-        std::string read_fn =
-            "read_" + to_cpp_identifier(info.type_name.local_name());
+        std::string read_fn = resolver.qualify_fn("read_", info.type_name);
         return "      " + field + " = " + read_fn + "(reader);\n";
       }
       return "      " + field + " = xb::read_simple<" + cpp_type +
@@ -1869,8 +2249,7 @@ namespace xb {
                         is_complex_type(resolver.schemas, alt.type_name);
                     if (is_complex) {
                       std::string read_fn =
-                          "read_" +
-                          to_cpp_identifier(alt.type_name.local_name());
+                          resolver.qualify_fn("read_", alt.type_name);
                       if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
                         body += "        " + field + ".push_back(" + read_fn +
                                 "(reader));\n";
@@ -1927,7 +2306,8 @@ namespace xb {
                 } else {
                   // No alternatives — normal read path
                   bool is_recursive =
-                      (term.type_name() == containing_type_name);
+                      (term.type_name() == containing_type_name) ||
+                      resolver.is_cycle_type(term.type_name());
                   body += emit_read_element(
                       {to_cpp_identifier(term.name().local_name()), term.name(),
                        term.type_name(), p.occurs, term.nillable(),
@@ -1956,8 +2336,7 @@ namespace xb {
                     std::string kw = first_branch ? "if" : "else if";
                     body += "    " + kw + " (name == " + mqn + ") {\n";
                     std::string read_fn =
-                        "read_" +
-                        to_cpp_identifier(m->type_name().local_name());
+                        resolver.qualify_fn("read_", m->type_name());
                     if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
                       body += "      " + field + ".push_back(" + read_fn +
                               "(reader));\n";
@@ -1981,7 +2360,8 @@ namespace xb {
               body += "    " + kw + " (name == " + qn + ") {\n";
               body += emit_read_element(
                   {to_cpp_identifier(elem->name().local_name()), elem->name(),
-                   elem->type_name(), p.occurs, elem->nillable(), false},
+                   elem->type_name(), p.occurs, elem->nillable(),
+                   resolver.is_cycle_type(elem->type_name())},
                   resolver.schemas, resolver);
               body += "    }\n";
               first_branch = false;
@@ -2043,8 +2423,7 @@ namespace xb {
                     std::string read_expr;
                     if (is_complex)
                       read_expr =
-                          "read_" +
-                          to_cpp_identifier(term.type_name().local_name()) +
+                          resolver.qualify_fn("read_", term.type_name()) +
                           "(reader)";
                     else
                       read_expr = "xb::read_simple<" + cpp_type + ">(reader)";
@@ -2057,8 +2436,7 @@ namespace xb {
                     body += "      }\n";
                   } else if (is_complex) {
                     std::string read_fn =
-                        "read_" +
-                        to_cpp_identifier(term.type_name().local_name());
+                        resolver.qualify_fn("read_", term.type_name());
                     body += "      result.choice = " + read_fn + "(reader);\n";
                   } else {
                     body += "      result.choice = xb::read_simple<" +
@@ -2080,8 +2458,7 @@ namespace xb {
                       std::string kw = first_branch ? "if" : "else if";
                       body += "    " + kw + " (name == " + mqn + ") {\n";
                       std::string read_fn =
-                          "read_" +
-                          to_cpp_identifier(m->type_name().local_name());
+                          resolver.qualify_fn("read_", m->type_name());
                       body +=
                           "      result.choice = " + read_fn + "(reader);\n";
                       body += "    }\n";
@@ -2098,8 +2475,7 @@ namespace xb {
                     body += "    " + kw + " (name == " + qn + ") {\n";
                     if (is_complex) {
                       std::string read_fn =
-                          "read_" +
-                          to_cpp_identifier(elem->type_name().local_name());
+                          resolver.qualify_fn("read_", elem->type_name());
                       body +=
                           "      result.choice = " + read_fn + "(reader);\n";
                     } else {
@@ -2207,6 +2583,27 @@ namespace xb {
       }
     }
 
+    // Emit attribute reads from a simpleContent base type chain.
+    void
+    emit_read_simple_content_base_attrs(std::string& body,
+                                        const schema_set& schemas,
+                                        const qname& base_name,
+                                        const type_resolver& resolver) {
+      auto* base_ct = schemas.find_complex_type(base_name);
+      if (!base_ct) return;
+      if (base_ct->content().kind != content_kind::simple) return;
+
+      if (auto* sc = std::get_if<simple_content>(&base_ct->content().detail)) {
+        if (sc->derivation == derivation_method::extension)
+          emit_read_simple_content_base_attrs(body, schemas, sc->base_type_name,
+                                              resolver);
+      }
+
+      emit_read_attributes(body, base_ct->attributes(), schemas, resolver);
+      emit_read_attribute_group_refs(body, base_ct->attribute_group_refs(),
+                                     schemas, resolver);
+    }
+
     cpp_function
     generate_read_function(const complex_type& ct,
                            const type_resolver& resolver,
@@ -2222,12 +2619,21 @@ namespace xb {
 
       // Handle simpleContent
       if (ct.content().kind == content_kind::simple) {
+        if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
+          // For extensions, read base type attributes first
+          if (sc->derivation == derivation_method::extension)
+            emit_read_simple_content_base_attrs(body, resolver.schemas,
+                                                sc->base_type_name, resolver);
+        }
         emit_read_attributes(body, ct.attributes(), resolver.schemas, resolver);
         emit_read_attribute_group_refs(body, ct.attribute_group_refs(),
                                        resolver.schemas, resolver);
 
         if (auto* sc = std::get_if<simple_content>(&ct.content().detail)) {
-          std::string cpp_type = resolver.resolve(sc->base_type_name);
+          // Resolve through the chain to get the ultimate simple type
+          qname value_qname = resolve_simple_content_value_type(
+              resolver.schemas, sc->base_type_name);
+          std::string cpp_type = resolver.resolve(value_qname);
           body += "  result.value = xb::parse<" + cpp_type +
                   ">(xb::read_text(reader));\n";
         }
@@ -2578,7 +2984,8 @@ namespace xb {
     // the same name. Merging combines their declarations and re-orders
     // type declarations to resolve cross-schema dependencies.
     std::vector<cpp_file>
-    merge_same_name_files(std::vector<cpp_file> files) {
+    merge_same_name_files(std::vector<cpp_file> files,
+                          const std::set<std::string>& cycle_names = {}) {
       std::vector<std::string> key_order;
       std::map<std::string, cpp_file> by_key;
 
@@ -2633,7 +3040,7 @@ namespace xb {
             }
           }
 
-          auto ordered = order_declarations(std::move(types));
+          auto ordered = order_declarations(std::move(types), cycle_names);
 
           ns.declarations.clear();
           ns.declarations.reserve(ordered.size() + functions.size());
@@ -2661,6 +3068,14 @@ namespace xb {
     // read functions in one schema can find parse functions from another.
     std::map<std::string, std::string> union_variant_map;
 
+    // Pre-compute types in dependency cycles for unique_ptr cycle-breaking
+    auto cycle_types = find_cycle_types(schemas_);
+
+    // Convert cycle qnames to C++ identifier names for order_declarations
+    std::set<std::string> cycle_type_cpp_names;
+    for (const auto& ct : cycle_types)
+      cycle_type_cpp_names.insert(to_cpp_identifier(ct.local_name()));
+
     for (const auto& s : schemas_.schemas()) {
       std::set<std::string> referenced_namespaces;
 
@@ -2669,7 +3084,8 @@ namespace xb {
                              options_,
                              s.target_namespace(),
                              referenced_namespaces,
-                             &union_variant_map};
+                             &union_variant_map,
+                             &cycle_types};
 
       std::vector<cpp_decl> declarations;
       std::set<std::string> seen_variant_types;
@@ -2689,7 +3105,8 @@ namespace xb {
         declarations.push_back(translate_complex_type(ct, resolver, s));
 
       // Order type declarations first (structs, enums, aliases, forward decls)
-      auto ordered_types = order_declarations(std::move(declarations));
+      auto ordered_types =
+          order_declarations(std::move(declarations), cycle_type_cpp_names);
 
       // Build a map from type name -> complex_type for ordered generation
       std::unordered_map<std::string, const complex_type*> ct_by_name;
@@ -2897,7 +3314,7 @@ namespace xb {
       }
     }
 
-    return merge_same_name_files(std::move(files));
+    return merge_same_name_files(std::move(files), cycle_type_cpp_names);
   }
 
 } // namespace xb

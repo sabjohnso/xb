@@ -100,7 +100,7 @@ struct point {
   int x;
   int y;
 
-  bool operator==(const point&) const = default;
+  bool operator==(const struct point&) const = default;
 };
 
 } // namespace ns
@@ -251,7 +251,7 @@ TEST_CASE("complete file", "[cpp_writer]") {
   CHECK(result.find("struct order {") != std::string::npos);
   CHECK(result.find("std::string id;") != std::string::npos);
   CHECK(result.find("order_status status;") != std::string::npos);
-  CHECK(result.find("bool operator==(const order&) const = default;") !=
+  CHECK(result.find("bool operator==(const struct order&) const = default;") !=
         std::string::npos);
   CHECK(result.find("} // namespace trading") != std::string::npos);
 }

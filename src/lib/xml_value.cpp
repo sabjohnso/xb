@@ -309,6 +309,17 @@ namespace xb {
     return value.to_string();
   }
 
+  std::string
+  format(const std::vector<std::byte>& value) {
+    return format_base64_binary(value);
+  }
+
+  template <>
+  std::vector<std::byte>
+  parse<std::vector<std::byte>>(std::string_view text) {
+    return parse_base64_binary(text);
+  }
+
   // ===== whitespace =====
 
   std::string
