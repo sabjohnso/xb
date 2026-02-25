@@ -11,11 +11,18 @@
 #include <xb/expat_reader.hpp>
 #include <xb/naming.hpp>
 #include <xb/ostream_writer.hpp>
+#include <xb/schema_fetcher.hpp>
 #include <xb/schema_parser.hpp>
 #include <xb/schema_set.hpp>
 #include <xb/type_map.hpp>
 
+#ifdef XB_HAS_CURL
+#include <curl/curl.h>
+#endif
+
+#include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -416,9 +423,226 @@ run_sample_doc(const sample_doc_options& opts) {
   return exit_success;
 }
 
+// ---------------------------------------------------------------------------
+// fetch subcommand
+// ---------------------------------------------------------------------------
+
+struct fetch_cli_options {
+  std::string url_or_path;
+  std::string output_dir = ".";
+  std::string manifest_file;
+  bool fail_fast = false;
+  bool show_help = false;
+};
+
+static void
+print_fetch_usage(std::ostream& os) {
+  os << "Usage: xb fetch <url-or-path> [options]\n"
+     << "\n"
+     << "Options:\n"
+     << "  --output-dir <dir>     Output directory (default: current "
+        "directory)\n"
+     << "  --manifest <file>      Write JSON manifest to file\n"
+     << "  --fail-fast            Stop on first fetch error (default: "
+        "best-effort)\n"
+     << "  -h, --help             Show this help message\n";
+}
+
+static fetch_cli_options
+parse_fetch_args(int argc, char* argv[]) {
+  fetch_cli_options opts;
+
+  // argv[0] is "xb", argv[1] is "fetch", start at 2
+  for (int i = 2; i < argc; ++i) {
+    std::string arg = argv[i];
+
+    if (arg == "-h" || arg == "--help") {
+      opts.show_help = true;
+      return opts;
+    }
+
+    if (arg == "--output-dir") {
+      if (i + 1 >= argc) {
+        std::cerr << "xb fetch: --output-dir requires an argument\n";
+        std::exit(exit_usage);
+      }
+      opts.output_dir = argv[++i];
+      continue;
+    }
+
+    if (arg == "--manifest") {
+      if (i + 1 >= argc) {
+        std::cerr << "xb fetch: --manifest requires an argument\n";
+        std::exit(exit_usage);
+      }
+      opts.manifest_file = argv[++i];
+      continue;
+    }
+
+    if (arg == "--fail-fast") {
+      opts.fail_fast = true;
+      continue;
+    }
+
+    if (arg[0] == '-') {
+      std::cerr << "xb fetch: unknown option: " << arg << "\n";
+      std::exit(exit_usage);
+    }
+
+    opts.url_or_path = arg;
+  }
+
+  return opts;
+}
+
+static bool
+is_http_url(const std::string& s) {
+  return s.starts_with("http://") || s.starts_with("https://");
+}
+
+#ifdef XB_HAS_CURL
+static std::size_t
+xb_curl_write_cb(char* ptr, std::size_t size, std::size_t nmemb,
+                 void* userdata) {
+  auto* buf = static_cast<std::string*>(userdata);
+  buf->append(ptr, size * nmemb);
+  return size * nmemb;
+}
+
+static std::string
+curl_fetch(const std::string& url) {
+  CURL* curl = curl_easy_init();
+  if (!curl) throw std::runtime_error("curl_easy_init failed");
+
+  std::string response;
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, xb_curl_write_cb);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    std::string err = curl_easy_strerror(res);
+    curl_easy_cleanup(curl);
+    throw std::runtime_error("fetch failed: " + url + ": " + err);
+  }
+
+  curl_easy_cleanup(curl);
+  return response;
+}
+#endif
+
+static xb::transport_fn
+make_transport() {
+  return [](const std::string& url) -> std::string {
+    if (is_http_url(url)) {
+#ifdef XB_HAS_CURL
+      return curl_fetch(url);
+#else
+      throw std::runtime_error(
+          "HTTP fetch not available (built without curl): " + url);
+#endif
+    }
+    // Local filesystem
+    std::ifstream in(url, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot open file: " + url);
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+  };
+}
+
+static int
+run_fetch(const fetch_cli_options& opts) {
+  auto transport = make_transport();
+
+  // Make the source path absolute for local files
+  std::string root_url = opts.url_or_path;
+  if (!is_http_url(root_url)) root_url = fs::absolute(root_url).string();
+
+  xb::fetch_options fetch_opts;
+  fetch_opts.fail_fast = opts.fail_fast;
+
+  std::vector<xb::fetched_schema> schemas;
+  try {
+    schemas = xb::crawl_schemas(root_url, transport, fetch_opts);
+  } catch (const std::exception& e) {
+    std::cerr << "xb fetch: " << e.what() << "\n";
+    return exit_io;
+  }
+
+  if (schemas.empty()) {
+    std::cerr << "xb fetch: no schemas fetched\n";
+    return exit_io;
+  }
+
+  auto entries = xb::compute_local_paths(schemas);
+
+  // Create output directory and write files
+  fs::create_directories(opts.output_dir);
+
+  for (std::size_t i = 0; i < schemas.size(); ++i) {
+    auto out_path = fs::path(opts.output_dir) / entries[i].local_path;
+    fs::create_directories(out_path.parent_path());
+    std::ofstream out(out_path, std::ios::binary);
+    if (!out) {
+      std::cerr << "xb fetch: cannot write: " << out_path.string() << "\n";
+      return exit_io;
+    }
+    out << schemas[i].content;
+    std::cout << entries[i].local_path << " (" << entries[i].size
+              << " bytes)\n";
+  }
+
+  // Write manifest if requested
+  if (!opts.manifest_file.empty()) {
+    // Get current time as ISO 8601
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    char time_buf[32];
+    std::strftime(time_buf, sizeof(time_buf), "%Y-%m-%dT%H:%M:%SZ",
+                  std::gmtime(&t));
+
+    xb::fetch_manifest manifest;
+    manifest.root_url = root_url;
+    manifest.fetched_at = time_buf;
+    manifest.schemas = entries;
+
+    try {
+      xb::write_manifest(opts.manifest_file, manifest);
+      std::cout << "Manifest: " << opts.manifest_file << "\n";
+    } catch (const std::exception& e) {
+      std::cerr << "xb fetch: " << e.what() << "\n";
+      return exit_io;
+    }
+  }
+
+  std::cout << "Fetched " << schemas.size() << " schema(s) to "
+            << opts.output_dir << "\n";
+  return exit_success;
+}
+
 int
 main(int argc, char* argv[]) {
   // Check for subcommand
+  if (argc >= 2 && std::string(argv[1]) == "fetch") {
+    auto opts = parse_fetch_args(argc, argv);
+
+    if (opts.show_help) {
+      print_fetch_usage(std::cerr);
+      return exit_success;
+    }
+
+    if (opts.url_or_path.empty()) {
+      std::cerr << "xb fetch: no URL or path specified\n";
+      print_fetch_usage(std::cerr);
+      return exit_usage;
+    }
+
+    return run_fetch(opts);
+  }
+
   if (argc >= 2 && std::string(argv[1]) == "sample-doc") {
     auto opts = parse_sample_doc_args(argc, argv);
 

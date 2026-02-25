@@ -131,3 +131,8 @@ add_executable(xb_doc_generator_test doc_generator_test.cpp)
 target_link_libraries(xb_doc_generator_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_doc_generator_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_doc_generator_test COMMAND xb_doc_generator_test)
+
+add_executable(xb_schema_fetcher_test schema_fetcher_test.cpp)
+target_link_libraries(xb_schema_fetcher_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_schema_fetcher_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_schema_fetcher_test COMMAND xb_schema_fetcher_test)

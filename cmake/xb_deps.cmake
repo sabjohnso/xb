@@ -8,3 +8,4 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_utilities)
 find_package(CMakeUtilities)
 
 find_package(EXPAT REQUIRED)
+find_package(CURL QUIET)

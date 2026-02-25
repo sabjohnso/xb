@@ -20,7 +20,8 @@ add_library(xb STATIC
   xml_value.cpp
   xml_io.cpp
   xpath_expr.cpp
-  doc_generator.cpp)
+  doc_generator.cpp
+  schema_fetcher.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header
