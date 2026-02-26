@@ -1,0 +1,159 @@
+#+TITLE: xb Upstream Workarounds
+#+AUTHOR: xb Project
+#+DATE: 2026-02-26
+#+STARTUP: overview
+
+* Purpose
+
+This document records workarounds for bugs in upstream dependencies.
+Each entry links to the affected source location and describes when
+the workaround can be removed.
+
+* Workarounds
+
+** json-commander: ~json_commander_TEMPLATE_DIR~ not visible via FetchContent
+:PROPERTIES:
+:TAGS: json-commander, cmake, FetchContent
+:END:
+
+*Upstream cause*: ~json-commander/CMakeLists.txt:24~:
+
+#+begin_src cmake
+set(json_commander_TEMPLATE_DIR "${PROJECT_SOURCE_DIR}/cmake")
+#+end_src
+
+This plain ~set()~ scopes the variable to the json-commander subdirectory.
+Consumers using FetchContent never see it, so
+~json_commander_add_executable~ fails with:
+
+#+begin_example
+CMake Error: File /json_commander_main.cpp.in does not exist.
+#+end_example
+
+The installed ~json-commander-config.cmake~ sets the variable correctly, so
+this only affects the FetchContent path.
+
+*Workaround* ([[file:cmake/xb_deps.cmake::json-commander sets TEMPLATE_DIR][cmake/xb_deps.cmake]]):
+
+#+begin_src cmake
+set(json_commander_TEMPLATE_DIR "${json-commander_SOURCE_DIR}/cmake")
+#+end_src
+
+*Remove when*: json-commander changes the ~set()~ to use ~CACHE~ or
+~PARENT_SCOPE~.
+
+** json-commander: ~schema::Loader~ crashes on recursive ~$ref~
+:PROPERTIES:
+:TAGS: json-commander, nlohmann-json-schema-validator, runtime
+:END:
+
+*Upstream cause*: ~json_commander/run.hpp:106-108~ calls:
+
+#+begin_src cpp
+schema::Loader loader;
+auto j = nlohmann::json::parse(cli_json);
+root = loader.load(j);
+#+end_src
+
+The ~Loader~ constructor (~json_commander/schema_loader.hpp:22-23~) calls:
+
+#+begin_src cpp
+auto metaschema = nlohmann::json::parse(detail::metaschema_json);
+validator_.set_root_schema(metaschema);
+#+end_src
+
+~set_root_schema()~ in ~nlohmann_json_schema_validator~ cannot handle the
+recursive ~$ref~ references in the json-commander metaschema and throws
+"schema already inserted", producing:
+
+#+begin_example
+xb: invalid CLI definition. Use json-commander validate to check your schema.
+#+end_example
+
+*Workaround* ([[file:src/bin/xb_jcmd_main.cpp.in][src/bin/xb_jcmd_main.cpp.in]], [[file:src/bin/CMakeLists.txt::Overwrite the generated main][src/bin/CMakeLists.txt]]):
+
+We let ~json_commander_add_executable~ generate its entry point (which
+sets up the target, man pages, and shell completions), then overwrite
+the generated ~main.cpp~ with a bypass that parses JSON directly to
+~model::Root~:
+
+#+begin_src cpp
+auto root = nlohmann::json::parse(jcmd_schema).get<json_commander::model::Root>();
+return json_commander::run(root, argc, argv, xb_cli::run);
+#+end_src
+
+This skips ~schema::Loader~ entirely.  The schema is validated at
+development time, so runtime validation is unnecessary.
+
+*Remove when*: ~nlohmann_json_schema_validator~ handles recursive ~$ref~,
+or json-commander provides a ~run~ overload that bypasses validation.
+
+** cmake_utilities: ~FindCURL.cmake~ clobbers ~BUILD_TESTING~
+:PROPERTIES:
+:TAGS: cmake_utilities, cmake, BUILD_TESTING
+:END:
+
+*Upstream cause*: ~cmake_utilities/FindCURL.cmake:5~:
+
+#+begin_src cmake
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+#+end_src
+
+This intends to disable curl's own tests but uses the global
+~BUILD_TESTING~ variable with ~FORCE~, clobbering it for the entire
+project.  The subsequent ~include(CTest)~ in xb's ~CMakeLists.txt~ uses
+~option(BUILD_TESTING ...)~ which cannot override a ~FORCE~'d cache
+variable.
+
+*Workaround* ([[file:CMakeLists.txt::FindCURL.cmake in cmake_utilities][CMakeLists.txt]]):
+
+#+begin_src cmake
+if(xb_BUILD_TESTING)
+  set(BUILD_TESTING ON CACHE BOOL "" FORCE)
+  include(CTest)
+  add_subdirectory(test)
+endif()
+#+end_src
+
+*Remove when*: ~cmake_utilities/FindCURL.cmake~ saves and restores
+~BUILD_TESTING~ (same pattern already used for ~BUILD_SHARED_LIBS~ in
+~xb_deps.cmake~).
+
+** nlohmann_json_schema_validator: tests register but targets not built
+:PROPERTIES:
+:TAGS: nlohmann-json-schema-validator, cmake, FetchContent, CTest
+:END:
+
+*Upstream cause*: ~nlohmann_json_schema_validator/CMakeLists.txt:8,148-151~:
+
+#+begin_src cmake
+option(BUILD_TESTS "Build tests" ON)    # line 8
+...
+if (BUILD_TESTS)                        # line 148
+    enable_testing()                     # line 150
+    add_subdirectory(test)               # line 151
+endif()
+#+end_src
+
+~BUILD_TESTS~ defaults to ~ON~ and is distinct from CMake's ~BUILD_TESTING~.
+The FetchContent declaration uses ~EXCLUDE_FROM_ALL~
+(~cmake_utilities/dependency.cmake:44-45~), so the test executables are
+not built, but ~enable_testing()~ and ~add_test()~ still fire, registering
+tests that point to nonexistent executables and causing ~ctest~ failures.
+
+*Workaround* ([[file:cmake/xb_deps.cmake::Prevent the FetchContent'd schema validator][cmake/xb_deps.cmake]]):
+
+#+begin_src cmake
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+#+end_src
+
+Set before ~find_package(json-commander)~ to prevent the validator's
+tests from being registered.
+
+*Note*: After changing this, stale ~CTestTestfile.cmake~ files in
+~build*/_deps/~ may persist.  Delete them or use a clean build to pick
+up the change.
+
+*Remove when*: ~cmake_utilities~ wraps the validator fetch with
+~BUILD_TESTS OFF~ / restore, or FetchContent gains the ability to
+suppress ~add_test()~ from ~EXCLUDE_FROM_ALL~ subdirectories.

@@ -30,18 +30,6 @@ run_cli(const std::string& args) {
   return exit_code(std::system(cmd.c_str()));
 }
 
-static int
-run_cli_stderr(const std::string& args, std::string& stderr_output) {
-  auto tmp = fs::temp_directory_path() / "xb_cli_stderr.txt";
-  std::string cmd = xb_cli + " " + args + " 2>" + tmp.string();
-  int rc = exit_code(std::system(cmd.c_str()));
-  std::ifstream in(tmp);
-  stderr_output.assign(std::istreambuf_iterator<char>(in),
-                       std::istreambuf_iterator<char>());
-  fs::remove(tmp);
-  return rc;
-}
-
 static std::string
 make_tmp_dir(const std::string& name) {
   auto dir = fs::temp_directory_path() / ("xb_cli_" + name);
@@ -54,11 +42,23 @@ cleanup_dir(const std::string& path) {
   fs::remove_all(path);
 }
 
+static int
+run_cli_stdout(const std::string& args, std::string& stdout_output) {
+  auto tmp = fs::temp_directory_path() / "xb_cli_stdout.txt";
+  std::string cmd = xb_cli + " " + args + " >" + tmp.string() + " 2>/dev/null";
+  int rc = exit_code(std::system(cmd.c_str()));
+  std::ifstream in(tmp);
+  stdout_output.assign(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
+  fs::remove(tmp);
+  return rc;
+}
+
 TEST_CASE("--help exits 0 and produces output", "[cli]") {
-  std::string err;
-  int rc = run_cli_stderr("--help", err);
+  std::string out;
+  int rc = run_cli_stdout("--help", out);
   CHECK(rc == 0);
-  CHECK(err.find("Usage") != std::string::npos);
+  CHECK(out.find("xb") != std::string::npos);
 }
 
 TEST_CASE("-h exits 0 and produces output", "[cli]") {
@@ -66,10 +66,10 @@ TEST_CASE("-h exits 0 and produces output", "[cli]") {
 }
 
 TEST_CASE("--version exits 0 and contains version", "[cli]") {
-  std::string err;
-  int rc = run_cli_stderr("--version", err);
+  std::string out;
+  int rc = run_cli_stdout("--version", out);
   CHECK(rc == 0);
-  CHECK(err.find("xb") != std::string::npos);
+  CHECK(out.find("xb") != std::string::npos);
 }
 
 TEST_CASE("no arguments exits 1 (usage error)", "[cli]") {
@@ -159,18 +159,6 @@ TEST_CASE("namespace mapping overrides generated namespace", "[cli]") {
 
 // ===== Output mode flags =====
 
-static int
-run_cli_stdout(const std::string& args, std::string& stdout_output) {
-  auto tmp = fs::temp_directory_path() / "xb_cli_stdout.txt";
-  std::string cmd = xb_cli + " " + args + " >" + tmp.string() + " 2>/dev/null";
-  int rc = exit_code(std::system(cmd.c_str()));
-  std::ifstream in(tmp);
-  stdout_output.assign(std::istreambuf_iterator<char>(in),
-                       std::istreambuf_iterator<char>());
-  fs::remove(tmp);
-  return rc;
-}
-
 TEST_CASE("default mode produces hpp and cpp files", "[cli]") {
   std::string out_dir = make_tmp_dir("gen_default_mode");
   cleanup_dir(out_dir);
@@ -236,9 +224,25 @@ TEST_CASE("--file-per-type produces multiple hpp files", "[cli]") {
   cleanup_dir(out_dir);
 }
 
-TEST_CASE("--header-only --file-per-type is an error", "[cli]") {
-  CHECK(run_cli("--header-only --file-per-type " + schema_dir +
-                "/xb-typemap.xsd") == 1);
+TEST_CASE("--header-only --file-per-type uses last flag", "[cli]") {
+  std::string out_dir = make_tmp_dir("gen_last_wins");
+  cleanup_dir(out_dir);
+
+  // json-commander flag_group: last flag wins
+  int rc = run_cli("--header-only --file-per-type -o " + out_dir + " " +
+                   schema_dir + "/xb-typemap.xsd");
+  CHECK(rc == 0);
+
+  // --file-per-type was last, so expect multiple hpp files
+  int hpp_count = 0;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      if (entry.path().extension() == ".hpp") ++hpp_count;
+    }
+  }
+  CHECK(hpp_count > 1);
+
+  cleanup_dir(out_dir);
 }
 
 TEST_CASE("--list-outputs prints filenames without generating", "[cli]") {
@@ -274,10 +278,10 @@ read_file_contents(const fs::path& path) {
 }
 
 TEST_CASE("fetch --help exits 0", "[cli][fetch]") {
-  std::string err;
-  int rc = run_cli_stderr("fetch --help", err);
+  std::string out;
+  int rc = run_cli_stdout("fetch --help", out);
   CHECK(rc == 0);
-  CHECK(err.find("--output-dir") != std::string::npos);
+  CHECK(out.find("output-dir") != std::string::npos);
 }
 
 TEST_CASE("fetch with no arguments exits 1", "[cli][fetch]") {

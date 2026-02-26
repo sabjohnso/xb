@@ -1,0 +1,169 @@
+{
+  "name": "xb",
+  "doc": [
+    "XML databinding for C++.",
+    "Generate C++ types and serialization code from XML Schema (XSD) definitions."
+  ],
+  "version": "@PROJECT_VERSION@",
+  "args": [
+    {
+      "kind": "option",
+      "names": ["output-dir", "o"],
+      "doc": ["Output directory for generated files."],
+      "type": "dir",
+      "docv": "DIR",
+      "default": "."
+    },
+    {
+      "kind": "option",
+      "names": ["type-map", "t"],
+      "doc": ["Type map override file (xb-typemap.xml)."],
+      "type": "file",
+      "docv": "FILE"
+    },
+    {
+      "kind": "option",
+      "names": ["namespace-map", "n"],
+      "doc": ["Namespace mapping (URI=C++ namespace). May be repeated."],
+      "type": {
+        "pair": {
+          "first": "string",
+          "second": "string",
+          "separator": "="
+        }
+      },
+      "docv": "URI=NS",
+      "repeated": true
+    },
+    {
+      "kind": "flag",
+      "names": ["list-outputs"],
+      "doc": ["Print expected output filenames and exit."]
+    },
+    {
+      "kind": "flag_group",
+      "dest": "output-mode",
+      "doc": ["Output mode for generated code."],
+      "default": "split",
+      "flags": [
+        {
+          "names": ["header-only"],
+          "doc": ["Generate header-only output (single .hpp)."],
+          "value": "header-only"
+        },
+        {
+          "names": ["file-per-type"],
+          "doc": ["Generate one header per type."],
+          "value": "file-per-type"
+        }
+      ]
+    },
+    {
+      "kind": "positional",
+      "name": "schemas",
+      "doc": ["XSD schema files to process."],
+      "type": "file",
+      "docv": "SCHEMA",
+      "repeated": true
+    }
+  ],
+  "commands": [
+    {
+      "name": "sample-doc",
+      "doc": [
+        "Generate a sample XML document from a schema.",
+        "Creates a minimal conforming XML instance for a given root element."
+      ],
+      "args": [
+        {
+          "kind": "option",
+          "names": ["element"],
+          "doc": ["Target element local name."],
+          "type": "string",
+          "docv": "NAME",
+          "required": true
+        },
+        {
+          "kind": "option",
+          "names": ["namespace"],
+          "doc": ["Target element namespace URI."],
+          "type": "string",
+          "docv": "URI"
+        },
+        {
+          "kind": "flag",
+          "names": ["populate-optional"],
+          "doc": ["Include optional elements and attributes."]
+        },
+        {
+          "kind": "option",
+          "names": ["max-depth"],
+          "doc": ["Recursion depth limit."],
+          "type": "int",
+          "docv": "N",
+          "default": 20
+        },
+        {
+          "kind": "option",
+          "names": ["output"],
+          "doc": ["Output file (default: stdout)."],
+          "type": "file",
+          "docv": "FILE"
+        },
+        {
+          "kind": "positional",
+          "name": "schemas",
+          "doc": ["XSD schema files to process."],
+          "type": "file",
+          "docv": "SCHEMA",
+          "repeated": true,
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fetch",
+      "doc": [
+        "Fetch XSD schemas and their transitive dependencies.",
+        "Crawls xs:import and xs:include references to collect all required schemas."
+      ],
+      "args": [
+        {
+          "kind": "positional",
+          "name": "source",
+          "doc": ["URL or local path to the root schema."],
+          "type": "string",
+          "docv": "URL_OR_PATH",
+          "required": true
+        },
+        {
+          "kind": "option",
+          "names": ["output-dir"],
+          "doc": ["Output directory for fetched schemas."],
+          "type": "dir",
+          "docv": "DIR",
+          "default": "."
+        },
+        {
+          "kind": "option",
+          "names": ["manifest"],
+          "doc": ["Write JSON manifest to file."],
+          "type": "file",
+          "docv": "FILE"
+        },
+        {
+          "kind": "flag",
+          "names": ["fail-fast"],
+          "doc": ["Stop on first fetch error (default: best-effort)."]
+        }
+      ]
+    }
+  ],
+  "exits": [
+    {"code": 0, "doc": ["Success."]},
+    {"code": 1, "doc": ["Usage error (invalid arguments)."]},
+    {"code": 2, "doc": ["I/O error (cannot read/write file)."]},
+    {"code": 3, "doc": ["Schema parse error."]},
+    {"code": 4, "doc": ["Code generation error."]}
+  ]
+}

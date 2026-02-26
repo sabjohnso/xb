@@ -1,0 +1,15 @@
+// Overrides json_commander_add_executable's generated main to bypass
+// schema::Loader which crashes on the recursive $ref in the metaschema.
+// The schema is validated at development time; runtime validation is
+// unnecessary.
+#include <json_commander/model_json.hpp>
+#include <json_commander/run.hpp>
+@JCMD_FROM_HEADER_INCLUDE@
+
+static const char jcmd_schema[] = R"__jcmd__(@JCMD_SCHEMA_CONTENT@)__jcmd__";
+
+int
+main(int argc, char *argv[]) {
+  auto root = nlohmann::json::parse(jcmd_schema).get<json_commander::model::Root>();
+  return json_commander::run(root, argc, argv, @JCMD_MAIN_FN@);
+}

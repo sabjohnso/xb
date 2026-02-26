@@ -21,10 +21,12 @@ include(${PROJECT_SOURCE_DIR}/cmake/xbGenerateCpp.cmake)
 include(${PROJECT_SOURCE_DIR}/cmake/xbFetchSchemas.cmake)
 
 if(xb_BUILD_TESTING)
+  # FindCURL.cmake in cmake_utilities force-sets BUILD_TESTING OFF.
+  # Restore it here so xb's tests are registered (third-party deps have
+  # already been configured with BUILD_TESTING OFF, so their tests stay off).
+  set(BUILD_TESTING ON CACHE BOOL "" FORCE)
   include(CTest)
-  if(BUILD_TESTING)
-    add_subdirectory(test)
-  endif()
+  add_subdirectory(test)
 endif()
 
 if(xb_BUILD_EXAMPLES)
