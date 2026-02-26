@@ -60,40 +60,10 @@ target_link_libraries(xb_cmake_gen_split_test
 target_compile_features(xb_cmake_gen_split_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_cmake_gen_split_test COMMAND xb_cmake_gen_split_test)
 
-# --- xb_fetch_schemas integration test ---
-# The fetch function runs at configure time and needs the xb binary.
-# In an in-tree build the binary only exists after the first build,
-# so we probe known locations from prior builds.
-set(_xb_fetch_test_exe)
-foreach(_config Release Debug RelWithDebInfo MinSizeRel)
-  if(EXISTS "${CMAKE_BINARY_DIR}/src/bin/${_config}/xb")
-    set(_xb_fetch_test_exe "${CMAKE_BINARY_DIR}/src/bin/${_config}/xb")
-    break()
-  endif()
-endforeach()
-if(NOT _xb_fetch_test_exe AND EXISTS "${CMAKE_BINARY_DIR}/src/bin/xb")
-  set(_xb_fetch_test_exe "${CMAKE_BINARY_DIR}/src/bin/xb")
-endif()
-
-if(_xb_fetch_test_exe)
-  xb_fetch_schemas(
-    EXECUTABLE ${_xb_fetch_test_exe}
-    URL ${PROJECT_SOURCE_DIR}/schema/xb-typemap.xsd
-    OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_fetched_test
-    SCHEMAS_VAR XB_FETCHED_SCHEMAS)
-
-  xb_generate_cpp(
-    TARGET xb_cmake_fetch_test_types
-    SCHEMAS ${XB_FETCHED_SCHEMAS}
-    OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_cmake_fetch_gen
-    MODE HEADER_ONLY)
-
-  add_executable(xb_cmake_fetch_test cmake_fetch_integration_test.cpp)
-  target_link_libraries(xb_cmake_fetch_test
-    PRIVATE Catch2::Catch2WithMain xb_cmake_fetch_test_types xb)
-  target_compile_features(xb_cmake_fetch_test PRIVATE cxx_std_${xb_CXX_STANDARD})
-  add_test(NAME xb_cmake_fetch_test COMMAND xb_cmake_fetch_test)
-else()
-  message(STATUS "xb_fetch_schemas test skipped: xb binary not yet built. "
-    "Build first, then re-run cmake to enable.")
-endif()
+add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
+target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
+target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+target_compile_definitions(xb_cmake_fetch_install_test PRIVATE
+  XB_BUILD_DIR=${CMAKE_BINARY_DIR}
+  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
+add_test(NAME xb_cmake_fetch_install_test COMMAND xb_cmake_fetch_install_test)

@@ -14,7 +14,6 @@ at configure time.
       [OUTPUT_DIR <dir>]
       [SCHEMAS_VAR <variable>]
       [MANIFEST <file>]
-      [EXECUTABLE <path>]
       [FAIL_FAST]
     )
 
@@ -30,11 +29,6 @@ at configure time.
   ``MANIFEST``: Override the manifest file path (default:
   ``${OUTPUT_DIR}/manifest.json``).
 
-  ``EXECUTABLE``: Explicit path to the ``xb`` binary. When provided,
-  target resolution is skipped entirely. Useful when the binary is
-  installed outside of CMake packaging or for in-tree builds where the
-  binary was built in a prior pass.
-
   ``FAIL_FAST``: Stop on the first fetch error instead of best-effort.
 
   The function runs ``xb fetch`` at configure time via
@@ -46,14 +40,14 @@ at configure time.
   (``find_package(xb)``), it is always available via the ``xb::cli``
   imported target. For in-tree builds (``add_subdirectory()``/
   ``FetchContent``), the binary is not yet built; the function emits a
-  ``FATAL_ERROR`` with a clear message unless ``EXECUTABLE`` is provided.
+  ``FATAL_ERROR`` with a clear message.
 
 #]=======================================================================]
 
 function(xb_fetch_schemas)
   cmake_parse_arguments(XB_FETCH
     "FAIL_FAST"
-    "URL;OUTPUT_DIR;SCHEMAS_VAR;MANIFEST;EXECUTABLE"
+    "URL;OUTPUT_DIR;SCHEMAS_VAR;MANIFEST"
     ""
     ${ARGN})
 
@@ -72,13 +66,20 @@ function(xb_fetch_schemas)
   endif()
 
   # --- Resolve the xb CLI executable ---
-  set(xb_exe_path "${XB_FETCH_EXECUTABLE}")
+  set(xb_exe_path)
 
-  if(NOT xb_exe_path)
-    if(TARGET xb::cli)
-      get_target_property(_imported xb::cli IMPORTED)
-      if(_imported)
-        get_target_property(xb_exe_path xb::cli IMPORTED_LOCATION)
+  if(TARGET xb::cli)
+    get_target_property(_imported xb::cli IMPORTED)
+    if(_imported)
+      get_target_property(xb_exe_path xb::cli IMPORTED_LOCATION)
+      if(NOT xb_exe_path)
+        get_target_property(_configs xb::cli IMPORTED_CONFIGURATIONS)
+        if(_configs)
+          list(GET _configs 0 _first_config)
+          string(TOUPPER "${_first_config}" _first_config)
+          get_target_property(xb_exe_path xb::cli
+            IMPORTED_LOCATION_${_first_config})
+        endif()
       endif()
     endif()
   endif()
@@ -91,19 +92,25 @@ function(xb_fetch_schemas)
           "xb_fetch_schemas: xb_cli target exists but is not yet built. "
           "xb_fetch_schemas() runs at configure time and requires the xb "
           "binary to already exist. Use find_package(xb) with an installed "
-          "build, pass EXECUTABLE to point to a pre-built binary, or run "
-          "'xb fetch' manually before configuring.")
+          "build, or run 'xb fetch' manually before configuring.")
       endif()
       get_target_property(xb_exe_path xb_cli IMPORTED_LOCATION)
+      if(NOT xb_exe_path)
+        get_target_property(_configs xb_cli IMPORTED_CONFIGURATIONS)
+        if(_configs)
+          list(GET _configs 0 _first_config)
+          string(TOUPPER "${_first_config}" _first_config)
+          get_target_property(xb_exe_path xb_cli
+            IMPORTED_LOCATION_${_first_config})
+        endif()
+      endif()
     endif()
   endif()
 
   if(NOT xb_exe_path OR NOT EXISTS "${xb_exe_path}")
     message(FATAL_ERROR
       "xb_fetch_schemas: cannot find xb executable. "
-      "Ensure xb is installed and find_package(xb) succeeded, "
-      "pass EXECUTABLE <path>, or that the xb::cli target provides "
-      "an IMPORTED_LOCATION.")
+      "Ensure xb is installed and find_package(xb) succeeded.")
   endif()
 
   # --- Make local paths absolute for consistent manifest matching ---

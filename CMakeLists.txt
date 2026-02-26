@@ -42,6 +42,6 @@ install(EXPORT xb_EXPORTS
 install(FILES cmake/xbGenerateCpp.cmake cmake/xbFetchSchemas.cmake
   DESTINATION ${xb_INSTALL_CONFDIR})
 
-configure_file(xb-config.cmake.in xb-config.cmake)
+configure_file(xb-config.cmake.in xb-config.cmake @ONLY)
 install(FILES ${PROJECT_BINARY_DIR}/xb-config.cmake
   DESTINATION ${xb_INSTALL_CONFDIR})

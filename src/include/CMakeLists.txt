@@ -15,7 +15,7 @@ install(TARGETS xb_header
   ARCHIVE DESTINATION ${xb_INSTALL_LIBDIR})
 
 install(FILES
-  ${CMAKE_CURRENT_BINARY_DIR}/config.hpp
+  ${CMAKE_CURRENT_BINARY_DIR}/xb/config.hpp
   xb/qname.hpp
   xb/any_attribute.hpp
   xb/any_element.hpp

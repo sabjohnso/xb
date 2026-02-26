@@ -264,3 +264,89 @@ TEST_CASE("output to non-existent directory creates it", "[cli]") {
 
   fs::remove_all(base);
 }
+
+// ===== fetch subcommand =====
+
+static std::string
+read_file_contents(const fs::path& path) {
+  std::ifstream in(path);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+TEST_CASE("fetch --help exits 0", "[cli][fetch]") {
+  std::string err;
+  int rc = run_cli_stderr("fetch --help", err);
+  CHECK(rc == 0);
+  CHECK(err.find("--output-dir") != std::string::npos);
+}
+
+TEST_CASE("fetch with no arguments exits 1", "[cli][fetch]") {
+  CHECK(run_cli("fetch") == 1);
+}
+
+TEST_CASE("fetch with nonexistent file exits 2", "[cli][fetch]") {
+  CHECK(run_cli("fetch nonexistent.xsd") == 2);
+}
+
+TEST_CASE("fetch writes schema files to output directory", "[cli][fetch]") {
+  std::string out_dir = make_tmp_dir("fetch_output");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("fetch " + schema_dir + "/xb-typemap.xsd --output-dir " +
+                   out_dir);
+  CHECK(rc == 0);
+
+  bool found_xsd = false;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      if (entry.path().extension() == ".xsd") {
+        found_xsd = true;
+        CHECK(fs::file_size(entry.path()) > 0);
+      }
+    }
+  }
+  CHECK(found_xsd);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("fetch writes manifest with correct structure", "[cli][fetch]") {
+  std::string out_dir = make_tmp_dir("fetch_manifest");
+  cleanup_dir(out_dir);
+
+  auto manifest = out_dir + "/manifest.json";
+  int rc = run_cli("fetch " + schema_dir + "/xb-typemap.xsd --output-dir " +
+                   out_dir + " --manifest " + manifest);
+  REQUIRE(rc == 0);
+  REQUIRE(fs::exists(manifest));
+
+  auto content = read_file_contents(manifest);
+  CHECK(content.find("\"root\"") != std::string::npos);
+  CHECK(content.find("\"schemas\"") != std::string::npos);
+  CHECK(content.find("\"path\"") != std::string::npos);
+  CHECK(content.find("xb-typemap.xsd") != std::string::npos);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("fetch is idempotent", "[cli][fetch]") {
+  std::string out_dir = make_tmp_dir("fetch_idempotent");
+  cleanup_dir(out_dir);
+
+  auto manifest = out_dir + "/manifest.json";
+  std::string args = "fetch " + schema_dir + "/xb-typemap.xsd --output-dir " +
+                     out_dir + " --manifest " + manifest;
+
+  REQUIRE(run_cli(args) == 0);
+  auto first_content = read_file_contents(manifest);
+
+  // Second fetch should also succeed
+  CHECK(run_cli(args) == 0);
+  auto second_content = read_file_contents(manifest);
+
+  // Manifest content should have the same structure
+  CHECK(second_content.find("\"root\"") != std::string::npos);
+  CHECK(second_content.find("xb-typemap.xsd") != std::string::npos);
+
+  cleanup_dir(out_dir);
+}
