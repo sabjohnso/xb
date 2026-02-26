@@ -25,8 +25,8 @@ set(BUILD_SHARED_LIBS ${_xb_saved_BSL})
 # json-commander sets TEMPLATE_DIR with directory-local scope, so it is not
 # visible outside its own CMakeLists.txt when consumed via FetchContent.
 set(json_commander_TEMPLATE_DIR "${json-commander_SOURCE_DIR}/cmake")
-# The FetchContent'd schema validator uses deprecated nlohmann_json APIs that
-# fail with -Werror. Suppress diagnostics for that third-party target.
+# The FetchContent'd schema validator uses deprecated nlohmann_json APIs and
+# has minor code issues.  Suppress all warnings for that third-party target.
 if(TARGET nlohmann_json_schema_validator)
-  target_compile_options(nlohmann_json_schema_validator PRIVATE -Wno-error)
+  target_compile_options(nlohmann_json_schema_validator PRIVATE -w)
 endif()
