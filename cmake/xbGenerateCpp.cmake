@@ -82,7 +82,7 @@ function(xb_generate_cpp)
   # SPLIT is the CLI default, no flag needed
 
   # --- Build the command line ---
-  set(xb_cmd "$<TARGET_FILE:${xb_exe}>")
+  set(xb_cmd "$<TARGET_FILE:${xb_exe}>" generate)
   if(mode_flag)
     list(APPEND xb_cmd ${mode_flag})
   endif()
@@ -122,7 +122,7 @@ function(xb_generate_cpp)
       endif()
       if(xb_exe_path AND EXISTS "${xb_exe_path}")
         # Build the --list-outputs command
-        set(list_cmd "${xb_exe_path}" --list-outputs)
+        set(list_cmd "${xb_exe_path}" generate --list-outputs)
         if(mode_flag)
           list(APPEND list_cmd ${mode_flag})
         endif()

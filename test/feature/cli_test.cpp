@@ -72,27 +72,41 @@ TEST_CASE("--version exits 0 and contains version", "[cli]") {
   CHECK(out.find("xb") != std::string::npos);
 }
 
-TEST_CASE("no arguments exits 1 (usage error)", "[cli]") {
+TEST_CASE("no subcommand exits 1 (usage error)", "[cli]") {
   CHECK(run_cli("") == 1);
 }
 
-TEST_CASE("nonexistent schema file exits 2 (file error)", "[cli]") {
-  CHECK(run_cli("nonexistent.xsd") == 2);
+TEST_CASE("generate --help exits 0", "[cli][generate]") {
+  std::string out;
+  int rc = run_cli_stdout("generate --help", out);
+  CHECK(rc == 0);
+  CHECK(out.find("output-dir") != std::string::npos);
 }
 
-TEST_CASE("nonexistent type map file exits 2", "[cli]") {
+TEST_CASE("generate with no arguments exits 1 (usage error)",
+          "[cli][generate]") {
+  CHECK(run_cli("generate") == 1);
+}
+
+TEST_CASE("nonexistent schema file exits 2 (file error)", "[cli][generate]") {
+  CHECK(run_cli("generate nonexistent.xsd") == 2);
+}
+
+TEST_CASE("nonexistent type map file exits 2", "[cli][generate]") {
   std::string out_dir = make_tmp_dir("tmapnotfound");
-  int rc = run_cli("-t nonexistent.xml -o " + out_dir + " " + schema_dir +
-                   "/xb-typemap.xsd");
+  int rc = run_cli("generate -t nonexistent.xml -o " + out_dir + " " +
+                   schema_dir + "/xb-typemap.xsd");
   cleanup_dir(out_dir);
   CHECK(rc == 2);
 }
 
-TEST_CASE("generate from xb-typemap.xsd produces output file", "[cli]") {
+TEST_CASE("generate from xb-typemap.xsd produces output file",
+          "[cli][generate]") {
   std::string out_dir = make_tmp_dir("gen_typemap");
   cleanup_dir(out_dir); // start fresh
 
-  int rc = run_cli("-o " + out_dir + " " + schema_dir + "/xb-typemap.xsd");
+  int rc =
+      run_cli("generate -o " + out_dir + " " + schema_dir + "/xb-typemap.xsd");
   CHECK(rc == 0);
 
   // At least one file should exist in the output directory
@@ -111,11 +125,12 @@ TEST_CASE("generate from xb-typemap.xsd produces output file", "[cli]") {
   cleanup_dir(out_dir);
 }
 
-TEST_CASE("generated output contains expected content", "[cli]") {
+TEST_CASE("generated output contains expected content", "[cli][generate]") {
   std::string out_dir = make_tmp_dir("gen_content");
   cleanup_dir(out_dir);
 
-  int rc = run_cli("-o " + out_dir + " " + schema_dir + "/xb-typemap.xsd");
+  int rc =
+      run_cli("generate -o " + out_dir + " " + schema_dir + "/xb-typemap.xsd");
   REQUIRE(rc == 0);
 
   // Read the first generated file and check it has C++ content
@@ -134,12 +149,13 @@ TEST_CASE("generated output contains expected content", "[cli]") {
   cleanup_dir(out_dir);
 }
 
-TEST_CASE("namespace mapping overrides generated namespace", "[cli]") {
+TEST_CASE("namespace mapping overrides generated namespace",
+          "[cli][generate]") {
   std::string out_dir = make_tmp_dir("gen_nsmap");
   cleanup_dir(out_dir);
 
-  int rc = run_cli("-n \"http://xb.dev/typemap=custom_ns\" -o " + out_dir +
-                   " " + schema_dir + "/xb-typemap.xsd");
+  int rc = run_cli("generate -n \"http://xb.dev/typemap=custom_ns\" -o " +
+                   out_dir + " " + schema_dir + "/xb-typemap.xsd");
   REQUIRE(rc == 0);
 
   // Read generated file and verify the custom namespace appears
@@ -159,11 +175,12 @@ TEST_CASE("namespace mapping overrides generated namespace", "[cli]") {
 
 // ===== Output mode flags =====
 
-TEST_CASE("default mode produces hpp and cpp files", "[cli]") {
+TEST_CASE("default mode produces hpp and cpp files", "[cli][generate]") {
   std::string out_dir = make_tmp_dir("gen_default_mode");
   cleanup_dir(out_dir);
 
-  int rc = run_cli("-o " + out_dir + " " + schema_dir + "/xb-typemap.xsd");
+  int rc =
+      run_cli("generate -o " + out_dir + " " + schema_dir + "/xb-typemap.xsd");
   CHECK(rc == 0);
 
   bool found_hpp = false;
@@ -181,11 +198,11 @@ TEST_CASE("default mode produces hpp and cpp files", "[cli]") {
   cleanup_dir(out_dir);
 }
 
-TEST_CASE("--header-only produces only hpp files", "[cli]") {
+TEST_CASE("--header-only produces only hpp files", "[cli][generate]") {
   std::string out_dir = make_tmp_dir("gen_header_only");
   cleanup_dir(out_dir);
 
-  int rc = run_cli("--header-only -o " + out_dir + " " + schema_dir +
+  int rc = run_cli("generate --header-only -o " + out_dir + " " + schema_dir +
                    "/xb-typemap.xsd");
   CHECK(rc == 0);
 
@@ -204,11 +221,11 @@ TEST_CASE("--header-only produces only hpp files", "[cli]") {
   cleanup_dir(out_dir);
 }
 
-TEST_CASE("--file-per-type produces multiple hpp files", "[cli]") {
+TEST_CASE("--file-per-type produces multiple hpp files", "[cli][generate]") {
   std::string out_dir = make_tmp_dir("gen_file_per_type");
   cleanup_dir(out_dir);
 
-  int rc = run_cli("--file-per-type -o " + out_dir + " " + schema_dir +
+  int rc = run_cli("generate --file-per-type -o " + out_dir + " " + schema_dir +
                    "/xb-typemap.xsd");
   CHECK(rc == 0);
 
@@ -224,13 +241,13 @@ TEST_CASE("--file-per-type produces multiple hpp files", "[cli]") {
   cleanup_dir(out_dir);
 }
 
-TEST_CASE("--header-only --file-per-type uses last flag", "[cli]") {
+TEST_CASE("--header-only --file-per-type uses last flag", "[cli][generate]") {
   std::string out_dir = make_tmp_dir("gen_last_wins");
   cleanup_dir(out_dir);
 
   // json-commander flag_group: last flag wins
-  int rc = run_cli("--header-only --file-per-type -o " + out_dir + " " +
-                   schema_dir + "/xb-typemap.xsd");
+  int rc = run_cli("generate --header-only --file-per-type -o " + out_dir +
+                   " " + schema_dir + "/xb-typemap.xsd");
   CHECK(rc == 0);
 
   // --file-per-type was last, so expect multiple hpp files
@@ -245,10 +262,11 @@ TEST_CASE("--header-only --file-per-type uses last flag", "[cli]") {
   cleanup_dir(out_dir);
 }
 
-TEST_CASE("--list-outputs prints filenames without generating", "[cli]") {
+TEST_CASE("--list-outputs prints filenames without generating",
+          "[cli][generate]") {
   std::string stdout_out;
-  int rc = run_cli_stdout("--list-outputs " + schema_dir + "/xb-typemap.xsd",
-                          stdout_out);
+  int rc = run_cli_stdout(
+      "generate --list-outputs " + schema_dir + "/xb-typemap.xsd", stdout_out);
   CHECK(rc == 0);
   CHECK(!stdout_out.empty());
   // Should contain at least one filename
@@ -256,13 +274,13 @@ TEST_CASE("--list-outputs prints filenames without generating", "[cli]") {
   CHECK(stdout_out.find(".cpp") != std::string::npos);
 }
 
-TEST_CASE("output to non-existent directory creates it", "[cli]") {
+TEST_CASE("output to non-existent directory creates it", "[cli][generate]") {
   auto base = fs::temp_directory_path() / "xb_cli_mkdir_test";
   auto nested = base / "sub" / "dir";
   fs::remove_all(base);
 
-  int rc =
-      run_cli("-o " + nested.string() + " " + schema_dir + "/xb-typemap.xsd");
+  int rc = run_cli("generate -o " + nested.string() + " " + schema_dir +
+                   "/xb-typemap.xsd");
   CHECK(rc == 0);
   CHECK(fs::exists(nested));
 
