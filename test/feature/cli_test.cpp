@@ -372,3 +372,104 @@ TEST_CASE("fetch is idempotent", "[cli][fetch]") {
 
   cleanup_dir(out_dir);
 }
+
+// ===== RELAX NG support =====
+
+TEST_CASE("generate from .rnc produces output files", "[cli][generate][rng]") {
+  std::string out_dir = make_tmp_dir("gen_rnc");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("generate -o " + out_dir + " " + schema_dir +
+                   "/test-addressbook.rnc");
+  CHECK(rc == 0);
+
+  bool found_hpp = false;
+  bool found_cpp = false;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      auto ext = entry.path().extension().string();
+      if (ext == ".hpp") found_hpp = true;
+      if (ext == ".cpp") found_cpp = true;
+    }
+  }
+  CHECK(found_hpp);
+  CHECK(found_cpp);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("generate from .rnc produces valid C++ content",
+          "[cli][generate][rng]") {
+  std::string out_dir = make_tmp_dir("gen_rnc_content");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("generate -o " + out_dir + " " + schema_dir +
+                   "/test-addressbook.rnc");
+  REQUIRE(rc == 0);
+
+  bool found_pragma = false;
+  bool found_struct = false;
+  for (const auto& entry : fs::directory_iterator(out_dir)) {
+    if (entry.is_regular_file()) {
+      auto content = read_file_contents(entry.path());
+      if (content.find("#pragma once") != std::string::npos)
+        found_pragma = true;
+      if (content.find("struct") != std::string::npos) found_struct = true;
+    }
+  }
+  CHECK(found_pragma);
+  CHECK(found_struct);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("generate from .rng produces output files", "[cli][generate][rng]") {
+  std::string out_dir = make_tmp_dir("gen_rng");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("generate -o " + out_dir + " " + schema_dir +
+                   "/test-addressbook.rng");
+  CHECK(rc == 0);
+
+  bool found_hpp = false;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      if (entry.path().extension() == ".hpp") found_hpp = true;
+    }
+  }
+  CHECK(found_hpp);
+
+  cleanup_dir(out_dir);
+}
+
+TEST_CASE("generate --list-outputs works with .rnc", "[cli][generate][rng]") {
+  std::string out;
+  int rc = run_cli_stdout(
+      "generate --list-outputs " + schema_dir + "/test-addressbook.rnc", out);
+  CHECK(rc == 0);
+  CHECK(!out.empty());
+  CHECK(out.find(".hpp") != std::string::npos);
+}
+
+TEST_CASE("generate --header-only works with .rnc", "[cli][generate][rng]") {
+  std::string out_dir = make_tmp_dir("gen_rnc_header_only");
+  cleanup_dir(out_dir);
+
+  int rc = run_cli("generate --header-only -o " + out_dir + " " + schema_dir +
+                   "/test-addressbook.rnc");
+  CHECK(rc == 0);
+
+  bool found_hpp = false;
+  bool found_cpp = false;
+  if (fs::exists(out_dir)) {
+    for (const auto& entry : fs::directory_iterator(out_dir)) {
+      auto ext = entry.path().extension().string();
+      if (ext == ".hpp") found_hpp = true;
+      if (ext == ".cpp") found_cpp = true;
+    }
+  }
+  CHECK(found_hpp);
+  CHECK_FALSE(found_cpp);
+
+  cleanup_dir(out_dir);
+}

@@ -1,0 +1,10 @@
+default namespace = "urn:test:addressbook"
+datatypes xsd = "http://www.w3.org/2001/XMLSchema-datatypes"
+
+start = element addressBook {
+  element card {
+    attribute type { xsd:string },
+    element name { text },
+    element email { text }
+  }+
+}

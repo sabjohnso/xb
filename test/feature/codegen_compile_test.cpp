@@ -345,7 +345,7 @@ TEST_CASE("compile: complex type with open content",
 
   open_content oc{
       open_content_mode::interleave,
-      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax}};
+      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax, {}, {}}};
 
   s.add_complex_type(complex_type(qname{"http://example.com/oc", "FlexType"},
                                   false, false, std::move(ct), {}, {}, {},

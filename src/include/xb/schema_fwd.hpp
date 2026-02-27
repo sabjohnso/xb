@@ -5,7 +5,7 @@
 
 namespace xb {
 
-  enum class compositor_kind { sequence, choice, all };
+  enum class compositor_kind { sequence, choice, all, interleave };
 
   enum class derivation_method { restriction, extension };
 

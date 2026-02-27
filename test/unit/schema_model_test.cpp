@@ -117,11 +117,39 @@ TEST_CASE("wildcard with enumerated namespaces", "[wildcard]") {
   CHECK(w.process == xb::process_contents::lax);
 }
 
+TEST_CASE("wildcard with except_names", "[wildcard]") {
+  xb::wildcard w;
+  w.ns_constraint = xb::wildcard_ns_constraint::any;
+  w.except_names = {xb::qname("urn:test", "skip"),
+                    xb::qname("urn:test", "ignore")};
+  CHECK(w.except_names.size() == 2);
+  CHECK(w.except_names[0] == xb::qname("urn:test", "skip"));
+}
+
+TEST_CASE("wildcard with except_namespaces", "[wildcard]") {
+  xb::wildcard w;
+  w.ns_constraint = xb::wildcard_ns_constraint::any;
+  w.except_namespaces = {"urn:excluded"};
+  CHECK(w.except_namespaces.size() == 1);
+  CHECK(w.except_namespaces[0] == "urn:excluded");
+}
+
 TEST_CASE("wildcard equality", "[wildcard]") {
   xb::wildcard a;
   a.ns_constraint = xb::wildcard_ns_constraint::other;
   xb::wildcard b;
   b.ns_constraint = xb::wildcard_ns_constraint::other;
+  CHECK(a == b);
+
+  xb::wildcard c;
+  CHECK_FALSE(a == c);
+}
+
+TEST_CASE("wildcard equality with except fields", "[wildcard]") {
+  xb::wildcard a;
+  a.except_names = {xb::qname("", "x")};
+  xb::wildcard b;
+  b.except_names = {xb::qname("", "x")};
   CHECK(a == b);
 
   xb::wildcard c;
@@ -356,6 +384,15 @@ TEST_CASE("model_group equality", "[model_group]") {
   c.add_particle(xb::particle(xb::element_ref{xb::qname(tns, "x")}));
 
   CHECK_FALSE(a == c);
+}
+
+TEST_CASE("model_group interleave compositor", "[model_group]") {
+  xb::model_group mg(xb::compositor_kind::interleave);
+  mg.add_particle(xb::particle(xb::element_ref{xb::qname(tns, "a")}));
+  mg.add_particle(xb::particle(xb::element_ref{xb::qname(tns, "b")}));
+
+  CHECK(mg.compositor() == xb::compositor_kind::interleave);
+  CHECK(mg.particles().size() == 2);
 }
 
 // -- content_type -------------------------------------------------------------

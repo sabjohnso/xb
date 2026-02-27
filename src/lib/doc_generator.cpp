@@ -356,6 +356,7 @@ namespace xb {
         switch (group.compositor()) {
           case compositor_kind::sequence:
           case compositor_kind::all:
+          case compositor_kind::interleave:
             for (const auto& p : group.particles())
               write_particle(p);
             break;

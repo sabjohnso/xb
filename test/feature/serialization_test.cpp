@@ -614,7 +614,7 @@ TEST_CASE("round-trip: open content elements are preserved",
 
   open_content oc{
       open_content_mode::interleave,
-      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax}};
+      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax, {}, {}}};
 
   s.add_complex_type(complex_type(qname{ns, "FlexType"}, false, false,
                                   std::move(ct), {}, {}, {}, std::move(oc)));

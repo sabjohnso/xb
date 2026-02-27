@@ -1918,7 +1918,7 @@ namespace xb {
         return;
       }
 
-      // Sequence or all: write each particle in order
+      // Sequence, all, or interleave: write each particle in order
       for (const auto& p : particles)
         emit_write_particle_term(body, p, resolver, containing_type_name);
     }
@@ -2492,7 +2492,7 @@ namespace xb {
         return;
       }
 
-      // Sequence or all: dispatch by element name
+      // Sequence, all, or interleave: dispatch by element name
       bool first_branch = true;
       for (const auto& p : particles)
         emit_read_particle_match(body, p, resolver, containing_type_name,

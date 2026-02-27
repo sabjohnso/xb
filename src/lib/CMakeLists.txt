@@ -21,7 +21,11 @@ add_library(xb STATIC
   xml_io.cpp
   xpath_expr.cpp
   doc_generator.cpp
-  schema_fetcher.cpp)
+  schema_fetcher.cpp
+  rng_parser.cpp
+  rng_simplify.cpp
+  rng_translator.cpp
+  rng_compact_parser.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

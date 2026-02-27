@@ -13,6 +13,10 @@
 #include <xb/expat_reader.hpp>
 #include <xb/naming.hpp>
 #include <xb/ostream_writer.hpp>
+#include <xb/rng_compact_parser.hpp>
+#include <xb/rng_parser.hpp>
+#include <xb/rng_simplify.hpp>
+#include <xb/rng_translator.hpp>
 #include <xb/schema_fetcher.hpp>
 #include <xb/schema_parser.hpp>
 #include <xb/schema_set.hpp>
@@ -60,6 +64,51 @@ namespace {
   }
 
   // ---------------------------------------------------------------------------
+  // Schema format detection and parsing
+  // ---------------------------------------------------------------------------
+
+  bool
+  has_extension(const std::string& path, const std::string& ext) {
+    if (path.size() < ext.size()) return false;
+    auto suffix = path.substr(path.size() - ext.size());
+    // Case-insensitive comparison
+    for (std::size_t i = 0; i < ext.size(); ++i) {
+      if (std::tolower(static_cast<unsigned char>(suffix[i])) !=
+          std::tolower(static_cast<unsigned char>(ext[i])))
+        return false;
+    }
+    return true;
+  }
+
+  // Parse a schema file into a schema_set, auto-detecting format by extension.
+  // Supports .xsd (XSD), .rng (RELAX NG XML), and .rnc (RELAX NG compact).
+  void
+  parse_schema_file(const std::string& file, const std::string& content,
+                    xb::schema_set& schemas) {
+    if (has_extension(file, ".rnc")) {
+      xb::rng_compact_parser parser;
+      auto pattern = parser.parse(content);
+      auto simplified = xb::rng_simplify(std::move(pattern));
+      auto ss = xb::rng_translate(simplified);
+      for (auto& s : ss.take_schemas())
+        schemas.add(std::move(s));
+    } else if (has_extension(file, ".rng")) {
+      xb::expat_reader reader(content);
+      xb::rng_xml_parser parser;
+      auto pattern = parser.parse(reader);
+      auto simplified = xb::rng_simplify(std::move(pattern));
+      auto ss = xb::rng_translate(simplified);
+      for (auto& s : ss.take_schemas())
+        schemas.add(std::move(s));
+    } else {
+      // Default: XSD
+      xb::expat_reader reader(content);
+      xb::schema_parser parser;
+      schemas.add(parser.parse(reader));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // generate (root command)
   // ---------------------------------------------------------------------------
 
@@ -101,14 +150,12 @@ namespace {
     else if (mode_str == "file-per-type")
       mode = xb::output_mode::file_per_type;
 
-    // Parse all schema files
+    // Parse all schema files (auto-detects .xsd, .rng, .rnc by extension)
     xb::schema_set schemas;
     for (const auto& file : schema_files) {
-      std::string xml = read_file(file);
+      std::string content = read_file(file);
       try {
-        xb::expat_reader reader(xml);
-        xb::schema_parser parser;
-        schemas.add(parser.parse(reader));
+        parse_schema_file(file, content, schemas);
       } catch (const std::exception& e) {
         std::cerr << "xb: error parsing schema " << file << ": " << e.what()
                   << "\n";
@@ -203,14 +250,12 @@ namespace {
       return exit_usage;
     }
 
-    // Parse all schema files
+    // Parse all schema files (auto-detects .xsd, .rng, .rnc by extension)
     xb::schema_set schemas;
     for (const auto& file : schema_files) {
-      std::string xml = read_file(file);
+      std::string content = read_file(file);
       try {
-        xb::expat_reader reader(xml);
-        xb::schema_parser parser;
-        schemas.add(parser.parse(reader));
+        parse_schema_file(file, content, schemas);
       } catch (const std::exception& e) {
         std::cerr << "xb sample-doc: error parsing schema " << file << ": "
                   << e.what() << "\n";

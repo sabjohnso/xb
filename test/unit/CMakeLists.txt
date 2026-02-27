@@ -136,3 +136,28 @@ add_executable(xb_schema_fetcher_test schema_fetcher_test.cpp)
 target_link_libraries(xb_schema_fetcher_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_schema_fetcher_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_schema_fetcher_test COMMAND xb_schema_fetcher_test)
+
+add_executable(xb_rng_pattern_test rng_pattern_test.cpp)
+target_link_libraries(xb_rng_pattern_test PRIVATE Catch2::Catch2WithMain xb_header)
+target_compile_features(xb_rng_pattern_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_pattern_test COMMAND xb_rng_pattern_test)
+
+add_executable(xb_rng_parser_test rng_parser_test.cpp)
+target_link_libraries(xb_rng_parser_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_rng_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_parser_test COMMAND xb_rng_parser_test)
+
+add_executable(xb_rng_simplify_test rng_simplify_test.cpp)
+target_link_libraries(xb_rng_simplify_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_rng_simplify_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_simplify_test COMMAND xb_rng_simplify_test)
+
+add_executable(xb_rng_translator_test rng_translator_test.cpp)
+target_link_libraries(xb_rng_translator_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_rng_translator_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_translator_test COMMAND xb_rng_translator_test)
+
+add_executable(xb_rng_compact_parser_test rng_compact_parser_test.cpp)
+target_link_libraries(xb_rng_compact_parser_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_rng_compact_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_compact_parser_test COMMAND xb_rng_compact_parser_test)

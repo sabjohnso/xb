@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0"
+         xmlns:a="urn:test:addressbook"
+         datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+  <start>
+    <ref name="addressBook"/>
+  </start>
+  <define name="addressBook">
+    <element name="a:addressBook">
+      <oneOrMore>
+        <ref name="card"/>
+      </oneOrMore>
+    </element>
+  </define>
+  <define name="card">
+    <element name="a:card">
+      <attribute name="type">
+        <data type="string"/>
+      </attribute>
+      <element name="a:name">
+        <text/>
+      </element>
+      <element name="a:email">
+        <text/>
+      </element>
+    </element>
+  </define>
+</grammar>

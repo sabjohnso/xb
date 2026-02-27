@@ -2333,7 +2333,8 @@ TEST_CASE("open content: type with open content gets open_content field",
 
   open_content oc{
       open_content_mode::interleave,
-      wildcard{wildcard_ns_constraint::other, {}, process_contents::lax}};
+      wildcard{
+          wildcard_ns_constraint::other, {}, process_contents::lax, {}, {}}};
 
   s.add_complex_type(complex_type(qname{"http://example.com/test", "FlexType"},
                                   false, false, std::move(ct), {}, {}, {},
@@ -2532,7 +2533,8 @@ TEST_CASE("open content: read function captures into open_content field",
 
   open_content oc{
       open_content_mode::interleave,
-      wildcard{wildcard_ns_constraint::other, {}, process_contents::lax}};
+      wildcard{
+          wildcard_ns_constraint::other, {}, process_contents::lax, {}, {}}};
 
   s.add_complex_type(complex_type(qname{"http://example.com/test", "FlexType"},
                                   false, false, std::move(ct), {}, {}, {},
@@ -2598,7 +2600,7 @@ TEST_CASE("open content: write function writes open_content elements",
 
   open_content oc{
       open_content_mode::suffix,
-      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax}};
+      wildcard{wildcard_ns_constraint::any, {}, process_contents::lax, {}, {}}};
 
   s.add_complex_type(complex_type(qname{"http://example.com/test", "FlexType"},
                                   false, false, std::move(ct), {}, {}, {},
@@ -4172,4 +4174,45 @@ TEST_CASE("cross-namespace include uses URN stem for filename", "[codegen]") {
       has_cbc_include = true;
   }
   CHECK(has_cbc_include);
+}
+
+// -- interleave compositor (RELAX NG support) ---------------------------------
+
+TEST_CASE("interleave compositor generates struct fields like sequence",
+          "[codegen]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Complex type with interleave compositor (unordered group)
+  std::vector<particle> particles;
+  particles.emplace_back(
+      element_decl(qname{"urn:test", "alpha"}, qname{xs_ns, "string"}));
+  particles.emplace_back(
+      element_decl(qname{"urn:test", "beta"}, qname{xs_ns, "int"}));
+  model_group mg(compositor_kind::interleave, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(mg)));
+
+  s.add_complex_type(complex_type(qname{"urn:test", "UnorderedType"}, false,
+                                  false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* st = find_struct(files[0], "unordered_type");
+  REQUIRE(st != nullptr);
+
+  // Interleave should produce individual fields (not a variant)
+  auto* f_alpha = find_field(*st, "alpha");
+  auto* f_beta = find_field(*st, "beta");
+  REQUIRE(f_alpha != nullptr);
+  REQUIRE(f_beta != nullptr);
+  CHECK(f_alpha->type == "std::string");
+  CHECK(f_beta->type == "int32_t");
 }
