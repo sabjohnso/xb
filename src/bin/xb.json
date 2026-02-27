@@ -2,72 +2,80 @@
   "name": "xb",
   "doc": [
     "XML databinding for C++.",
-    "Generate C++ types and serialization code from XML Schema (XSD) definitions."
+    "Use 'xb <command> --help' for details on each command."
   ],
   "version": "@PROJECT_VERSION@",
-  "args": [
+  "args": [],
+  "commands": [
     {
-      "kind": "option",
-      "names": ["output-dir", "o"],
-      "doc": ["Output directory for generated files."],
-      "type": "dir",
-      "docv": "DIR",
-      "default": "."
-    },
-    {
-      "kind": "option",
-      "names": ["type-map", "t"],
-      "doc": ["Type map override file (xb-typemap.xml)."],
-      "type": "file",
-      "docv": "FILE"
-    },
-    {
-      "kind": "option",
-      "names": ["namespace-map", "n"],
-      "doc": ["Namespace mapping (URI=C++ namespace). May be repeated."],
-      "type": {
-        "pair": {
-          "first": "string",
-          "second": "string",
-          "separator": "="
-        }
-      },
-      "docv": "URI=NS",
-      "repeated": true
-    },
-    {
-      "kind": "flag",
-      "names": ["list-outputs"],
-      "doc": ["Print expected output filenames and exit."]
-    },
-    {
-      "kind": "flag_group",
-      "dest": "output-mode",
-      "doc": ["Output mode for generated code."],
-      "default": "split",
-      "flags": [
+      "name": "generate",
+      "doc": [
+        "Generate C++ types and serialization code from XSD.",
+        "Parses XML Schema definitions and produces C++ headers and sources."
+      ],
+      "args": [
         {
-          "names": ["header-only"],
-          "doc": ["Generate header-only output (single .hpp)."],
-          "value": "header-only"
+          "kind": "option",
+          "names": ["output-dir", "o"],
+          "doc": ["Output directory for generated files."],
+          "type": "dir",
+          "docv": "DIR",
+          "default": "."
         },
         {
-          "names": ["file-per-type"],
-          "doc": ["Generate one header per type."],
-          "value": "file-per-type"
+          "kind": "option",
+          "names": ["type-map", "t"],
+          "doc": ["Type map override file (xb-typemap.xml)."],
+          "type": "file",
+          "docv": "FILE"
+        },
+        {
+          "kind": "option",
+          "names": ["namespace-map", "n"],
+          "doc": ["Namespace mapping (URI=C++ namespace). May be repeated."],
+          "type": {
+            "pair": {
+              "first": "string",
+              "second": "string",
+              "separator": "="
+            }
+          },
+          "docv": "URI=NS",
+          "repeated": true
+        },
+        {
+          "kind": "flag",
+          "names": ["list-outputs"],
+          "doc": ["Print expected output filenames and exit."]
+        },
+        {
+          "kind": "flag_group",
+          "dest": "output-mode",
+          "doc": ["Output mode for generated code."],
+          "default": "split",
+          "flags": [
+            {
+              "names": ["header-only"],
+              "doc": ["Generate header-only output (single .hpp)."],
+              "value": "header-only"
+            },
+            {
+              "names": ["file-per-type"],
+              "doc": ["Generate one header per type."],
+              "value": "file-per-type"
+            }
+          ]
+        },
+        {
+          "kind": "positional",
+          "name": "schemas",
+          "doc": ["XSD schema files to process."],
+          "type": "file",
+          "docv": "SCHEMA",
+          "repeated": true
         }
       ]
     },
-    {
-      "kind": "positional",
-      "name": "schemas",
-      "doc": ["XSD schema files to process."],
-      "type": "file",
-      "docv": "SCHEMA",
-      "repeated": true
-    }
-  ],
-  "commands": [
     {
       "name": "sample-doc",
       "doc": [
