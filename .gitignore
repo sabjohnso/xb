@@ -29,3 +29,6 @@ Asm/
 *.DLL
 *.exe
 *.EXE
+
+# organization
+*.org
