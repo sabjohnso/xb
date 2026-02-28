@@ -105,6 +105,19 @@ namespace xb {
     public:
       explicit lexer(const std::string& source) : src_(source), pos_(0) {}
 
+      std::size_t
+      position() const {
+        return pos_;
+      }
+
+      int
+      line_number() const {
+        int line = 1;
+        for (std::size_t i = 0; i < pos_ && i < src_.size(); ++i)
+          if (src_[i] == '\n') ++line;
+        return line;
+      }
+
       token
       next() {
         skip_whitespace_and_comments();
@@ -205,8 +218,53 @@ namespace xb {
               ++pos_;
             continue;
           }
+          if (c == '[') {
+            // Standalone annotation block [ ... ]. These annotate
+            // patterns and definitions with metadata (e.g. Schematron
+            // rules). Skip the balanced bracket content.
+            skip_annotation_block();
+            continue;
+          }
           break;
         }
+      }
+
+    public:
+      // Skip a balanced [ ... ] annotation block at the current position.
+      // Returns true if an annotation was found and consumed.
+      bool
+      skip_annotation_if_present() {
+        auto saved = pos_;
+        skip_whitespace_and_comments();
+        if (pos_ < src_.size() && src_[pos_] == '[') {
+          skip_annotation_block();
+          return true;
+        }
+        pos_ = saved;
+        return false;
+      }
+
+    private:
+      void
+      skip_annotation_block() {
+        ++pos_; // consume opening '['
+        int depth = 1;
+        while (pos_ < src_.size() && depth > 0) {
+          char c = src_[pos_++];
+          if (c == '[')
+            ++depth;
+          else if (c == ']')
+            --depth;
+          else if (c == '"' || c == '\'')
+            skip_quoted_in_annotation(c);
+        }
+      }
+
+      void
+      skip_quoted_in_annotation(char quote) {
+        while (pos_ < src_.size() && src_[pos_] != quote)
+          ++pos_;
+        if (pos_ < src_.size()) ++pos_; // consume closing quote
       }
 
       token
@@ -329,7 +387,9 @@ namespace xb {
 
       [[noreturn]] void
       error(const std::string& msg) {
-        throw std::runtime_error("rnc parse error: " + msg);
+        throw std::runtime_error("rnc parse error (line " +
+                                 std::to_string(lex_.line_number()) +
+                                 "): " + msg);
       }
 
       void
@@ -388,6 +448,11 @@ namespace xb {
             parse_default_decl();
           } else if (current_.kind == token_kind::kw_datatypes) {
             parse_datatypes_decl();
+          } else if (current_.kind == token_kind::cname) {
+            // Annotation element (CName [ ... ]). The bracket content
+            // was already consumed by the lexer's whitespace skipper.
+            // Discard the orphaned CName prefix.
+            advance();
           } else {
             break;
           }
@@ -470,6 +535,10 @@ namespace xb {
             parse_div(gp);
           } else if (current_.kind == token_kind::identifier) {
             parse_define(gp);
+          } else if (current_.kind == token_kind::cname) {
+            // Annotation element (CName [ ... ]). The bracket content
+            // was already consumed by the lexer. Discard the prefix.
+            advance();
           } else {
             break;
           }
@@ -947,6 +1016,37 @@ namespace xb {
         return nc;
       }
 
+      // In RNC, keywords (namespace, element, attribute, etc.) can be
+      // used as unquoted element/attribute names after the keyword that
+      // introduces the construct.
+      bool
+      is_keyword_as_name() const {
+        switch (current_.kind) {
+          case token_kind::kw_attribute:
+          case token_kind::kw_default:
+          case token_kind::kw_datatypes:
+          case token_kind::kw_div:
+          case token_kind::kw_element:
+          case token_kind::kw_empty:
+          case token_kind::kw_external:
+          case token_kind::kw_grammar:
+          case token_kind::kw_include:
+          case token_kind::kw_inherit:
+          case token_kind::kw_list:
+          case token_kind::kw_mixed:
+          case token_kind::kw_namespace:
+          case token_kind::kw_notAllowed:
+          case token_kind::kw_parent:
+          case token_kind::kw_start:
+          case token_kind::kw_string:
+          case token_kind::kw_token:
+          case token_kind::kw_text:
+            return true;
+          default:
+            return false;
+        }
+      }
+
       // Attributes: unqualified names have empty namespace (not default)
       rng::name_class
       parse_name_class_for_attr() {
@@ -969,7 +1069,7 @@ namespace xb {
         if (current_.kind == token_kind::cname) {
           return parse_cname_as_name_class();
         }
-        if (current_.kind == token_kind::identifier) {
+        if (current_.kind == token_kind::identifier || is_keyword_as_name()) {
           auto local = current_.value;
           advance();
           // Attribute names: empty namespace (not default)
@@ -995,7 +1095,7 @@ namespace xb {
         if (current_.kind == token_kind::cname) {
           return parse_cname_as_name_class();
         }
-        if (current_.kind == token_kind::identifier) {
+        if (current_.kind == token_kind::identifier || is_keyword_as_name()) {
           auto local = current_.value;
           advance();
           std::string ns = use_default_ns ? default_ns_ : "";
@@ -1032,7 +1132,7 @@ namespace xb {
       rng::name_class
       parse_name_class_except(rng::name_class base) {
         advance(); // consume '-'
-        auto exc = parse_simple_name_class(true);
+        auto exc = parse_name_class_primary(true);
         if (base.holds<rng::any_name_nc>()) {
           return rng::name_class(
               rng::any_name_nc{rng::make_name_class(std::move(exc))});
@@ -1043,6 +1143,23 @@ namespace xb {
               rng::ns_name_nc{nsn.ns, rng::make_name_class(std::move(exc))});
         }
         error("except only valid after * or nsName");
+      }
+
+      // Parse a primary name class: either a parenthesized group or a
+      // simple name. Parenthesized groups may contain choice (|).
+      rng::name_class
+      parse_name_class_primary(bool use_default_ns) {
+        if (current_.kind == token_kind::lparen) {
+          advance(); // consume '('
+          auto nc = parse_simple_name_class(use_default_ns);
+          if (current_.kind == token_kind::pipe)
+            nc = parse_name_class_choice(std::move(nc));
+          if (current_.kind == token_kind::minus)
+            nc = parse_name_class_except(std::move(nc));
+          expect(token_kind::rparen, "')'");
+          return nc;
+        }
+        return parse_simple_name_class(use_default_ns);
       }
     };
 

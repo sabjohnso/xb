@@ -1,0 +1,12 @@
+DocBook 5.0 RELAX NG Schemas
+=============================
+
+Source:  https://cdn.docbook.org/schema/5.0/rng/
+Version: DocBook V5.0 (OASIS Standard, 1 November 2009)
+
+Files:
+  docbook.rng  - RELAX NG schema (XML syntax), flattened (no includes)
+  docbook.rnc  - RELAX NG schema (compact syntax), flattened (no includes)
+
+These files are redistributed under the OASIS IPR policy.
+See https://docbook.org/specs/docbook-5.0-spec-os for the specification.
