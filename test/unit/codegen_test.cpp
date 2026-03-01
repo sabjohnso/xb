@@ -4216,3 +4216,55 @@ TEST_CASE("interleave compositor generates struct fields like sequence",
   CHECK(f_alpha->type == "std::string");
   CHECK(f_beta->type == "int32_t");
 }
+
+// Field name that shadows a type name in the same namespace gets
+// disambiguated with a trailing underscore (mirrors keyword escaping).
+TEST_CASE("field name shadowing type name is disambiguated", "[codegen]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Type "part" — a simple struct
+  {
+    std::vector<particle> particles;
+    particles.emplace_back(
+        element_decl(qname{"urn:test", "title"}, qname{xs_ns, "string"}));
+    model_group seq(compositor_kind::sequence, std::move(particles));
+    content_type ct(content_kind::element_only,
+                    complex_content(qname{}, derivation_method::restriction,
+                                    std::move(seq)));
+    s.add_complex_type(
+        complex_type(qname{"urn:test", "Part"}, false, false, std::move(ct)));
+  }
+
+  // Type "book" — has a field named "part" which collides with type "part"
+  {
+    std::vector<particle> particles;
+    particles.emplace_back(
+        element_decl(qname{"urn:test", "part"}, qname{"urn:test", "Part"}),
+        occurrence{1, unbounded});
+    model_group seq(compositor_kind::sequence, std::move(particles));
+    content_type ct(content_kind::element_only,
+                    complex_content(qname{}, derivation_method::restriction,
+                                    std::move(seq)));
+    s.add_complex_type(
+        complex_type(qname{"urn:test", "Book"}, false, false, std::move(ct)));
+  }
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* book = find_struct(files[0], "book");
+  REQUIRE(book != nullptr);
+
+  // The field should be renamed to "part_" to avoid shadowing the type "part"
+  auto* f = find_field(*book, "part_");
+  REQUIRE(f != nullptr);
+  CHECK(f->type == "std::vector<part>");
+
+  // Original name "part" should NOT exist as a field
+  CHECK(find_field(*book, "part") == nullptr);
+}

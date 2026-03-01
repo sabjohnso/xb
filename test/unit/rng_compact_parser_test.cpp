@@ -716,3 +716,25 @@ TEST_CASE("rnc: equivalent to simple XML schema", "[rng_compact_parser]") {
   }
   CHECK(found_addr_book);
 }
+
+// == Annotation block with apostrophe in comment ============================
+
+TEST_CASE("rnc: apostrophe in comment inside annotation block",
+          "[rng_compact_parser]") {
+  // A comment containing an apostrophe (e.g. "wouldn't") inside a [...]
+  // annotation block must not be treated as a string literal delimiter.
+  rng_compact_parser p;
+  auto pat = p.parse(R"(
+    foo =
+      attribute xml:space {
+        [
+          # This wouldn't cause problems
+        ]
+        "preserve"
+      }
+    start = foo
+  )");
+  REQUIRE(pat.holds<grammar_pattern>());
+  auto& g = pat.get<grammar_pattern>();
+  REQUIRE(g.start != nullptr);
+}

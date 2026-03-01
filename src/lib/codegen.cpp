@@ -154,10 +154,25 @@ namespace xb {
       // Types that participate in dependency cycles, requiring unique_ptr
       // to break the cycle in C++.
       const std::set<qname>* cycle_types = nullptr;
+      // Type names (C++ identifiers) in the current schema, used to detect
+      // field names that would shadow a sibling type in the same namespace.
+      const std::set<std::string>* schema_type_names = nullptr;
 
       bool
       is_cycle_type(const qname& type_name) const {
         return cycle_types && cycle_types->count(type_name) > 0;
+      }
+
+      // Return a C++ field name for the given element/attribute, appending
+      // '_' when the name collides with a type in the same namespace.
+      std::string
+      field_name(const std::string& xml_local_name,
+                 const std::string& enclosing_type = {}) const {
+        auto name = to_cpp_identifier(xml_local_name);
+        if (schema_type_names && name != enclosing_type &&
+            schema_type_names->count(name))
+          name += '_';
+        return name;
       }
 
       // Produce a qualified function name for cross-namespace calls.
@@ -422,6 +437,8 @@ namespace xb {
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
+              auto enc_type =
+                  to_cpp_identifier(containing_type_name.local_name());
               // Check for conditional type assignment (CTA)
               auto deduped =
                   deduplicate_alternatives(term.type_alternatives(), resolver);
@@ -442,7 +459,9 @@ namespace xb {
                   type = "std::optional<" + type + ">";
 
                 fields.push_back(
-                    {type, to_cpp_identifier(term.name().local_name()), ""});
+                    {type,
+                     resolver.field_name(term.name().local_name(), enc_type),
+                     ""});
               } else if (deduped.size() == 1) {
                 // Single unique CTA type — use it directly
                 std::string type = deduped[0].cpp_type;
@@ -451,16 +470,20 @@ namespace xb {
                 else if (p.occurs.min_occurs == 0)
                   type = "std::optional<" + type + ">";
                 fields.push_back(
-                    {type, to_cpp_identifier(term.name().local_name()), ""});
+                    {type,
+                     resolver.field_name(term.name().local_name(), enc_type),
+                     ""});
               } else {
                 // No alternatives — use normal field type
                 fields.push_back(
                     {field_type_for_element(term, p.occurs, resolver,
                                             containing_type_name),
-                     to_cpp_identifier(term.name().local_name()),
+                     resolver.field_name(term.name().local_name(), enc_type),
                      default_value_for_element(term)});
               }
             } else if constexpr (std::is_same_v<T, element_ref>) {
+              auto enc_type =
+                  to_cpp_identifier(containing_type_name.local_name());
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
 
@@ -485,7 +508,9 @@ namespace xb {
                     type = "std::optional<" + type + ">";
 
                   fields.push_back(
-                      {type, to_cpp_identifier(elem->name().local_name()), ""});
+                      {type,
+                       resolver.field_name(elem->name().local_name(), enc_type),
+                       ""});
                   return;
                 }
               }
@@ -493,7 +518,7 @@ namespace xb {
               fields.push_back(
                   {field_type_for_element(*elem, p.occurs, resolver,
                                           containing_type_name),
-                   to_cpp_identifier(elem->name().local_name()),
+                   resolver.field_name(elem->name().local_name(), enc_type),
                    default_value_for_element(*elem)});
             } else if constexpr (std::is_same_v<T, group_ref>) {
               auto* group_def = resolver.schemas.find_model_group_def(term.ref);
@@ -738,6 +763,16 @@ namespace xb {
       s.name = to_cpp_identifier(ct.name().local_name());
       s.generate_equality = true;
 
+      // Disambiguate field names that shadow type names in the same namespace.
+      // Appends '_' (same convention as C++ keyword escaping in naming.cpp).
+      auto disambiguate_fields = [&s, &resolver]() {
+        if (!resolver.schema_type_names) return;
+        for (auto& f : s.fields) {
+          if (f.name != s.name && resolver.schema_type_names->count(f.name))
+            f.name += '_';
+        }
+      };
+
       // Compute effective open content
       auto eff_oc = effective_open_content(ct, current_schema);
       bool content_has_wildcard = false;
@@ -767,6 +802,7 @@ namespace xb {
         if (ct.attribute_wildcard().has_value())
           s.fields.push_back(
               {"std::vector<xb::any_attribute>", "any_attribute", ""});
+        disambiguate_fields();
         return s;
       }
 
@@ -801,6 +837,7 @@ namespace xb {
         if (needs_oc_field)
           s.fields.push_back(
               {"std::vector<xb::any_element>", "open_content", ""});
+        disambiguate_fields();
         return s;
       }
 
@@ -836,6 +873,7 @@ namespace xb {
         s.fields.push_back(
             {"std::vector<xb::any_element>", "open_content", ""});
 
+      disambiguate_fields();
       return s;
     }
 
@@ -1670,12 +1708,15 @@ namespace xb {
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
+              auto enc_type =
+                  to_cpp_identifier(containing_type_name.local_name());
               auto deduped =
                   deduplicate_alternatives(term.type_alternatives(), resolver);
               if (deduped.size() > 1) {
                 // CTA: std::visit dispatch over variant alternatives
                 std::string field =
-                    "value." + to_cpp_identifier(term.name().local_name());
+                    "value." +
+                    resolver.field_name(term.name().local_name(), enc_type);
                 std::string qn = "xb::qname{\"" + term.name().namespace_uri() +
                                  "\", \"" + term.name().local_name() + "\"}";
 
@@ -1716,22 +1757,26 @@ namespace xb {
                 }
               } else if (deduped.size() == 1) {
                 // Single unique CTA type — write using that type
-                emit_write_element(body,
-                                   {to_cpp_identifier(term.name().local_name()),
-                                    term.name(), deduped[0].type_name, p.occurs,
-                                    term.nillable(), false},
-                                   resolver.schemas, resolver);
+                emit_write_element(
+                    body,
+                    {resolver.field_name(term.name().local_name(), enc_type),
+                     term.name(), deduped[0].type_name, p.occurs,
+                     term.nillable(), false},
+                    resolver.schemas, resolver);
               } else {
                 bool is_recursive =
                     (term.type_name() == containing_type_name) ||
                     resolver.is_cycle_type(term.type_name());
-                emit_write_element(body,
-                                   {to_cpp_identifier(term.name().local_name()),
-                                    term.name(), term.type_name(), p.occurs,
-                                    term.nillable(), is_recursive},
-                                   resolver.schemas, resolver);
+                emit_write_element(
+                    body,
+                    {resolver.field_name(term.name().local_name(), enc_type),
+                     term.name(), term.type_name(), p.occurs, term.nillable(),
+                     is_recursive},
+                    resolver.schemas, resolver);
               }
             } else if constexpr (std::is_same_v<T, element_ref>) {
+              auto enc_type =
+                  to_cpp_identifier(containing_type_name.local_name());
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
 
@@ -1741,7 +1786,8 @@ namespace xb {
                     find_substitution_members(resolver.schemas, term.ref);
                 if (!members.empty()) {
                   std::string field =
-                      "value." + to_cpp_identifier(elem->name().local_name());
+                      "value." +
+                      resolver.field_name(elem->name().local_name(), enc_type);
                   auto emit_visit = [&](const std::string& val_expr) {
                     body += "  std::visit([&](const auto& v) {\n";
                     body += "    using V = std::decay_t<decltype(v)>;\n";
@@ -1780,12 +1826,12 @@ namespace xb {
                 }
               }
 
-              emit_write_element(body,
-                                 {to_cpp_identifier(elem->name().local_name()),
-                                  elem->name(), elem->type_name(), p.occurs,
-                                  elem->nillable(),
-                                  resolver.is_cycle_type(elem->type_name())},
-                                 resolver.schemas, resolver);
+              emit_write_element(
+                  body,
+                  {resolver.field_name(elem->name().local_name(), enc_type),
+                   elem->name(), elem->type_name(), p.occurs, elem->nillable(),
+                   resolver.is_cycle_type(elem->type_name())},
+                  resolver.schemas, resolver);
             } else if constexpr (std::is_same_v<T, group_ref>) {
               auto* group_def = resolver.schemas.find_model_group_def(term.ref);
               if (group_def)
@@ -2231,6 +2277,8 @@ namespace xb {
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
+              auto enc_type =
+                  to_cpp_identifier(containing_type_name.local_name());
               std::string qn = "xb::qname{\"" + term.name().namespace_uri() +
                                "\", \"" + term.name().local_name() + "\"}";
               std::string kw = first_branch ? "if" : "else if";
@@ -2242,7 +2290,8 @@ namespace xb {
                 if (deduped.size() > 1) {
                   // CTA: dispatch based on attribute values
                   std::string field =
-                      "result." + to_cpp_identifier(term.name().local_name());
+                      "result." +
+                      resolver.field_name(term.name().local_name(), enc_type);
 
                   auto emit_read_alt = [&](const type_alternative& alt) {
                     bool is_complex =
@@ -2300,8 +2349,9 @@ namespace xb {
                 } else if (deduped.size() == 1) {
                   // Single unique CTA type — read using that type
                   body += emit_read_element(
-                      {to_cpp_identifier(term.name().local_name()), term.name(),
-                       deduped[0].type_name, p.occurs, term.nillable(), false},
+                      {resolver.field_name(term.name().local_name(), enc_type),
+                       term.name(), deduped[0].type_name, p.occurs,
+                       term.nillable(), false},
                       resolver.schemas, resolver);
                 } else {
                   // No alternatives — normal read path
@@ -2309,8 +2359,8 @@ namespace xb {
                       (term.type_name() == containing_type_name) ||
                       resolver.is_cycle_type(term.type_name());
                   body += emit_read_element(
-                      {to_cpp_identifier(term.name().local_name()), term.name(),
-                       term.type_name(), p.occurs, term.nillable(),
+                      {resolver.field_name(term.name().local_name(), enc_type),
+                       term.name(), term.type_name(), p.occurs, term.nillable(),
                        is_recursive},
                       resolver.schemas, resolver);
                 }
@@ -2319,6 +2369,8 @@ namespace xb {
               body += "    }\n";
               first_branch = false;
             } else if constexpr (std::is_same_v<T, element_ref>) {
+              auto enc_type =
+                  to_cpp_identifier(containing_type_name.local_name());
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
 
@@ -2328,7 +2380,8 @@ namespace xb {
                     find_substitution_members(resolver.schemas, term.ref);
                 if (!members.empty()) {
                   std::string field =
-                      "result." + to_cpp_identifier(elem->name().local_name());
+                      "result." +
+                      resolver.field_name(elem->name().local_name(), enc_type);
                   for (const auto* m : members) {
                     std::string mqn = "xb::qname{\"" +
                                       m->name().namespace_uri() + "\", \"" +
@@ -2359,8 +2412,8 @@ namespace xb {
               std::string kw = first_branch ? "if" : "else if";
               body += "    " + kw + " (name == " + qn + ") {\n";
               body += emit_read_element(
-                  {to_cpp_identifier(elem->name().local_name()), elem->name(),
-                   elem->type_name(), p.occurs, elem->nillable(),
+                  {resolver.field_name(elem->name().local_name(), enc_type),
+                   elem->name(), elem->type_name(), p.occurs, elem->nillable(),
                    resolver.is_cycle_type(elem->type_name())},
                   resolver.schemas, resolver);
               body += "    }\n";
@@ -3079,13 +3132,22 @@ namespace xb {
     for (const auto& s : schemas_.schemas()) {
       std::set<std::string> referenced_namespaces;
 
+      // Collect all type names (C++ identifiers) in this schema so that
+      // field names that would shadow a sibling type can be disambiguated.
+      std::set<std::string> schema_type_names;
+      for (const auto& st : s.simple_types())
+        schema_type_names.insert(to_cpp_identifier(st.name().local_name()));
+      for (const auto& ct : s.complex_types())
+        schema_type_names.insert(to_cpp_identifier(ct.name().local_name()));
+
       type_resolver resolver{schemas_,
                              types_,
                              options_,
                              s.target_namespace(),
                              referenced_namespaces,
                              &union_variant_map,
-                             &cycle_types};
+                             &cycle_types,
+                             &schema_type_names};
 
       std::vector<cpp_decl> declarations;
       std::set<std::string> seen_variant_types;

@@ -251,7 +251,12 @@ namespace xb {
         int depth = 1;
         while (pos_ < src_.size() && depth > 0) {
           char c = src_[pos_++];
-          if (c == '[')
+          if (c == '#') {
+            // Skip comment to end of line — quotes inside comments
+            // are not string delimiters (e.g. "wouldn't").
+            while (pos_ < src_.size() && src_[pos_] != '\n')
+              ++pos_;
+          } else if (c == '[')
             ++depth;
           else if (c == ']')
             --depth;
@@ -394,8 +399,12 @@ namespace xb {
 
       void
       expect(token_kind k, const std::string& what) {
-        if (current_.kind != k)
-          error("expected " + what + ", got '" + current_.value + "'");
+        if (current_.kind != k) {
+          auto got = current_.kind == token_kind::eof
+                         ? "end of input"
+                         : "'" + current_.value + "'";
+          error("expected " + what + ", got " + got);
+        }
         advance();
       }
 
@@ -800,6 +809,8 @@ namespace xb {
             return parse_value();
           case token_kind::lparen:
             return parse_paren();
+          case token_kind::eof:
+            error("unexpected end of input");
           case token_kind::star:
             // This is * in name class context but shouldn't appear as
             // primary pattern. Fall through to error.
