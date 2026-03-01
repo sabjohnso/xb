@@ -91,6 +91,11 @@ namespace xb {
       return assertions_;
     }
 
+    void
+    add_assertion(assertion a) {
+      assertions_.push_back(std::move(a));
+    }
+
     bool
     operator==(const complex_type& other) const {
       return name_ == other.name_ && abstract_ == other.abstract_ &&

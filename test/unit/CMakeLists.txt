@@ -161,3 +161,33 @@ add_executable(xb_rng_compact_parser_test rng_compact_parser_test.cpp)
 target_link_libraries(xb_rng_compact_parser_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_rng_compact_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_rng_compact_parser_test COMMAND xb_rng_compact_parser_test)
+
+add_executable(xb_dtd_model_test dtd_model_test.cpp)
+target_link_libraries(xb_dtd_model_test PRIVATE Catch2::Catch2WithMain xb_header)
+target_compile_features(xb_dtd_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_dtd_model_test COMMAND xb_dtd_model_test)
+
+add_executable(xb_dtd_parser_test dtd_parser_test.cpp)
+target_link_libraries(xb_dtd_parser_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_dtd_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_dtd_parser_test COMMAND xb_dtd_parser_test)
+
+add_executable(xb_dtd_translator_test dtd_translator_test.cpp)
+target_link_libraries(xb_dtd_translator_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_dtd_translator_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_dtd_translator_test COMMAND xb_dtd_translator_test)
+
+add_executable(xb_schematron_model_test schematron_model_test.cpp)
+target_link_libraries(xb_schematron_model_test PRIVATE Catch2::Catch2WithMain xb_header)
+target_compile_features(xb_schematron_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_schematron_model_test COMMAND xb_schematron_model_test)
+
+add_executable(xb_schematron_parser_test schematron_parser_test.cpp)
+target_link_libraries(xb_schematron_parser_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_schematron_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_schematron_parser_test COMMAND xb_schematron_parser_test)
+
+add_executable(xb_schematron_overlay_test schematron_overlay_test.cpp)
+target_link_libraries(xb_schematron_overlay_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_schematron_overlay_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_schematron_overlay_test COMMAND xb_schematron_overlay_test)

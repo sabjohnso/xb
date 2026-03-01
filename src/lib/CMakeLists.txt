@@ -25,7 +25,11 @@ add_library(xb STATIC
   rng_parser.cpp
   rng_simplify.cpp
   rng_translator.cpp
-  rng_compact_parser.cpp)
+  rng_compact_parser.cpp
+  dtd_parser.cpp
+  dtd_translator.cpp
+  schematron_parser.cpp
+  schematron_overlay.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

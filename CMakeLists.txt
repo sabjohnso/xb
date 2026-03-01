@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
-project(xb VERSION 0.5.0 LANGUAGES C CXX)
+project(xb VERSION 0.7.0 LANGUAGES C CXX)
 
 option(xb_BUILD_TESTING "Build the xb tests" ON)
 option(xb_BUILD_INTEGRATION_TESTS "Build the xb integration tests" OFF)

@@ -42,6 +42,11 @@ namespace xb {
       return schemas_;
     }
 
+    std::vector<schema>&
+    schemas() {
+      return schemas_;
+    }
+
     std::vector<schema>
     take_schemas() {
       resolved_ = false;

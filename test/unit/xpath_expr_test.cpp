@@ -148,3 +148,75 @@ TEST_CASE("xpath: whitespace-only unsupported", "[xpath_expr]") {
   auto result = translate_xpath_assertion("   ", ctx);
   CHECK_FALSE(result.has_value());
 }
+
+// Subgroup 3f: Path expressions (Schematron support)
+
+TEST_CASE("xpath: simple path item/price", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion("item/price > 0", ctx);
+  REQUIRE(result.has_value());
+  CHECK(result.value() == "(value.item.price > 0)");
+}
+
+TEST_CASE("xpath: multi-step path a/b/c", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion("a/b/c = 1", ctx);
+  REQUIRE(result.has_value());
+  CHECK(result.value() == "(value.a.b.c == 1)");
+}
+
+// Subgroup 3g: Function calls (Schematron support)
+
+TEST_CASE("xpath: count(field)", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion("count(items) > 0", ctx);
+  REQUIRE(result.has_value());
+  CHECK(result.value() == "(value.items.size() > 0)");
+}
+
+TEST_CASE("xpath: string-length(field)", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion("string-length(name) > 0", ctx);
+  REQUIRE(result.has_value());
+  CHECK(result.value() == "(value.name.size() > 0)");
+}
+
+TEST_CASE("xpath: contains(a, b)", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion("contains(name, 'test')", ctx);
+  REQUIRE(result.has_value());
+  CHECK(result.value() == "(value.name.find(\"test\") != std::string::npos)");
+}
+
+TEST_CASE("xpath: starts-with(a, b)", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion("starts-with(code, 'ABC')", ctx);
+  REQUIRE(result.has_value());
+  CHECK(result.value() == "value.code.starts_with(\"ABC\")");
+}
+
+TEST_CASE("xpath: true() and false()", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto r1 = translate_xpath_assertion("true()", ctx);
+  REQUIRE(r1.has_value());
+  CHECK(r1.value() == "true");
+
+  auto r2 = translate_xpath_assertion("false()", ctx);
+  REQUIRE(r2.has_value());
+  CHECK(r2.value() == "false");
+}
+
+TEST_CASE("xpath: function in comparison", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion(
+      "count(items) >= 1 and count(items) <= 10", ctx);
+  REQUIRE(result.has_value());
+  CHECK(result.value() ==
+        "((value.items.size() >= 1) && (value.items.size() <= 10))");
+}
+
+TEST_CASE("xpath: unsupported function returns nullopt", "[xpath_expr]") {
+  xpath_context ctx{"value."};
+  auto result = translate_xpath_assertion("normalize-space(x) = 'y'", ctx);
+  CHECK_FALSE(result.has_value());
+}

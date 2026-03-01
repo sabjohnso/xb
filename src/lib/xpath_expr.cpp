@@ -14,8 +14,10 @@ namespace xb {
     //   not_expr    := 'not' '(' expr ')' | comparison
     //   comparison  := primary (comp_op primary)?
     //   comp_op     := '>=' | '<=' | '!=' | '>' | '<' | '='
-    //   primary     := '$value' | '@' IDENT | NUMBER | STRING | IDENT
-    //                  | '(' expr ')'
+    //   primary     := '$value' | '@' IDENT | NUMBER | STRING
+    //                  | function_call | path_expr | '(' expr ')'
+    //   function_call := IDENT '(' (expr (',' expr)*)? ')'
+    //   path_expr   := IDENT ('/' IDENT)*
 
     class xpath_parser {
       std::string_view input_;
@@ -251,29 +253,137 @@ namespace xb {
           return parse_number();
         }
 
-        // Identifier (field reference) -- but not 'and', 'or', 'not'
+        // Identifier: function call, path expression, or field reference
         if (is_ident_start(c)) {
           auto saved = pos_;
           auto ident = read_ident();
           if (ident == "and" || ident == "or" || ident == "not") {
-            // These are keywords, not field refs -- put back
             pos_ = saved;
             failed_ = true;
             return {};
           }
-          // Check for unsupported constructs: function calls (ident '(')
-          // or namespace prefixes (ident ':')
+          // Namespace prefix (ident ':') — unsupported
           skip_ws();
-          if (peek() == '(' || peek() == ':') {
+          if (peek() == ':') {
             failed_ = true;
             return {};
           }
-          return std::string(ctx_.value_prefix) + std::string(ident);
+          // Function call (ident '(')
+          if (peek() == '(') { return parse_function_call(std::string(ident)); }
+          // Path expression (ident '/' ident ...)
+          std::string path =
+              std::string(ctx_.value_prefix) + std::string(ident);
+          while (peek() == '/') {
+            ++pos_; // consume '/'
+            auto step = read_ident();
+            if (step.empty()) {
+              failed_ = true;
+              return {};
+            }
+            path += "." + std::string(step);
+          }
+          return path;
         }
 
-        // Unsupported character (e.g. '/')
+        // Unsupported character
         failed_ = true;
         return {};
+      }
+
+      // Parse a known function call. Returns the C++ translation.
+      std::string
+      parse_function_call(const std::string& name) {
+        if (!match('(')) {
+          failed_ = true;
+          return {};
+        }
+
+        // Zero-arg functions
+        if (name == "true") {
+          if (!match(')')) {
+            failed_ = true;
+            return {};
+          }
+          return "true";
+        }
+        if (name == "false") {
+          if (!match(')')) {
+            failed_ = true;
+            return {};
+          }
+          return "false";
+        }
+
+        // One-arg functions: count, string-length
+        if (name == "count" || name == "string-length") {
+          auto arg = parse_function_arg();
+          if (failed_) return {};
+          if (!match(')')) {
+            failed_ = true;
+            return {};
+          }
+          return arg + ".size()";
+        }
+
+        // Two-arg functions: contains, starts-with
+        if (name == "contains") {
+          auto arg1 = parse_function_arg();
+          if (failed_) return {};
+          if (!match(',')) {
+            failed_ = true;
+            return {};
+          }
+          auto arg2 = parse_primary();
+          if (failed_) return {};
+          if (!match(')')) {
+            failed_ = true;
+            return {};
+          }
+          return "(" + arg1 + ".find(" + arg2 + ") != std::string::npos)";
+        }
+        if (name == "starts-with") {
+          auto arg1 = parse_function_arg();
+          if (failed_) return {};
+          if (!match(',')) {
+            failed_ = true;
+            return {};
+          }
+          auto arg2 = parse_primary();
+          if (failed_) return {};
+          if (!match(')')) {
+            failed_ = true;
+            return {};
+          }
+          return arg1 + ".starts_with(" + arg2 + ")";
+        }
+
+        // Unsupported function
+        failed_ = true;
+        return {};
+      }
+
+      // Parse a function argument (field path or expression)
+      std::string
+      parse_function_arg() {
+        skip_ws();
+        if (is_ident_start(peek())) {
+          auto ident = read_ident();
+          // Path expression inside function arg
+          std::string path =
+              std::string(ctx_.value_prefix) + std::string(ident);
+          while (peek() == '/') {
+            ++pos_;
+            auto step = read_ident();
+            if (step.empty()) {
+              failed_ = true;
+              return {};
+            }
+            path += "." + std::string(step);
+          }
+          return path;
+        }
+        // Could be $value or other primary
+        return parse_primary();
       }
 
       std::string_view

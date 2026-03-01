@@ -75,6 +75,11 @@ namespace xb {
       return complex_types_;
     }
 
+    std::vector<complex_type>&
+    complex_types() {
+      return complex_types_;
+    }
+
     void
     add_element(element_decl e) {
       elements_.push_back(std::move(e));
