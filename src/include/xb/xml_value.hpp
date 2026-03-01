@@ -64,6 +64,10 @@ namespace xb {
   std::string
   format(const xb::day_time_duration& value);
 
+  // List types (xsd:NMTOKENS, xsd:IDREFS, xsd:ENTITIES — space-delimited)
+  std::string
+  format(const std::vector<std::string>& value);
+
   // Binary data (xsd:base64Binary default encoding)
   std::string
   format(const std::vector<std::byte>& value);

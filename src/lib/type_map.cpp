@@ -21,6 +21,12 @@ namespace xb {
     map.set("IDREF", {"std::string", "<string>"});
     map.set("NMTOKEN", {"std::string", "<string>"});
     map.set("language", {"std::string", "<string>"});
+    map.set("ENTITY", {"std::string", "<string>"});
+
+    // List types
+    map.set("IDREFS", {"std::vector<std::string>", "<vector> <string>"});
+    map.set("NMTOKENS", {"std::vector<std::string>", "<vector> <string>"});
+    map.set("ENTITIES", {"std::vector<std::string>", "<vector> <string>"});
 
     // Built-in types (no header needed)
     map.set("boolean", {"bool", ""});
@@ -96,7 +102,11 @@ namespace xb {
         "QName",
         "ID",
         "IDREF",
+        "IDREFS",
         "NMTOKEN",
+        "NMTOKENS",
+        "ENTITY",
+        "ENTITIES",
         "language",
     };
 

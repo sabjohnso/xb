@@ -631,7 +631,7 @@ namespace xb {
                          const type_resolver& resolver) {
       for (const auto& attr : attrs) {
         std::string base_type = resolver.resolve(attr.type_name);
-        std::string name = to_cpp_identifier(attr.name.local_name());
+        std::string name = resolver.field_name(attr.name.local_name());
         std::string default_val = default_value_for_attr(attr, resolver);
 
         if (attr.required)
@@ -765,11 +765,22 @@ namespace xb {
 
       // Disambiguate field names that shadow type names in the same namespace.
       // Appends '_' (same convention as C++ keyword escaping in naming.cpp).
+      // After type-name disambiguation, resolve any remaining duplicate names
+      // by appending additional '_' suffixes.
       auto disambiguate_fields = [&s, &resolver]() {
-        if (!resolver.schema_type_names) return;
+        if (resolver.schema_type_names) {
+          for (auto& f : s.fields) {
+            if (f.name != s.name && resolver.schema_type_names->count(f.name))
+              f.name += '_';
+          }
+        }
+        // Resolve remaining duplicates (e.g., element "revision" and attribute
+        // "revision" both renamed to "revision_")
+        std::set<std::string> seen;
         for (auto& f : s.fields) {
-          if (f.name != s.name && resolver.schema_type_names->count(f.name))
+          while (seen.count(f.name))
             f.name += '_';
+          seen.insert(f.name);
         }
       };
 
@@ -1969,13 +1980,59 @@ namespace xb {
         emit_write_particle_term(body, p, resolver, containing_type_name);
     }
 
+    // Collect field names occupied by element particles in a complex type.
+    // Used to prevent attribute field names from colliding with element fields.
+    std::set<std::string>
+    collect_element_field_names(const complex_type& ct,
+                                const type_resolver& resolver) {
+      std::set<std::string> names;
+      auto enc_type = to_cpp_identifier(ct.name().local_name());
+
+      if (ct.mixed()) { names.insert("content"); }
+
+      auto* cc = std::get_if<complex_content>(&ct.content().detail);
+      if (!cc || !cc->content_model.has_value()) return names;
+
+      std::function<void(const std::vector<particle>&)> scan;
+      scan = [&](const std::vector<particle>& particles) {
+        for (const auto& p : particles) {
+          std::visit(
+              [&](const auto& term) {
+                using T = std::decay_t<decltype(term)>;
+                if constexpr (std::is_same_v<T, element_decl>) {
+                  names.insert(
+                      resolver.field_name(term.name().local_name(), enc_type));
+                } else if constexpr (std::is_same_v<T, element_ref>) {
+                  auto* elem = resolver.schemas.find_element(term.ref);
+                  if (elem)
+                    names.insert(resolver.field_name(elem->name().local_name(),
+                                                     enc_type));
+                } else if constexpr (std::is_same_v<T, group_ref>) {
+                  auto* g = resolver.schemas.find_model_group_def(term.ref);
+                  if (g) scan(g->group().particles());
+                } else if constexpr (std::is_same_v<
+                                         T, std::unique_ptr<model_group>>) {
+                  if (term) scan(term->particles());
+                }
+              },
+              p.term);
+        }
+      };
+      scan(cc->content_model->particles());
+      return names;
+    }
+
     void
     emit_write_attributes(std::string& body,
                           const std::vector<attribute_use>& attrs,
                           const schema_set& schemas,
-                          const type_resolver& resolver) {
+                          const type_resolver& resolver,
+                          std::set<std::string> occupied = {}) {
       for (const auto& attr : attrs) {
-        std::string name = to_cpp_identifier(attr.name.local_name());
+        std::string name = resolver.field_name(attr.name.local_name());
+        while (occupied.count(name))
+          name += '_';
+        occupied.insert(name);
         std::string qn = "xb::qname{\"" + attr.name.namespace_uri() + "\", \"" +
                          attr.name.local_name() + "\"}";
         std::string fmt_expr =
@@ -2080,8 +2137,8 @@ namespace xb {
             emit_write_simple_content_base_attrs(body, resolver.schemas,
                                                  sc->base_type_name, resolver);
         }
-        emit_write_attributes(body, ct.attributes(), resolver.schemas,
-                              resolver);
+        emit_write_attributes(body, ct.attributes(), resolver.schemas, resolver,
+                              collect_element_field_names(ct, resolver));
         emit_write_attribute_group_refs(body, ct.attribute_group_refs(),
                                         resolver.schemas, resolver);
 
@@ -2099,7 +2156,9 @@ namespace xb {
       }
 
       // Handle attributes first
-      emit_write_attributes(body, ct.attributes(), resolver.schemas, resolver);
+      auto occupied = collect_element_field_names(ct, resolver);
+      emit_write_attributes(body, ct.attributes(), resolver.schemas, resolver,
+                            occupied);
       emit_write_attribute_group_refs(body, ct.attribute_group_refs(),
                                       resolver.schemas, resolver);
 
@@ -2120,7 +2179,32 @@ namespace xb {
             body += "      if constexpr (std::is_same_v<T, std::string>) {\n";
             body += "        writer.characters(v);\n";
             body += "      }\n";
-            // TODO: handle element alternatives in mixed content
+            for (const auto& p : cc->content_model->particles()) {
+              std::visit(
+                  [&](const auto& term) {
+                    using TermT = std::decay_t<decltype(term)>;
+                    if constexpr (std::is_same_v<TermT, element_decl>) {
+                      std::string cpp_type = resolver.resolve(term.type_name());
+                      std::string elem_qn =
+                          "xb::qname{\"" + term.name().namespace_uri() +
+                          "\", \"" + term.name().local_name() + "\"}";
+                      body += "      else if constexpr (std::is_same_v<T, " +
+                              cpp_type + ">) {\n";
+                      body +=
+                          "        writer.start_element(" + elem_qn + ");\n";
+                      if (is_complex_type(resolver.schemas, term.type_name())) {
+                        std::string write_fn =
+                            resolver.qualify_fn("write_", term.type_name());
+                        body += "        " + write_fn + "(v, writer);\n";
+                      } else {
+                        body += "        writer.characters(xb::format(v));\n";
+                      }
+                      body += "        writer.end_element();\n";
+                      body += "      }\n";
+                    }
+                  },
+                  p.term);
+            }
             body += "    }, item);\n";
             body += "  }\n";
           }
@@ -2570,9 +2654,13 @@ namespace xb {
     emit_read_attributes(std::string& body,
                          const std::vector<attribute_use>& attrs,
                          const schema_set& schemas,
-                         const type_resolver& resolver) {
+                         const type_resolver& resolver,
+                         std::set<std::string> occupied = {}) {
       for (const auto& attr : attrs) {
-        std::string name = to_cpp_identifier(attr.name.local_name());
+        std::string name = resolver.field_name(attr.name.local_name());
+        while (occupied.count(name))
+          name += '_';
+        occupied.insert(name);
         std::string qn = "xb::qname{\"" + attr.name.namespace_uri() + "\", \"" +
                          attr.name.local_name() + "\"}";
 
@@ -2678,7 +2766,8 @@ namespace xb {
             emit_read_simple_content_base_attrs(body, resolver.schemas,
                                                 sc->base_type_name, resolver);
         }
-        emit_read_attributes(body, ct.attributes(), resolver.schemas, resolver);
+        emit_read_attributes(body, ct.attributes(), resolver.schemas, resolver,
+                             collect_element_field_names(ct, resolver));
         emit_read_attribute_group_refs(body, ct.attribute_group_refs(),
                                        resolver.schemas, resolver);
 
@@ -2697,7 +2786,9 @@ namespace xb {
       }
 
       // Read attributes from current start_element
-      emit_read_attributes(body, ct.attributes(), resolver.schemas, resolver);
+      auto occupied_read = collect_element_field_names(ct, resolver);
+      emit_read_attributes(body, ct.attributes(), resolver.schemas, resolver,
+                           occupied_read);
       emit_read_attribute_group_refs(body, ct.attribute_group_refs(),
                                      resolver.schemas, resolver);
 
@@ -2723,6 +2814,64 @@ namespace xb {
         }
       }
       has_children = has_children || has_oc;
+
+      // Mixed content: read text nodes and element nodes into content variant
+      if (ct.mixed() && (ct.content().kind == content_kind::mixed ||
+                         ct.content().kind == content_kind::element_only)) {
+        if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
+          if (cc->content_model.has_value() &&
+              !cc->content_model->particles().empty()) {
+            body += "  auto start_depth = reader.depth();\n";
+            body += "  while (reader.read()) {\n";
+            body += "    if (reader.node_type() == "
+                    "xb::xml_node_type::end_element "
+                    "&& reader.depth() == start_depth) break;\n";
+            body += "    if (reader.node_type() == "
+                    "xb::xml_node_type::characters) {\n";
+            body += "      result.content.emplace_back("
+                    "std::string(reader.text()));\n";
+            body += "      continue;\n";
+            body += "    }\n";
+            body += "    if (reader.node_type() != "
+                    "xb::xml_node_type::start_element) continue;\n";
+            body += "    auto& name = reader.name();\n";
+            bool first = true;
+            for (const auto& p : cc->content_model->particles()) {
+              std::visit(
+                  [&](const auto& term) {
+                    using TermT = std::decay_t<decltype(term)>;
+                    if constexpr (std::is_same_v<TermT, element_decl>) {
+                      std::string kw = first ? "if" : "else if";
+                      std::string elem_qn =
+                          "xb::qname{\"" + term.name().namespace_uri() +
+                          "\", \"" + term.name().local_name() + "\"}";
+                      body += "    " + kw + " (name == " + elem_qn + ") {\n";
+                      if (is_complex_type(resolver.schemas, term.type_name())) {
+                        std::string read_fn =
+                            resolver.qualify_fn("read_", term.type_name());
+                        body += "      result.content.emplace_back(" + read_fn +
+                                "(reader));\n";
+                      } else {
+                        std::string cpp_type =
+                            resolver.resolve(term.type_name());
+                        body += "      result.content.emplace_back("
+                                "xb::read_simple_content<" +
+                                cpp_type + ">(reader));\n";
+                      }
+                      body += "    }\n";
+                      first = false;
+                    }
+                  },
+                  p.term);
+            }
+            if (!first) { body += "    else { xb::skip_element(reader); }\n"; }
+            body += "  }\n";
+            body += "  return result;\n";
+            fn.body = body;
+            return fn;
+          }
+        }
+      }
 
       if (has_children) {
         body += "  auto start_depth = reader.depth();\n";
@@ -2863,7 +3012,9 @@ namespace xb {
     // type, not as separate fields.
     std::vector<std::string>
     collect_cardinality_checks(const model_group& mg,
-                               const std::string& struct_prefix) {
+                               const std::string& struct_prefix,
+                               const type_resolver* resolver = nullptr,
+                               const std::string& enclosing_type = {}) {
       std::vector<std::string> checks;
 
       // Choice groups map to a single variant field; individual particle
@@ -2876,7 +3027,10 @@ namespace xb {
               using T = std::decay_t<decltype(term)>;
               if constexpr (std::is_same_v<T, element_decl>) {
                 std::string field =
-                    struct_prefix + to_cpp_identifier(term.name().local_name());
+                    struct_prefix +
+                    (resolver ? resolver->field_name(term.name().local_name(),
+                                                     enclosing_type)
+                              : to_cpp_identifier(term.name().local_name()));
                 bool is_collection =
                     p.occurs.is_unbounded() || p.occurs.max_occurs > 1;
                 bool is_optional =
@@ -2926,13 +3080,18 @@ namespace xb {
         has_sc_facets = has_constraining_facets(sc_ptr->facets);
       }
 
-      // Check for cardinality constraints in element_only/mixed content
+      // Check for cardinality constraints in element_only content.
+      // Mixed content types store elements in a variant vector, so individual
+      // element cardinality checks don't apply.
       bool has_card = false;
       const complex_content* cc = nullptr;
-      if (auto* cc_ptr = std::get_if<complex_content>(&ct.content().detail)) {
-        cc = cc_ptr;
-        if (cc_ptr->content_model.has_value())
-          has_card = has_cardinality_constraints(cc_ptr->content_model.value());
+      if (!ct.mixed()) {
+        if (auto* cc_ptr = std::get_if<complex_content>(&ct.content().detail)) {
+          cc = cc_ptr;
+          if (cc_ptr->content_model.has_value())
+            has_card =
+                has_cardinality_constraints(cc_ptr->content_model.value());
+        }
       }
 
       if (ct.assertions().empty() && !has_sc_facets && !has_card)
@@ -2975,8 +3134,8 @@ namespace xb {
 
       // Add cardinality checks for element_only/mixed content
       if (cc && cc->content_model.has_value()) {
-        for (const auto& check :
-             collect_cardinality_checks(cc->content_model.value(), "value.")) {
+        for (const auto& check : collect_cardinality_checks(
+                 cc->content_model.value(), "value.", &resolver, struct_name)) {
           if (!first) body += "\n      && ";
           body += check;
           first = false;

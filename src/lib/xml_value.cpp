@@ -310,8 +310,35 @@ namespace xb {
   }
 
   std::string
+  format(const std::vector<std::string>& value) {
+    std::string result;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+      if (i > 0) result += ' ';
+      result += value[i];
+    }
+    return result;
+  }
+
+  std::string
   format(const std::vector<std::byte>& value) {
     return format_base64_binary(value);
+  }
+
+  template <>
+  std::vector<std::string>
+  parse<std::vector<std::string>>(std::string_view text) {
+    std::vector<std::string> result;
+    std::size_t start = 0;
+    while (start < text.size()) {
+      while (start < text.size() && text[start] == ' ')
+        ++start;
+      if (start >= text.size()) break;
+      auto end = text.find(' ', start);
+      if (end == std::string_view::npos) end = text.size();
+      result.emplace_back(text.substr(start, end - start));
+      start = end;
+    }
+    return result;
   }
 
   template <>

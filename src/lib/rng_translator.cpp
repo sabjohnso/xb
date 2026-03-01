@@ -1,5 +1,6 @@
 #include <xb/rng_translator.hpp>
 
+#include <algorithm>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -96,11 +97,37 @@ namespace xb {
         }
       }
 
-      // Translate a content pattern into particles for a model_group
+      // Detect if a pattern is the desugared form of RELAX NG mixed content:
+      // interleave(content, text). The simplifier turns mixed { p } into
+      // interleave(p, text), so we check for an interleave where either
+      // child is a text_pattern.
+      bool
+      has_interleaved_text(const rng::pattern& p) {
+        if (p.holds<rng::interleave_pattern>()) {
+          auto& il = p.get<rng::interleave_pattern>();
+          if ((il.left && il.left->holds<rng::text_pattern>()) ||
+              (il.right && il.right->holds<rng::text_pattern>()))
+            return true;
+          // Also check nested interleaves
+          if (il.left && has_interleaved_text(*il.left)) return true;
+          if (il.right && has_interleaved_text(*il.right)) return true;
+        }
+        if (p.holds<rng::group_pattern>()) {
+          auto& g = p.get<rng::group_pattern>();
+          if (g.left && has_interleaved_text(*g.left)) return true;
+          if (g.right && has_interleaved_text(*g.right)) return true;
+        }
+        return false;
+      }
+
+      // Translate a content pattern into particles for a model_group.
+      // Sets found_text=true if a text_pattern is encountered (indicates
+      // mixed content when it appears alongside element particles).
       void
       translate_content_particles(const rng::pattern& p, const std::string& ns,
                                   std::vector<particle>& particles,
-                                  std::vector<attribute_use>& attrs) {
+                                  std::vector<attribute_use>& attrs,
+                                  bool& found_text) {
         if (p.holds<rng::element_pattern>()) {
           auto& elem = p.get<rng::element_pattern>();
           if (elem.name.holds<rng::specific_name>()) {
@@ -131,24 +158,31 @@ namespace xb {
             attrs.push_back(attribute_use{attr_name, type_name, true,
                                           std::nullopt, std::nullopt});
           }
+        } else if (p.holds<rng::text_pattern>()) {
+          found_text = true;
         } else if (p.holds<rng::group_pattern>()) {
           auto& g = p.get<rng::group_pattern>();
           if (g.left)
-            translate_content_particles(*g.left, ns, particles, attrs);
+            translate_content_particles(*g.left, ns, particles, attrs,
+                                        found_text);
           if (g.right)
-            translate_content_particles(*g.right, ns, particles, attrs);
+            translate_content_particles(*g.right, ns, particles, attrs,
+                                        found_text);
         } else if (p.holds<rng::interleave_pattern>()) {
           auto& il = p.get<rng::interleave_pattern>();
           if (il.left)
-            translate_content_particles(*il.left, ns, particles, attrs);
+            translate_content_particles(*il.left, ns, particles, attrs,
+                                        found_text);
           if (il.right)
-            translate_content_particles(*il.right, ns, particles, attrs);
+            translate_content_particles(*il.right, ns, particles, attrs,
+                                        found_text);
         } else if (p.holds<rng::one_or_more_pattern>()) {
           auto& om = p.get<rng::one_or_more_pattern>();
           if (om.content) {
             std::vector<particle> inner;
             std::vector<attribute_use> inner_attrs;
-            translate_content_particles(*om.content, ns, inner, inner_attrs);
+            translate_content_particles(*om.content, ns, inner, inner_attrs,
+                                        found_text);
             for (auto& ip : inner) {
               ip.occurs = occurrence{1, unbounded};
               particles.push_back(std::move(ip));
@@ -161,28 +195,32 @@ namespace xb {
           if (ch.right && ch.right->holds<rng::empty_pattern>() && ch.left) {
             std::vector<particle> inner;
             std::vector<attribute_use> inner_attrs;
-            translate_content_particles(*ch.left, ns, inner, inner_attrs);
+            translate_content_particles(*ch.left, ns, inner, inner_attrs,
+                                        found_text);
             make_optional(inner, inner_attrs, particles, attrs);
           } else if (ch.left && ch.left->holds<rng::empty_pattern>() &&
                      ch.right) {
             std::vector<particle> inner;
             std::vector<attribute_use> inner_attrs;
-            translate_content_particles(*ch.right, ns, inner, inner_attrs);
+            translate_content_particles(*ch.right, ns, inner, inner_attrs,
+                                        found_text);
             make_optional(inner, inner_attrs, particles, attrs);
           } else {
             if (ch.left)
-              translate_content_particles(*ch.left, ns, particles, attrs);
+              translate_content_particles(*ch.left, ns, particles, attrs,
+                                          found_text);
             if (ch.right)
-              translate_content_particles(*ch.right, ns, particles, attrs);
+              translate_content_particles(*ch.right, ns, particles, attrs,
+                                          found_text);
           }
         } else if (p.holds<rng::ref_pattern>()) {
           auto& ref = p.get<rng::ref_pattern>();
           auto it = define_map.find(ref.name);
           if (it != define_map.end() && it->second->body)
-            translate_content_particles(*it->second->body, ns, particles,
-                                        attrs);
+            translate_content_particles(*it->second->body, ns, particles, attrs,
+                                        found_text);
         }
-        // text, empty, data, value: no particles in complex content
+        // empty, data, value: no particles in complex content
       }
 
       // Determine compositor kind from a pattern
@@ -202,6 +240,53 @@ namespace xb {
         return compositor_kind::sequence;
       }
 
+      // Deduplicate particles by element qname, keeping the most permissive
+      // occurrence (min of min_occurs, max of max_occurs). RELAX NG interleave
+      // flattening can produce the same element multiple times.
+      void
+      deduplicate_particles(std::vector<particle>& particles) {
+        std::unordered_map<std::string, std::size_t> seen;
+        std::vector<particle> result;
+        for (auto& p : particles) {
+          auto* ed = std::get_if<element_decl>(&p.term);
+          if (!ed) {
+            result.push_back(std::move(p));
+            continue;
+          }
+          std::string key =
+              ed->name().namespace_uri() + "#" + ed->name().local_name();
+          auto it = seen.find(key);
+          if (it == seen.end()) {
+            seen[key] = result.size();
+            result.push_back(std::move(p));
+          } else {
+            // Multiple copies of the same element → widen to unbounded
+            auto& existing = result[it->second];
+            existing.occurs.min_occurs =
+                std::min(existing.occurs.min_occurs, p.occurs.min_occurs);
+            existing.occurs.max_occurs = unbounded;
+          }
+        }
+        particles = std::move(result);
+      }
+
+      // Deduplicate attributes by qname. RELAX NG interleave flattening can
+      // produce the same attribute multiple times from different branches.
+      void
+      deduplicate_attributes(std::vector<attribute_use>& attrs) {
+        std::unordered_map<std::string, std::size_t> seen;
+        std::vector<attribute_use> result;
+        for (auto& a : attrs) {
+          std::string key = a.name.namespace_uri() + "#" + a.name.local_name();
+          if (seen.find(key) == seen.end()) {
+            seen[key] = result.size();
+            result.push_back(std::move(a));
+          }
+          // Duplicates are silently dropped (first-wins)
+        }
+        attrs = std::move(result);
+      }
+
       // Translate an element body into a complex type
       void
       translate_element_body(const qname& elem_name, const rng::pattern& body,
@@ -214,15 +299,18 @@ namespace xb {
 
         std::vector<particle> particles;
         std::vector<attribute_use> attrs;
-        translate_content_particles(body, ns, particles, attrs);
+        bool is_mixed = false;
+        translate_content_particles(body, ns, particles, attrs, is_mixed);
+        deduplicate_particles(particles);
+        deduplicate_attributes(attrs);
 
         compositor_kind compositor = pattern_compositor(body);
 
         if (particles.empty() && attrs.empty()) {
-          // Empty content type
+          // Empty content type (text-only mixed becomes empty content)
           content_type ct;
           result.add_complex_type(
-              complex_type(elem_name, false, false, std::move(ct)));
+              complex_type(elem_name, false, is_mixed, std::move(ct)));
           return;
         }
 
@@ -230,7 +318,7 @@ namespace xb {
           // Attributes only → empty content with attributes
           content_type ct;
           result.add_complex_type(complex_type(
-              elem_name, false, false, std::move(ct), std::move(attrs)));
+              elem_name, false, is_mixed, std::move(ct), std::move(attrs)));
           return;
         }
 
@@ -238,8 +326,10 @@ namespace xb {
         model_group mg(compositor, std::move(particles));
         complex_content cc(qname{}, derivation_method::restriction,
                            std::move(mg));
-        content_type ct(content_kind::element_only, std::move(cc));
-        result.add_complex_type(complex_type(elem_name, false, false,
+        content_kind ck =
+            is_mixed ? content_kind::mixed : content_kind::element_only;
+        content_type ct(ck, std::move(cc));
+        result.add_complex_type(complex_type(elem_name, false, is_mixed,
                                              std::move(ct), std::move(attrs)));
       }
 

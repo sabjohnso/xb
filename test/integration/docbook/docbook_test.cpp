@@ -122,7 +122,7 @@ TEST_CASE("DocBook RNG schema parses without errors",
 // ===== Phase A2: RNC parsing (compact syntax) =====
 
 TEST_CASE("DocBook RNC schema parses without errors",
-          "[docbook][integration][parse][!mayfail]") {
+          "[docbook][integration][parse]") {
   REQUIRE(fs::exists(schema_dir() / "docbook.rnc"));
 
   auto result = parse_rnc();
@@ -139,7 +139,7 @@ TEST_CASE("DocBook RNC schema parses without errors",
 // ===== Phase A3: Parser equivalence =====
 
 TEST_CASE("RNG and RNC parsers produce the same define names",
-          "[docbook][integration][parse][!mayfail]") {
+          "[docbook][integration][parse]") {
   auto rng_result = parse_rng();
   auto rnc_result = parse_rnc();
 
@@ -148,6 +148,9 @@ TEST_CASE("RNG and RNC parsers produce the same define names",
 
   auto rng_names = define_names(rng_result.get<grammar_pattern>());
   auto rnc_names = define_names(rnc_result.get<grammar_pattern>());
+
+  // Filter out __start__ synthetic define (RNC parser implementation detail)
+  rnc_names.erase("__start__");
 
   CHECK(rng_names == rnc_names);
 
@@ -319,7 +322,7 @@ compile_generated_files(const std::vector<cpp_file>& files,
 }
 
 TEST_CASE("DocBook generated code compiles",
-          "[docbook][integration][compile][!mayfail]") {
+          "[docbook][integration][compile]") {
   auto files = generate_docbook();
 
   REQUIRE(!files.empty());
@@ -329,24 +332,25 @@ TEST_CASE("DocBook generated code compiles",
 // ===== Phase F: Round-trip (stretch goal) =====
 
 TEST_CASE("DocBook round-trip: minimal article",
-          "[docbook][integration][roundtrip][!mayfail]") {
-  // This documents the aspiration for round-trip serialization of
-  // DocBook documents. Expected to fail until context-sensitive content
-  // and mixed content are fully supported in the translator.
+          "[docbook][integration][roundtrip]") {
   auto files = generate_docbook();
   REQUIRE(!files.empty());
 
-  // Check that at least the article element type was generated
+  // Verify key DocBook types are generated in the header
   bool has_article = false;
+  bool has_para = false;
+  bool has_book = false;
   for (const auto& f : files) {
     if (f.kind == file_kind::header) {
       cpp_writer writer;
       auto content = writer.write(f);
-      if (content.find("article") != std::string::npos) {
+      if (content.find("struct article") != std::string::npos)
         has_article = true;
-        break;
-      }
+      if (content.find("struct para") != std::string::npos) has_para = true;
+      if (content.find("struct book") != std::string::npos) has_book = true;
     }
   }
   CHECK(has_article);
+  CHECK(has_para);
+  CHECK(has_book);
 }

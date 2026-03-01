@@ -4268,3 +4268,187 @@ TEST_CASE("field name shadowing type name is disambiguated", "[codegen]") {
   // Original name "part" should NOT exist as a field
   CHECK(find_field(*book, "part") == nullptr);
 }
+
+// ===== Attribute field name disambiguation in write/read =====
+
+TEST_CASE("attribute field name disambiguated in write function",
+          "[codegen][serialization]") {
+  // When an attribute name shadows a type name, the field gets a '_' suffix.
+  // The write/read functions must use the same disambiguated name.
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Type "revision" exists in the schema
+  {
+    content_type ct;
+    s.add_complex_type(complex_type(qname{"urn:test", "Revision"}, false, false,
+                                    std::move(ct)));
+  }
+
+  // Type "item" has an attribute named "revision" which shadows type "revision"
+  {
+    std::vector<attribute_use> attrs;
+    attrs.push_back(attribute_use{qname{"", "revision"}, qname{xs_ns, "string"},
+                                  false, std::nullopt, std::nullopt});
+    content_type ct;
+    s.add_complex_type(complex_type(qname{"urn:test", "Item"}, false, false,
+                                    std::move(ct), std::move(attrs)));
+  }
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  // Struct should have "revision_" (disambiguated)
+  auto* st = find_struct(files[0], "item");
+  REQUIRE(st != nullptr);
+  CHECK(find_field(*st, "revision_") != nullptr);
+  CHECK(find_field(*st, "revision") == nullptr);
+
+  // Write function must reference "revision_" not "revision"
+  auto* wfn = find_function(files[0], "write_item");
+  REQUIRE(wfn != nullptr);
+  CHECK(wfn->body.find("value.revision_") != std::string::npos);
+  CHECK(wfn->body.find("value.revision)") == std::string::npos);
+
+  // Read function must reference "revision_" not "revision"
+  auto* rfn = find_function(files[0], "read_item");
+  REQUIRE(rfn != nullptr);
+  CHECK(rfn->body.find("result.revision_") != std::string::npos);
+  CHECK(rfn->body.find("result.revision)") == std::string::npos);
+  CHECK(rfn->body.find("result.revision =") == std::string::npos);
+}
+
+TEST_CASE(
+    "element-attribute name collision: attribute field gets extra underscore",
+    "[codegen][serialization]") {
+  // When an element particle and an attribute share the same XML local name,
+  // the element field occupies the first disambiguated name (e.g. "revision_")
+  // and the attribute field must get an additional underscore ("revision__").
+  // Write/read functions must use the correct field name for each.
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Type "revision" (complex, so "revision" is a known type name)
+  {
+    content_type ct;
+    s.add_complex_type(complex_type(qname{"urn:test", "revision"}, false, false,
+                                    std::move(ct)));
+  }
+
+  // Type "container" with:
+  //   - element particle "revision" (type revision, unbounded)
+  //   - attribute "revision" (type string, optional)
+  {
+    std::vector<particle> particles;
+    particles.emplace_back(element_decl(qname{"urn:test", "revision"},
+                                        qname{"urn:test", "revision"}),
+                           occurrence{0, unbounded});
+    model_group seq(compositor_kind::sequence, std::move(particles));
+    content_type ct(content_kind::element_only,
+                    complex_content(qname{}, derivation_method::restriction,
+                                    std::move(seq)));
+
+    std::vector<attribute_use> attrs;
+    attrs.push_back(attribute_use{qname{"", "revision"}, qname{xs_ns, "string"},
+                                  false, std::nullopt, std::nullopt});
+
+    s.add_complex_type(complex_type(qname{"urn:test", "container"}, false,
+                                    false, std::move(ct), std::move(attrs)));
+  }
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  // Struct: element field "revision_", attribute field "revision__"
+  auto* st = find_struct(files[0], "container");
+  REQUIRE(st != nullptr);
+  CHECK(find_field(*st, "revision_") != nullptr);  // element
+  CHECK(find_field(*st, "revision__") != nullptr); // attribute
+
+  // Write function must use "revision__" for the attribute, not "revision_"
+  auto* wfn = find_function(files[0], "write_container");
+  REQUIRE(wfn != nullptr);
+  CHECK(wfn->body.find("value.revision__") != std::string::npos);
+
+  // Read function must use "revision__" for the attribute
+  auto* rfn = find_function(files[0], "read_container");
+  REQUIRE(rfn != nullptr);
+  CHECK(rfn->body.find("result.revision__") != std::string::npos);
+}
+
+// ===== Mixed Content Codegen: Write and Read =====
+
+TEST_CASE("mixed content write function dispatches element alternatives",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "bold"},
+                                      qname{xs_ns, "string"}));
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "italic"}, qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::mixed,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "MixedType"},
+                                  false, true, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* fn = find_function(files[0], "write_mixed_type");
+  REQUIRE(fn != nullptr);
+  // Write function should handle string text nodes
+  CHECK(fn->body.find("writer.characters(v)") != std::string::npos);
+  // Write function should handle element alternatives (bold, italic)
+  CHECK(fn->body.find("writer.start_element") != std::string::npos);
+  CHECK(fn->body.find("writer.end_element") != std::string::npos);
+}
+
+TEST_CASE("mixed content read function handles text and element nodes",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "bold"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::mixed,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "MixedType"},
+                                  false, true, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* fn = find_function(files[0], "read_mixed_type");
+  REQUIRE(fn != nullptr);
+  // Read function should handle characters (text) nodes
+  CHECK(fn->body.find("characters") != std::string::npos);
+  // Read function should handle element dispatching
+  CHECK(fn->body.find("start_element") != std::string::npos);
+}

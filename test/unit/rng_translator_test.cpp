@@ -276,3 +276,116 @@ TEST_CASE("translate: ref in body links to correct type", "[rng_translator]") {
   // Both "container" and "item" should be element declarations
   CHECK(s.elements().size() >= 2);
 }
+
+// -- particle deduplication: interleave with repeated element names
+// ------------
+
+TEST_CASE(
+    "translate: interleave with duplicate elements deduplicates particles",
+    "[rng_translator]") {
+  // Simulate what DocBook produces: interleave with the same element appearing
+  // in multiple branches (e.g., imagedata appearing 3x in imageobject).
+  // The translator should deduplicate to one particle per element qname.
+  auto content = make_pattern(interleave_pattern{
+      make_pattern(group_pattern{
+          make_pattern(
+              element_pattern{name_class(specific_name{"urn:test", "child"}),
+                              make_pattern(text_pattern{})}),
+          make_pattern(
+              element_pattern{name_class(specific_name{"urn:test", "child"}),
+                              make_pattern(text_pattern{})})}),
+      make_pattern(
+          element_pattern{name_class(specific_name{"urn:test", "child"}),
+                          make_pattern(text_pattern{})})});
+
+  std::vector<define> defs;
+  defs.push_back(define{"parent", combine_method::none,
+                        make_pattern(element_pattern{
+                            name_class(specific_name{"urn:test", "parent"}),
+                            std::move(content)})});
+
+  auto p = make_grammar("parent", std::move(defs));
+  auto ss = rng_translate(p);
+
+  const auto& s = ss.schemas()[0];
+  for (const auto& ct : s.complex_types()) {
+    if (ct.name().local_name() == "parent") {
+      auto* cc = std::get_if<complex_content>(&ct.content().detail);
+      REQUIRE(cc != nullptr);
+      REQUIRE(cc->content_model.has_value());
+      // Should have exactly 1 particle (deduplicated), not 3
+      CHECK(cc->content_model->particles().size() == 1);
+      // The deduplicated particle should allow unbounded occurrences
+      CHECK(cc->content_model->particles()[0].occurs.is_unbounded());
+    }
+  }
+}
+
+// -- attribute deduplication: interleave with repeated attributes
+// --------------
+
+TEST_CASE("translate: interleave with duplicate attributes deduplicates",
+          "[rng_translator]") {
+  // RNG interleave flattening can produce duplicate attributes (e.g.,
+  // "units" appearing in multiple interleaved groups from DocBook).
+  auto content = make_pattern(interleave_pattern{
+      make_pattern(group_pattern{
+          make_pattern(attribute_pattern{
+              name_class(specific_name{"", "lang"}),
+              make_pattern(data_pattern{xsd_dt, "string", {}, nullptr})}),
+          make_pattern(
+              element_pattern{name_class(specific_name{"urn:test", "x"}),
+                              make_pattern(text_pattern{})})}),
+      make_pattern(attribute_pattern{
+          name_class(specific_name{"", "lang"}),
+          make_pattern(data_pattern{xsd_dt, "string", {}, nullptr})})});
+
+  std::vector<define> defs;
+  defs.push_back(define{
+      "item", combine_method::none,
+      make_pattern(element_pattern{
+          name_class(specific_name{"urn:test", "item"}), std::move(content)})});
+
+  auto p = make_grammar("item", std::move(defs));
+  auto ss = rng_translate(p);
+
+  const auto& s = ss.schemas()[0];
+  for (const auto& ct : s.complex_types()) {
+    if (ct.name().local_name() == "item") {
+      // Should have exactly 1 attribute (deduplicated), not 2
+      CHECK(ct.attributes().size() == 1);
+      CHECK(ct.attributes()[0].name.local_name() == "lang");
+    }
+  }
+}
+
+// -- mixed content detection: interleave(content, text) -----------------------
+
+TEST_CASE("translate: interleave with text detects mixed content",
+          "[rng_translator]") {
+  // After RNG simplification, mixed { element x { text } } becomes:
+  //   interleave(element(x, text), text)
+  // The translator must detect this as mixed content.
+  auto content = make_pattern(
+      interleave_pattern{make_pattern(element_pattern{
+                             name_class(specific_name{"urn:test", "bold"}),
+                             make_pattern(text_pattern{})}),
+                         make_pattern(text_pattern{})});
+
+  std::vector<define> defs;
+  defs.push_back(define{
+      "para", combine_method::none,
+      make_pattern(element_pattern{
+          name_class(specific_name{"urn:test", "para"}), std::move(content)})});
+
+  auto p = make_grammar("para", std::move(defs));
+  auto ss = rng_translate(p);
+
+  const auto& s = ss.schemas()[0];
+  for (const auto& ct : s.complex_types()) {
+    if (ct.name().local_name() == "para") {
+      CHECK(ct.mixed() == true);
+      CHECK(ct.content().kind == content_kind::mixed);
+    }
+  }
+}
