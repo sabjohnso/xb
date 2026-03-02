@@ -191,3 +191,28 @@ add_executable(xb_schematron_overlay_test schematron_overlay_test.cpp)
 target_link_libraries(xb_schematron_overlay_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_schematron_overlay_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_schematron_overlay_test COMMAND xb_schematron_overlay_test)
+
+add_executable(xb_soap_model_test soap_model_test.cpp)
+target_link_libraries(xb_soap_model_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_soap_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_soap_model_test COMMAND xb_soap_model_test)
+
+add_executable(xb_soap_envelope_test soap_envelope_test.cpp)
+target_link_libraries(xb_soap_envelope_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_soap_envelope_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_soap_envelope_test COMMAND xb_soap_envelope_test)
+
+add_executable(xb_soap_fault_test soap_fault_test.cpp)
+target_link_libraries(xb_soap_fault_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_soap_fault_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_soap_fault_test COMMAND xb_soap_fault_test)
+
+add_executable(xb_soap_header_test soap_header_test.cpp)
+target_link_libraries(xb_soap_header_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_soap_header_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_soap_header_test COMMAND xb_soap_header_test)
+
+add_executable(xb_soap_integration_test soap_integration_test.cpp)
+target_link_libraries(xb_soap_integration_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_soap_integration_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_soap_integration_test COMMAND xb_soap_integration_test)

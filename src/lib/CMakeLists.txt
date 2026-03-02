@@ -29,7 +29,9 @@ add_library(xb STATIC
   dtd_parser.cpp
   dtd_translator.cpp
   schematron_parser.cpp
-  schematron_overlay.cpp)
+  schematron_overlay.cpp
+  soap_envelope.cpp
+  soap_fault.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header
