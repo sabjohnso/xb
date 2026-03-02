@@ -510,7 +510,7 @@ namespace xb {
             group.children.push_back(parse_cp());
           }
           expect(token_type::close_paren);
-          group.quantifier = parse_quantifier();
+          group.quant = parse_quantifier();
           return group;
         } else if (current_.type == token_type::pipe) {
           dtd::content_particle group;
@@ -521,7 +521,7 @@ namespace xb {
             group.children.push_back(parse_cp());
           }
           expect(token_type::close_paren);
-          group.quantifier = parse_quantifier();
+          group.quant = parse_quantifier();
           return group;
         } else {
           // Single child in parens: (a) or (a+)
@@ -530,7 +530,7 @@ namespace xb {
           dtd::content_particle group;
           group.kind = dtd::particle_kind::sequence;
           group.children.push_back(std::move(first));
-          group.quantifier = q;
+          group.quant = q;
           return group;
         }
       }
@@ -549,7 +549,7 @@ namespace xb {
         dtd::content_particle cp;
         cp.kind = dtd::particle_kind::name;
         cp.name = expect_name();
-        cp.quantifier = parse_quantifier();
+        cp.quant = parse_quantifier();
         return cp;
       }
 
@@ -655,19 +655,19 @@ namespace xb {
       parse_default_decl(dtd::attribute_def& ad) {
         if (current_.type == token_type::kw_required) {
           advance();
-          ad.default_kind = dtd::default_kind::required;
+          ad.dflt = dtd::default_kind::required;
         } else if (current_.type == token_type::kw_implied) {
           advance();
-          ad.default_kind = dtd::default_kind::implied;
+          ad.dflt = dtd::default_kind::implied;
         } else if (current_.type == token_type::kw_fixed) {
           advance();
-          ad.default_kind = dtd::default_kind::fixed;
+          ad.dflt = dtd::default_kind::fixed;
           ad.default_value = expect_literal();
         } else if (current_.type == token_type::literal) {
-          ad.default_kind = dtd::default_kind::value;
+          ad.dflt = dtd::default_kind::value;
           ad.default_value = expect_literal();
         } else {
-          ad.default_kind = dtd::default_kind::implied;
+          ad.dflt = dtd::default_kind::implied;
         }
       }
 

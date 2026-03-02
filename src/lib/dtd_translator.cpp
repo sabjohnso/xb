@@ -1,3 +1,9 @@
+// GCC false-positive: unique_ptr inside std::variant triggers
+// -Wmaybe-uninitialized through deeply inlined variant internals.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include <xb/dtd_translator.hpp>
 
 #include <unordered_map>
@@ -82,11 +88,11 @@ namespace xb {
           attribute_use au;
           au.name = qname("", ad->name);
           au.type_name = attr_type_qname(*ad);
-          au.required = (ad->default_kind == dtd::default_kind::required);
+          au.required = (ad->dflt == dtd::default_kind::required);
 
-          if (ad->default_kind == dtd::default_kind::fixed) {
+          if (ad->dflt == dtd::default_kind::fixed) {
             au.fixed_value = ad->default_value;
-          } else if (ad->default_kind == dtd::default_kind::value) {
+          } else if (ad->dflt == dtd::default_kind::value) {
             au.default_value = ad->default_value;
           }
 
@@ -138,7 +144,7 @@ namespace xb {
           qname elem_name("", cp.name);
           qname type_name = resolve_child_type(cp.name);
           particles.emplace_back(element_decl(elem_name, type_name),
-                                 quantifier_occurrence(cp.quantifier));
+                                 quantifier_occurrence(cp.quant));
         } else if (cp.kind == dtd::particle_kind::sequence ||
                    cp.kind == dtd::particle_kind::choice) {
           compositor_kind comp = (cp.kind == dtd::particle_kind::sequence)
@@ -152,7 +158,7 @@ namespace xb {
 
           auto mg = std::make_unique<model_group>(comp, std::move(inner));
           particles.emplace_back(std::move(mg),
-                                 quantifier_occurrence(cp.quantifier));
+                                 quantifier_occurrence(cp.quant));
         }
       }
 

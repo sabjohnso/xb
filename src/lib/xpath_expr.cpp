@@ -1,3 +1,9 @@
+// GCC-12 false-positive: -O3 string operations in system headers trigger
+// -Wrestrict through __builtin_memcpy analysis.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wrestrict"
+#endif
+
 #include <xb/xpath_expr.hpp>
 
 #include <cctype>

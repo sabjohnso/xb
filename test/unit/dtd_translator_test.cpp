@@ -175,7 +175,7 @@ TEST_CASE("dtd translate: quantifier * -> {0, unbounded}", "[dtd_translator]") {
   dd::content_particle child;
   child.kind = dd::particle_kind::name;
   child.name = "item";
-  child.quantifier = dd::quantifier::zero_or_more;
+  child.quant = dd::quantifier::zero_or_more;
 
   dd::content_particle seq;
   seq.kind = dd::particle_kind::sequence;
@@ -210,7 +210,7 @@ TEST_CASE("dtd translate: quantifier + -> {1, unbounded}", "[dtd_translator]") {
   dd::content_particle child;
   child.kind = dd::particle_kind::name;
   child.name = "item";
-  child.quantifier = dd::quantifier::one_or_more;
+  child.quant = dd::quantifier::one_or_more;
 
   dd::content_particle seq;
   seq.kind = dd::particle_kind::sequence;
@@ -243,7 +243,7 @@ TEST_CASE("dtd translate: quantifier ? -> {0, 1}", "[dtd_translator]") {
   dd::content_particle child;
   child.kind = dd::particle_kind::name;
   child.name = "item";
-  child.quantifier = dd::quantifier::optional;
+  child.quant = dd::quantifier::optional;
 
   dd::content_particle seq;
   seq.kind = dd::particle_kind::sequence;
@@ -303,7 +303,7 @@ TEST_CASE("dtd translate: CDATA attribute -> xs:string attribute_use",
   dd::attribute_def ad;
   ad.name = "src";
   ad.type = dd::attribute_type::cdata;
-  ad.default_kind = dd::default_kind::required;
+  ad.dflt = dd::default_kind::required;
   al.attributes.push_back(std::move(ad));
 
   dd::document doc;
@@ -337,7 +337,7 @@ TEST_CASE("dtd translate: ID attribute -> xs:ID", "[dtd_translator]") {
   dd::attribute_def ad;
   ad.name = "id";
   ad.type = dd::attribute_type::id;
-  ad.default_kind = dd::default_kind::implied;
+  ad.dflt = dd::default_kind::implied;
   al.attributes.push_back(std::move(ad));
 
   dd::document doc;
@@ -372,7 +372,7 @@ TEST_CASE("dtd translate: enumeration attribute -> simple type with enum facet",
   ad.name = "genre";
   ad.type = dd::attribute_type::enumeration;
   ad.enum_values = {"fiction", "nonfiction", "poetry"};
-  ad.default_kind = dd::default_kind::value;
+  ad.dflt = dd::default_kind::value;
   ad.default_value = "fiction";
   al.attributes.push_back(std::move(ad));
 
@@ -406,7 +406,7 @@ TEST_CASE("dtd translate: FIXED attribute has fixed_value",
   dd::attribute_def ad;
   ad.name = "version";
   ad.type = dd::attribute_type::cdata;
-  ad.default_kind = dd::default_kind::fixed;
+  ad.dflt = dd::default_kind::fixed;
   ad.default_value = "1.0";
   al.attributes.push_back(std::move(ad));
 

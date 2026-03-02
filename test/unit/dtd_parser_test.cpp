@@ -39,7 +39,7 @@ TEST_CASE("dtd parser: ELEMENT book (chapter+)", "[dtd_parser]") {
   CHECK(cp.kind == particle_kind::sequence);
   REQUIRE(cp.children.size() == 1);
   CHECK(cp.children[0].name == "chapter");
-  CHECK(cp.children[0].quantifier == quantifier::one_or_more);
+  CHECK(cp.children[0].quant == quantifier::one_or_more);
 }
 
 // -- 4. Nested groups: (a, b, (c | d)*) ---------------------------------------
@@ -57,7 +57,7 @@ TEST_CASE("dtd parser: ELEMENT doc (a, b, (c | d)*)", "[dtd_parser]") {
   CHECK(root.children[0].name == "a");
   CHECK(root.children[1].name == "b");
   CHECK(root.children[2].kind == particle_kind::choice);
-  CHECK(root.children[2].quantifier == quantifier::zero_or_more);
+  CHECK(root.children[2].quant == quantifier::zero_or_more);
   REQUIRE(root.children[2].children.size() == 2);
   CHECK(root.children[2].children[0].name == "c");
   CHECK(root.children[2].children[1].name == "d");
@@ -87,7 +87,7 @@ TEST_CASE("dtd parser: ATTLIST book id ID #IMPLIED", "[dtd_parser]") {
   auto& ad = doc.attlists[0].attributes[0];
   CHECK(ad.name == "id");
   CHECK(ad.type == attribute_type::id);
-  CHECK(ad.default_kind == default_kind::implied);
+  CHECK(ad.dflt == default_kind::implied);
 }
 
 // -- 7. Enumeration attribute: (fiction | nonfiction) "fiction"
@@ -104,7 +104,7 @@ TEST_CASE("dtd parser: ATTLIST enumeration with default", "[dtd_parser]") {
   CHECK(ad.enum_values.size() == 2);
   CHECK(ad.enum_values[0] == "fiction");
   CHECK(ad.enum_values[1] == "nonfiction");
-  CHECK(ad.default_kind == default_kind::value);
+  CHECK(ad.dflt == default_kind::value);
   CHECK(ad.default_value == "fiction");
 }
 
@@ -167,7 +167,7 @@ TEST_CASE("dtd parser: ATTLIST with multiple attributes", "[dtd_parser]") {
   REQUIRE(doc.attlists[0].attributes.size() == 3);
   CHECK(doc.attlists[0].attributes[0].name == "src");
   CHECK(doc.attlists[0].attributes[0].type == attribute_type::cdata);
-  CHECK(doc.attlists[0].attributes[0].default_kind == default_kind::required);
+  CHECK(doc.attlists[0].attributes[0].dflt == default_kind::required);
   CHECK(doc.attlists[0].attributes[1].name == "alt");
   CHECK(doc.attlists[0].attributes[2].name == "width");
   CHECK(doc.attlists[0].attributes[2].type == attribute_type::nmtoken);
@@ -181,7 +181,7 @@ TEST_CASE("dtd parser: ATTLIST with FIXED value", "[dtd_parser]") {
   REQUIRE(doc.attlists.size() == 1);
   auto& ad = doc.attlists[0].attributes[0];
   CHECK(ad.name == "version");
-  CHECK(ad.default_kind == default_kind::fixed);
+  CHECK(ad.dflt == default_kind::fixed);
   CHECK(ad.default_value == "1.0");
 }
 
@@ -211,8 +211,8 @@ TEST_CASE("dtd parser: ELEMENT with optional child (a, b?)", "[dtd_parser]") {
   auto& root = *doc.elements[0].content.particle;
   CHECK(root.kind == particle_kind::sequence);
   REQUIRE(root.children.size() == 2);
-  CHECK(root.children[0].quantifier == quantifier::one);
-  CHECK(root.children[1].quantifier == quantifier::optional);
+  CHECK(root.children[0].quant == quantifier::one);
+  CHECK(root.children[1].quant == quantifier::optional);
 }
 
 // -- General entity -----------------------------------------------------------

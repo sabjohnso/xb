@@ -15,7 +15,7 @@ namespace xb::dtd {
   struct content_particle {
     particle_kind kind = particle_kind::name;
     std::string name;
-    quantifier quantifier = quantifier::one;
+    quantifier quant = quantifier::one;
     std::vector<content_particle> children;
   };
 
@@ -50,7 +50,7 @@ namespace xb::dtd {
     std::string name;
     attribute_type type = attribute_type::cdata;
     std::vector<std::string> enum_values;
-    default_kind default_kind = default_kind::implied;
+    default_kind dflt = default_kind::implied;
     std::string default_value;
   };
 
