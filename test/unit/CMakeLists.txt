@@ -216,3 +216,13 @@ add_executable(xb_soap_integration_test soap_integration_test.cpp)
 target_link_libraries(xb_soap_integration_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_soap_integration_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_soap_integration_test COMMAND xb_soap_integration_test)
+
+add_executable(xb_wsdl_model_test wsdl_model_test.cpp)
+target_link_libraries(xb_wsdl_model_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl_model_test COMMAND xb_wsdl_model_test)
+
+add_executable(xb_wsdl_parser_test wsdl_parser_test.cpp)
+target_link_libraries(xb_wsdl_parser_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl_parser_test COMMAND xb_wsdl_parser_test)

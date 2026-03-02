@@ -31,7 +31,8 @@ add_library(xb STATIC
   schematron_parser.cpp
   schematron_overlay.cpp
   soap_envelope.cpp
-  soap_fault.cpp)
+  soap_fault.cpp
+  wsdl_parser.cpp)
 
 target_link_libraries(xb
   PUBLIC xb_header

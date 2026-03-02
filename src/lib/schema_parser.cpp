@@ -718,7 +718,11 @@ namespace xb {
       throw std::runtime_error(
           "schema_parser: expected <xs:schema> root element");
     }
+    return parse_at_element(reader);
+  }
 
+  schema
+  schema_parser::parse_at_element(xml_reader& reader) {
     schema result;
 
     // Read targetNamespace
