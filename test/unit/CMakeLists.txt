@@ -226,3 +226,28 @@ add_executable(xb_wsdl_parser_test wsdl_parser_test.cpp)
 target_link_libraries(xb_wsdl_parser_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_wsdl_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wsdl_parser_test COMMAND xb_wsdl_parser_test)
+
+add_executable(xb_service_model_test service_model_test.cpp)
+target_link_libraries(xb_service_model_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_service_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_service_model_test COMMAND xb_service_model_test)
+
+add_executable(xb_wsdl_resolver_test wsdl_resolver_test.cpp)
+target_link_libraries(xb_wsdl_resolver_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl_resolver_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl_resolver_test COMMAND xb_wsdl_resolver_test)
+
+add_executable(xb_wsdl_support_test wsdl_support_test.cpp)
+target_link_libraries(xb_wsdl_support_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl_support_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl_support_test COMMAND xb_wsdl_support_test)
+
+add_executable(xb_wsdl_codegen_test wsdl_codegen_test.cpp)
+target_link_libraries(xb_wsdl_codegen_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl_codegen_test COMMAND xb_wsdl_codegen_test)
+
+add_executable(xb_wsdl_server_codegen_test wsdl_server_codegen_test.cpp)
+target_link_libraries(xb_wsdl_server_codegen_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl_server_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl_server_codegen_test COMMAND xb_wsdl_server_codegen_test)

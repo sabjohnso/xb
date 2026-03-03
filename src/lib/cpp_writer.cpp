@@ -154,6 +154,8 @@ namespace xb {
               write_type_alias(os, d);
             } else if constexpr (std::is_same_v<T, cpp_forward_decl>) {
               write_forward_decl(os, d);
+            } else if constexpr (std::is_same_v<T, cpp_raw_text>) {
+              os << d.text;
             }
           },
           decl);

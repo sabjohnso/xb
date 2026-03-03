@@ -73,8 +73,15 @@ namespace xb {
     operator==(const cpp_function&) const = default;
   };
 
+  struct cpp_raw_text {
+    std::string text;
+
+    bool
+    operator==(const cpp_raw_text&) const = default;
+  };
+
   using cpp_decl = std::variant<cpp_struct, cpp_enum, cpp_type_alias,
-                                cpp_forward_decl, cpp_function>;
+                                cpp_forward_decl, cpp_function, cpp_raw_text>;
 
   struct cpp_namespace {
     std::string name;
