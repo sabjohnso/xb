@@ -280,12 +280,15 @@ TEST_CASE("wsdl codegen: client includes contain transport and support",
 
   bool has_transport = false;
   bool has_support = false;
+  bool has_http_transport = false;
   for (const auto& f : files) {
     for (const auto& inc : f.includes) {
       if (contains(inc.path, "wsdl_transport")) has_transport = true;
       if (contains(inc.path, "wsdl_support")) has_support = true;
+      if (contains(inc.path, "http_transport")) has_http_transport = true;
     }
   }
   CHECK(has_transport);
   CHECK(has_support);
+  CHECK(has_http_transport);
 }

@@ -293,6 +293,7 @@ namespace xb {
             to_snake_case(to_cpp_identifier(port.name)) + "_client.hpp";
         file.kind = file_kind::header;
         file.includes.push_back({"<xb/wsdl_transport.hpp>"});
+        file.includes.push_back({"<xb/http_transport.hpp>"});
         file.includes.push_back({"<xb/wsdl_support.hpp>"});
         file.includes.push_back({"<xb/soap_model.hpp>"});
         file.includes.push_back({"<xb/qname.hpp>"});

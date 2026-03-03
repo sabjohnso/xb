@@ -34,7 +34,14 @@ add_library(xb STATIC
   soap_fault.cpp
   wsdl_parser.cpp
   wsdl_resolver.cpp
-  wsdl_codegen.cpp)
+  wsdl_codegen.cpp
+  wsa_headers.cpp)
+
+if(CURL_FOUND)
+  target_sources(xb PRIVATE http_transport.cpp)
+  target_link_libraries(xb PRIVATE $<BUILD_INTERFACE:CURL::libcurl>)
+  target_compile_definitions(xb PUBLIC XB_HAS_CURL)
+endif()
 
 target_link_libraries(xb
   PUBLIC xb_header
