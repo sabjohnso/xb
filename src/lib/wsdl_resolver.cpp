@@ -197,6 +197,7 @@ namespace xb {
         service::resolved_port rport;
         rport.name = port.name;
         rport.address = port.address;
+        rport.soap_ver = binding->soap.soap_ver;
 
         for (const auto& bop : binding->operations) {
           const auto* pt_op = find_port_type_operation(*pt, bop.name);

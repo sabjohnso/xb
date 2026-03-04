@@ -301,6 +301,9 @@ namespace xb {
             std::string style_str = opt_attr(reader, "style");
             b.soap.style = parse_style(style_str);
             b.soap.transport = opt_attr(reader, "transport");
+            b.soap.soap_ver = (reader.name().namespace_uri() == soap12b_ns)
+                                  ? soap::soap_version::v1_2
+                                  : soap::soap_version::v1_1;
             skip_element(reader);
           } else if (is_wsdl(reader.name(), "operation")) {
             b.operations.push_back(parse_binding_op(reader));

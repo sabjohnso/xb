@@ -1,6 +1,7 @@
 #include <xb/wsdl_codegen.hpp>
 
 #include <xb/naming.hpp>
+#include <xb/soap_model.hpp>
 
 #include <sstream>
 #include <string>
@@ -20,7 +21,14 @@ namespace xb {
     }
 
     std::string
-    generate_doc_lit_method(const service::resolved_operation& op) {
+    soap_version_literal(soap::soap_version ver) {
+      return ver == soap::soap_version::v1_2 ? "xb::soap::soap_version::v1_2"
+                                             : "xb::soap::soap_version::v1_1";
+    }
+
+    std::string
+    generate_doc_lit_method(const service::resolved_operation& op,
+                            soap::soap_version soap_ver) {
       std::ostringstream os;
       auto mname = method_name(op);
 
@@ -32,7 +40,7 @@ namespace xb {
         }
         os << ") {\n";
         os << "    xb::soap::envelope env;\n";
-        os << "    env.version = xb::soap::soap_version::v1_1;\n";
+        os << "    env.version = " << soap_version_literal(soap_ver) << ";\n";
         if (!op.input.empty()) {
           os << "    env.body.push_back(\n";
           os << "        xb::service::make_body_element(\n";
@@ -54,7 +62,7 @@ namespace xb {
         }
         os << ") {\n";
         os << "    xb::soap::envelope env;\n";
-        os << "    env.version = xb::soap::soap_version::v1_1;\n";
+        os << "    env.version = " << soap_version_literal(soap_ver) << ";\n";
         if (!op.input.empty()) {
           os << "    env.body.push_back(\n";
           os << "        xb::service::make_body_element(\n";
@@ -78,7 +86,8 @@ namespace xb {
     }
 
     std::string
-    generate_rpc_lit_method(const service::resolved_operation& op) {
+    generate_rpc_lit_method(const service::resolved_operation& op,
+                            soap::soap_version soap_ver) {
       std::ostringstream os;
       auto mname = method_name(op);
 
@@ -92,7 +101,7 @@ namespace xb {
       }
       os << ") {\n";
       os << "    xb::soap::envelope env;\n";
-      os << "    env.version = xb::soap::soap_version::v1_1;\n";
+      os << "    env.version = " << soap_version_literal(soap_ver) << ";\n";
       os << "    env.body.push_back(\n";
       os << "        xb::service::make_rpc_request(\n";
       os << "            xb::qname(\"" << op.rpc_namespace << "\", \""
@@ -120,11 +129,12 @@ namespace xb {
     }
 
     std::string
-    generate_client_method(const service::resolved_operation& op) {
+    generate_client_method(const service::resolved_operation& op,
+                           soap::soap_version soap_ver) {
       if (op.style == wsdl::binding_style::rpc) {
-        return generate_rpc_lit_method(op);
+        return generate_rpc_lit_method(op, soap_ver);
       }
-      return generate_doc_lit_method(op);
+      return generate_doc_lit_method(op, soap_ver);
     }
 
     cpp_raw_text
@@ -142,7 +152,7 @@ namespace xb {
       os << "\n";
 
       for (const auto& op : port.operations) {
-        os << generate_client_method(op);
+        os << generate_client_method(op, port.soap_ver);
         os << "\n";
       }
 

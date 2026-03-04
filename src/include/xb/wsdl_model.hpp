@@ -2,6 +2,7 @@
 
 #include <xb/qname.hpp>
 #include <xb/schema_set.hpp>
+#include <xb/soap_model.hpp>
 
 #include <optional>
 #include <string>
@@ -73,6 +74,7 @@ namespace xb::wsdl {
   struct soap_binding_ext {
     binding_style style = binding_style::document;
     std::string transport;
+    soap::soap_version soap_ver = soap::soap_version::v1_1;
     bool
     operator==(const soap_binding_ext&) const = default;
   };

@@ -46,6 +46,7 @@ namespace xb::service {
   struct resolved_port {
     std::string name;
     std::string address;
+    soap::soap_version soap_ver = soap::soap_version::v1_1;
     std::vector<resolved_operation> operations;
 
     bool

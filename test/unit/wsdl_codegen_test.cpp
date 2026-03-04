@@ -3,6 +3,7 @@
 #include <xb/cpp_code.hpp>
 #include <xb/cpp_writer.hpp>
 #include <xb/service_model.hpp>
+#include <xb/soap_model.hpp>
 #include <xb/wsdl_model.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -268,6 +269,36 @@ TEST_CASE("wsdl codegen: multiple operations all present", "[wsdl_codegen]") {
   CHECK(contains(output, "get_price"));
   CHECK(contains(output, "set_price"));
   CHECK(contains(output, "class stock_port_client"));
+}
+
+TEST_CASE("wsdl codegen: SOAP 1.2 client uses soap_version::v1_2",
+          "[wsdl_codegen]") {
+  auto desc = make_doc_lit_description();
+  // Set SOAP 1.2 on the port
+  desc.services[0].ports[0].soap_ver = xb::soap::soap_version::v1_2;
+
+  xb::wsdl_codegen gen;
+  auto files = gen.generate_client(desc);
+
+  REQUIRE_FALSE(files.empty());
+  auto output = render(files);
+
+  CHECK(contains(output, "soap_version::v1_2"));
+  CHECK_FALSE(contains(output, "soap_version::v1_1"));
+}
+
+TEST_CASE("wsdl codegen: default SOAP 1.1 client uses soap_version::v1_1",
+          "[wsdl_codegen]") {
+  auto desc = make_doc_lit_description();
+  // soap_ver defaults to v1_1
+
+  xb::wsdl_codegen gen;
+  auto files = gen.generate_client(desc);
+
+  REQUIRE_FALSE(files.empty());
+  auto output = render(files);
+
+  CHECK(contains(output, "soap_version::v1_1"));
 }
 
 TEST_CASE("wsdl codegen: client includes contain transport and support",

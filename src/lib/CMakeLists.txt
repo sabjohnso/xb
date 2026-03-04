@@ -35,6 +35,8 @@ add_library(xb STATIC
   wsdl_parser.cpp
   wsdl_resolver.cpp
   wsdl_codegen.cpp
+  wsdl2_parser.cpp
+  wsdl2_resolver.cpp
   wsa_headers.cpp
   wss_headers.cpp
   mime_multipart.cpp

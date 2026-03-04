@@ -315,3 +315,23 @@ if(CURL_FOUND)
   target_compile_definitions(xb_mtom_transport_test PRIVATE XB_HAS_CURL)
 endif()
 add_test(NAME xb_mtom_transport_test COMMAND xb_mtom_transport_test)
+
+add_executable(xb_wsdl2_model_test wsdl2_model_test.cpp)
+target_link_libraries(xb_wsdl2_model_test PRIVATE Catch2::Catch2WithMain xb_header)
+target_compile_features(xb_wsdl2_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl2_model_test COMMAND xb_wsdl2_model_test)
+
+add_executable(xb_wsdl2_parser_test wsdl2_parser_test.cpp)
+target_link_libraries(xb_wsdl2_parser_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl2_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl2_parser_test COMMAND xb_wsdl2_parser_test)
+
+add_executable(xb_wsdl2_resolver_test wsdl2_resolver_test.cpp)
+target_link_libraries(xb_wsdl2_resolver_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl2_resolver_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl2_resolver_test COMMAND xb_wsdl2_resolver_test)
+
+add_executable(xb_wsdl2_codegen_test wsdl2_codegen_test.cpp)
+target_link_libraries(xb_wsdl2_codegen_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_wsdl2_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wsdl2_codegen_test COMMAND xb_wsdl2_codegen_test)

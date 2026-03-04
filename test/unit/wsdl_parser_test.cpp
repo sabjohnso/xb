@@ -1,4 +1,5 @@
 #include <xb/expat_reader.hpp>
+#include <xb/soap_model.hpp>
 #include <xb/wsdl_parser.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -360,7 +361,27 @@ TEST_CASE("wsdl parser: soap 1.2 binding namespace accepted", "[wsdl_parser]") {
   REQUIRE(doc.bindings.size() == 1);
   CHECK(doc.bindings[0].name == "Soap12Binding");
   CHECK(doc.bindings[0].soap.style == wsdl::binding_style::document);
+  CHECK(doc.bindings[0].soap.soap_ver == xb::soap::soap_version::v1_2);
   CHECK(doc.bindings[0].operations[0].soap_op.soap_action == "urn:DoSomething");
   CHECK(doc.bindings[0].operations[0].input_body.use ==
         wsdl::body_use::literal);
+}
+
+TEST_CASE("wsdl parser: soap 1.1 binding sets soap_ver to v1_1",
+          "[wsdl_parser]") {
+  auto doc = parse_wsdl(R"(
+    <wsdl:definitions
+      xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+      xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+      xmlns:tns="urn:example"
+      name="Test"
+      targetNamespace="urn:example">
+      <wsdl:binding name="Soap11Binding" type="tns:MyPortType">
+        <soap:binding style="document"
+                      transport="http://schemas.xmlsoap.org/soap/http"/>
+      </wsdl:binding>
+    </wsdl:definitions>
+  )");
+  REQUIRE(doc.bindings.size() == 1);
+  CHECK(doc.bindings[0].soap.soap_ver == xb::soap::soap_version::v1_1);
 }

@@ -1,5 +1,7 @@
 #include <xb/wsdl_resolver.hpp>
 
+#include <xb/soap_model.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 namespace svc = xb::service;
@@ -411,6 +413,37 @@ TEST_CASE("wsdl resolver: missing binding reference throws",
   xb::wsdl_resolver resolver;
 
   CHECK_THROWS_AS(resolver.resolve(doc, types), std::runtime_error);
+}
+
+TEST_CASE("wsdl resolver: WSDL 1.1 with SOAP 1.2 binding propagates soap_ver",
+          "[wsdl_resolver]") {
+  auto doc = make_doc_lit_wsdl();
+  // Change binding to use SOAP 1.2
+  doc.bindings[0].soap.soap_ver = xb::soap::soap_version::v1_2;
+
+  xb::type_map types = xb::type_map::defaults();
+  xb::wsdl_resolver resolver;
+
+  auto desc = resolver.resolve(doc, types);
+  REQUIRE(desc.services.size() == 1);
+  REQUIRE(desc.services[0].ports.size() == 1);
+
+  const auto& port = desc.services[0].ports[0];
+  CHECK(port.soap_ver == xb::soap::soap_version::v1_2);
+}
+
+TEST_CASE("wsdl resolver: default soap_ver is v1_1", "[wsdl_resolver]") {
+  auto doc = make_doc_lit_wsdl();
+
+  xb::type_map types = xb::type_map::defaults();
+  xb::wsdl_resolver resolver;
+
+  auto desc = resolver.resolve(doc, types);
+  REQUIRE(desc.services.size() == 1);
+  REQUIRE(desc.services[0].ports.size() == 1);
+
+  const auto& port = desc.services[0].ports[0];
+  CHECK(port.soap_ver == xb::soap::soap_version::v1_1);
 }
 
 TEST_CASE("wsdl resolver: XSD built-in type part resolves via type_map",

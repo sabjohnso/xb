@@ -1,4 +1,5 @@
 #include <xb/service_model.hpp>
+#include <xb/soap_model.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -177,6 +178,7 @@ TEST_CASE("service model: resolved_port default construction",
   CHECK(p.name.empty());
   CHECK(p.address.empty());
   CHECK(p.operations.empty());
+  CHECK(p.soap_ver == xb::soap::soap_version::v1_1);
 }
 
 TEST_CASE("service model: resolved_port with values", "[service_model]") {
