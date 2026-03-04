@@ -35,12 +35,21 @@ add_library(xb STATIC
   wsdl_parser.cpp
   wsdl_resolver.cpp
   wsdl_codegen.cpp
-  wsa_headers.cpp)
+  wsa_headers.cpp
+  wss_headers.cpp
+  mime_multipart.cpp
+  xop.cpp)
 
 if(CURL_FOUND)
-  target_sources(xb PRIVATE http_transport.cpp)
+  target_sources(xb PRIVATE http_transport.cpp mtom_transport.cpp)
   target_link_libraries(xb PRIVATE $<BUILD_INTERFACE:CURL::libcurl>)
   target_compile_definitions(xb PUBLIC XB_HAS_CURL)
+endif()
+
+if(OPENSSL_FOUND)
+  target_sources(xb PRIVATE wss_crypto.cpp)
+  target_link_libraries(xb PRIVATE $<BUILD_INTERFACE:OpenSSL::Crypto>)
+  target_compile_definitions(xb PUBLIC XB_HAS_OPENSSL)
 endif()
 
 target_link_libraries(xb

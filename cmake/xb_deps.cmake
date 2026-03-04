@@ -9,6 +9,7 @@ find_package(CMakeUtilities)
 
 find_package(EXPAT REQUIRED)
 find_package(CURL QUIET)
+find_package(OpenSSL QUIET)
 # Findjson-commander.cmake forces FetchContent for nlohmann_json (3.12) which
 # has a different ABI from the system-installed version (3.11). Force-download
 # the schema validator too so both use the same nlohmann_json ABI.
