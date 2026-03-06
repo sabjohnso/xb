@@ -40,7 +40,8 @@ add_library(xb STATIC
   wsa_headers.cpp
   wss_headers.cpp
   mime_multipart.cpp
-  xop.cpp)
+  xop.cpp
+  json_codegen.cpp)
 
 if(CURL_FOUND)
   target_sources(xb PRIVATE http_transport.cpp mtom_transport.cpp)

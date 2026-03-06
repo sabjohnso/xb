@@ -335,3 +335,13 @@ add_executable(xb_wsdl2_codegen_test wsdl2_codegen_test.cpp)
 target_link_libraries(xb_wsdl2_codegen_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_wsdl2_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wsdl2_codegen_test COMMAND xb_wsdl2_codegen_test)
+
+add_executable(xb_json_value_test json_value_test.cpp)
+target_link_libraries(xb_json_value_test PRIVATE Catch2::Catch2WithMain xb nlohmann_json::nlohmann_json)
+target_compile_features(xb_json_value_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_json_value_test COMMAND xb_json_value_test)
+
+add_executable(xb_json_codegen_test json_codegen_test.cpp)
+target_link_libraries(xb_json_codegen_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_json_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_json_codegen_test COMMAND xb_json_codegen_test)

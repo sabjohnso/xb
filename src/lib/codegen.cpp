@@ -3,6 +3,9 @@
 #include <xb/open_content.hpp>
 #include <xb/xpath_expr.hpp>
 
+#include "codegen_internal.hpp"
+#include "json_codegen.hpp"
+
 #include <map>
 #include <set>
 
@@ -142,121 +145,8 @@ namespace xb {
       return cycle_types;
     }
 
-    struct type_resolver {
-      const schema_set& schemas;
-      const type_map& types;
-      const codegen_options& options;
-      const std::string& current_ns;
-      std::set<std::string>& referenced_namespaces;
-      // Maps variant key (resolved member types) -> canonical C++ type name
-      // for deduplicating independent union types with identical members.
-      const std::map<std::string, std::string>* union_variant_map = nullptr;
-      // Types that participate in dependency cycles, requiring unique_ptr
-      // to break the cycle in C++.
-      const std::set<qname>* cycle_types = nullptr;
-      // Type names (C++ identifiers) in the current schema, used to detect
-      // field names that would shadow a sibling type in the same namespace.
-      const std::set<std::string>* schema_type_names = nullptr;
-
-      bool
-      is_cycle_type(const qname& type_name) const {
-        return cycle_types && cycle_types->count(type_name) > 0;
-      }
-
-      // Return a C++ field name for the given element/attribute, appending
-      // '_' when the name collides with a type in the same namespace.
-      std::string
-      field_name(const std::string& xml_local_name,
-                 const std::string& enclosing_type = {}) const {
-        auto name = to_cpp_identifier(xml_local_name);
-        if (schema_type_names && name != enclosing_type &&
-            schema_type_names->count(name))
-          name += '_';
-        return name;
-      }
-
-      // Produce a qualified function name for cross-namespace calls.
-      // Returns "ns::fn_name" when the type is in a different namespace,
-      // or just "fn_name" when it's in the current namespace.
-      std::string
-      qualify_fn(const std::string& prefix, const qname& type_name) const {
-        std::string fn = prefix + to_cpp_identifier(type_name.local_name());
-        if (!type_name.namespace_uri().empty() &&
-            type_name.namespace_uri() != current_ns) {
-          std::string ns =
-              cpp_namespace_for(type_name.namespace_uri(), options);
-          if (!ns.empty()) return ns + "::" + fn;
-        }
-        return fn;
-      }
-
-      std::string
-      resolve(const qname& type_name) const {
-        if (type_name.namespace_uri().empty() && type_name.local_name().empty())
-          return "void";
-
-        // Check type_map for XSD built-in type
-        if (type_name.namespace_uri() == "http://www.w3.org/2001/XMLSchema") {
-          if (auto* mapping = types.find(type_name.local_name()))
-            return mapping->cpp_type;
-        }
-
-        // Check if it's a simple type defined in the schema set
-        if (auto* st = schemas.find_simple_type(type_name)) {
-          // Cross-namespace reference: use qualified name
-          if (!type_name.namespace_uri().empty() &&
-              type_name.namespace_uri() != current_ns)
-            return qualify(type_name);
-
-          // Simple type with enumeration -> the enum name
-          if (!st->facets().enumeration.empty()) return qualify(type_name);
-
-          // List type -> vector
-          if (st->variety() == simple_type_variety::list &&
-              st->item_type_name().has_value())
-            return "std::vector<" + resolve(st->item_type_name().value()) + ">";
-
-          // Union type -> variant
-          if (st->variety() == simple_type_variety::union_type) {
-            std::string result = "std::variant<";
-            bool first = true;
-            for (const auto& member : st->member_type_names()) {
-              if (!first) result += ", ";
-              result += resolve(member);
-              first = false;
-            }
-            return result + ">";
-          }
-
-          // Atomic restriction without enum -> alias to base
-          return resolve(st->base_type_name());
-        }
-
-        // Check if it's a complex type
-        if (schemas.find_complex_type(type_name)) return qualify(type_name);
-
-        // Fallback: try type_map with just local name
-        if (auto* mapping = types.find(type_name.local_name()))
-          return mapping->cpp_type;
-
-        return to_cpp_identifier(type_name.local_name());
-      }
-
-      std::string
-      qualify(const qname& type_name) const {
-        std::string name = to_cpp_identifier(type_name.local_name());
-
-        if (!type_name.namespace_uri().empty() &&
-            type_name.namespace_uri() != current_ns) {
-          referenced_namespaces.insert(type_name.namespace_uri());
-          std::string ns =
-              cpp_namespace_for(type_name.namespace_uri(), options);
-          if (!ns.empty()) return ns + "::" + name;
-        }
-
-        return name;
-      }
-    };
+    // type_resolver is defined in codegen_internal.hpp (shared with
+    // json_codegen.cpp).
 
     // Find substitution group members for an abstract element
     std::vector<const element_decl*>
@@ -1204,6 +1094,16 @@ namespace xb {
     }
 
     bool
+    has_json_functions(const std::vector<cpp_decl>& declarations) {
+      return std::any_of(declarations.begin(), declarations.end(),
+                         [](const cpp_decl& d) {
+                           auto* fn = std::get_if<cpp_function>(&d);
+                           return fn && fn->parameters.find("nlohmann::json") !=
+                                            std::string::npos;
+                         });
+    }
+
+    bool
     has_regex_usage(const std::vector<cpp_decl>& declarations) {
       return std::any_of(
           declarations.begin(), declarations.end(), [](const cpp_decl& d) {
@@ -1228,6 +1128,10 @@ namespace xb {
           includes.insert("\"xb/xml_io.hpp\"");
           includes.insert("\"xb/xml_reader.hpp\"");
           includes.insert("\"xb/xml_writer.hpp\"");
+        }
+        if (has_json_functions(declarations)) {
+          includes.insert("<nlohmann/json.hpp>");
+          includes.insert("\"xb/json_value.hpp\"");
         }
       } else {
         // Header file: type includes + cross-namespace + enum includes
@@ -1275,6 +1179,12 @@ namespace xb {
         }
 
         if (has_regex_usage(declarations)) includes.insert("<regex>");
+
+        // JSON includes when to_json/from_json functions are present
+        if (has_json_functions(declarations)) {
+          includes.insert("<nlohmann/json.hpp>");
+          includes.insert("\"xb/json_value.hpp\"");
+        }
 
         add_cross_namespace_includes(includes, referenced_namespaces, schemas);
       }
@@ -3357,6 +3267,41 @@ namespace xb {
           if (auto vf = generate_simple_validate_function(st, resolver))
             ordered_types.push_back(std::move(*vf));
         }
+      }
+
+      // Generate JSON to_json/from_json functions when enabled
+      if (options_.json == json_mode::enabled) {
+        std::vector<cpp_decl> json_decls;
+        std::set<std::string> json_seen_variants;
+
+        // Enums and unions
+        for (const auto& st : s.simple_types()) {
+          if (!st.facets().enumeration.empty()) {
+            cpp_enum e;
+            e.name = to_cpp_identifier(st.name().local_name());
+            if (auto tj = generate_enum_to_json(e))
+              json_decls.push_back(std::move(*tj));
+            if (auto fj = generate_enum_from_json(e))
+              json_decls.push_back(std::move(*fj));
+          }
+          if (auto tj =
+                  generate_union_to_json(st, resolver, json_seen_variants))
+            json_decls.push_back(std::move(*tj));
+          if (auto fj =
+                  generate_union_from_json(st, resolver, json_seen_variants))
+            json_decls.push_back(std::move(*fj));
+        }
+
+        // Complex types (structs)
+        for (const auto& decl : ordered_types) {
+          if (auto* st_decl = std::get_if<cpp_struct>(&decl)) {
+            json_decls.push_back(generate_to_json_function(*st_decl));
+            json_decls.push_back(generate_from_json_function(*st_decl));
+          }
+        }
+
+        for (auto& d : json_decls)
+          ordered_types.push_back(std::move(d));
       }
 
       // In split mode, mark read_/write_ functions as non-inline

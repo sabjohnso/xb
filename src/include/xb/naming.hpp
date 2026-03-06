@@ -8,11 +8,13 @@ namespace xb {
 
   enum class output_mode { header_only, split, file_per_type };
   enum class validation_mode { none, on_demand };
+  enum class json_mode { none, enabled };
 
   struct codegen_options {
     std::unordered_map<std::string, std::string> namespace_map;
     output_mode mode = output_mode::header_only;
     validation_mode validation = validation_mode::on_demand;
+    json_mode json = json_mode::none;
   };
 
   std::string

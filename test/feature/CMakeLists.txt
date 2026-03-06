@@ -60,6 +60,16 @@ target_link_libraries(xb_cmake_gen_split_test
 target_compile_features(xb_cmake_gen_split_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_cmake_gen_split_test COMMAND xb_cmake_gen_split_test)
 
+add_executable(xb_json_round_trip_test json_round_trip_test.cpp)
+target_link_libraries(xb_json_round_trip_test PRIVATE Catch2::Catch2WithMain xb nlohmann_json::nlohmann_json)
+target_compile_features(xb_json_round_trip_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+target_compile_definitions(xb_json_round_trip_test PRIVATE
+  XB_INCLUDE_DIR=${PROJECT_SOURCE_DIR}/src/include
+  XB_LIB_FILE=$<TARGET_FILE:xb>
+  XB_JSON_INCLUDE_DIR=$<TARGET_PROPERTY:nlohmann_json::nlohmann_json,INTERFACE_INCLUDE_DIRECTORIES>
+  XB_SANITIZERS=$<IF:$<CONFIG:RelWithDebInfo>,1,0>)
+add_test(NAME xb_json_round_trip_test COMMAND xb_json_round_trip_test)
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})
