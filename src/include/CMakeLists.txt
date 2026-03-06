@@ -53,4 +53,5 @@ install(FILES
   xb/codegen.hpp
   xb/xml_value.hpp
   xb/xml_io.hpp
+  xb/json_value.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)

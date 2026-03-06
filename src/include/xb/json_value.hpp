@@ -1,5 +1,7 @@
 #pragma once
 
+#if __has_include(<nlohmann/json.hpp>)
+
 #include <xb/any_attribute.hpp>
 #include <xb/any_element.hpp>
 #include <xb/date.hpp>
@@ -208,3 +210,5 @@ namespace xb {
   }
 
 } // namespace xb
+
+#endif // __has_include(<nlohmann/json.hpp>)
