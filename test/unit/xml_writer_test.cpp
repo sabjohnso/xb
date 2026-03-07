@@ -169,6 +169,18 @@ TEST_CASE("writer: multiple namespace declarations", "[xml_writer]") {
       R"(<a:root xmlns:a="http://a.example" xmlns:b="http://b.example"><b:child/></a:root>)");
 }
 
+TEST_CASE("writer: xml_declaration", "[xml_writer]") {
+  std::ostringstream os;
+  ostream_writer writer(os);
+
+  writer.xml_declaration();
+  writer.start_element({"", "root"});
+  writer.end_element();
+
+  CHECK(os.str() == R"(<?xml version="1.0" encoding="UTF-8"?>
+<root/>)");
+}
+
 TEST_CASE("writer: namespace bindings are scoped to elements", "[xml_writer]") {
   std::ostringstream os;
   ostream_writer writer(os);

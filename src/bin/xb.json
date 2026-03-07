@@ -165,6 +165,37 @@
           "doc": ["Stop on first fetch error (default: best-effort)."]
         }
       ]
+    },
+    {
+      "name": "convert",
+      "doc": [
+        "Convert between schema formats (RNG XML <-> RNC compact syntax).",
+        "Auto-detects input format from file extension."
+      ],
+      "args": [
+        {
+          "kind": "option",
+          "names": ["output-format", "f"],
+          "doc": ["Output format: rng (XML) or rnc (compact). Default: the other format."],
+          "type": "string",
+          "docv": "FORMAT"
+        },
+        {
+          "kind": "option",
+          "names": ["indent"],
+          "doc": ["Indentation width for pretty-printing. RNC output defaults to 2."],
+          "type": "int",
+          "docv": "N"
+        },
+        {
+          "kind": "positional",
+          "name": "input",
+          "doc": ["Input schema file (.rng or .rnc)."],
+          "type": "file",
+          "docv": "FILE",
+          "required": true
+        }
+      ]
     }
   ],
   "exits": [

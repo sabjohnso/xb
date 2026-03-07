@@ -16,9 +16,11 @@
 #include <xb/naming.hpp>
 #include <xb/ostream_writer.hpp>
 #include <xb/rng_compact_parser.hpp>
+#include <xb/rng_compact_writer.hpp>
 #include <xb/rng_parser.hpp>
 #include <xb/rng_simplify.hpp>
 #include <xb/rng_translator.hpp>
+#include <xb/rng_writer.hpp>
 #include <xb/schema_fetcher.hpp>
 #include <xb/schema_parser.hpp>
 #include <xb/schema_set.hpp>
@@ -514,6 +516,68 @@ namespace {
     return exit_success;
   }
 
+  // ---------------------------------------------------------------------------
+  // convert subcommand
+  // ---------------------------------------------------------------------------
+
+  int
+  run_convert(const nlohmann::json& config) {
+    std::string input_file = config.value("input", "");
+    std::string output_format = config.value("output-format", "");
+
+    if (input_file.empty()) {
+      std::cerr << "xb convert: no input file\n";
+      return exit_usage;
+    }
+
+    std::string content = read_file(input_file);
+
+    // Auto-detect input format
+    bool input_is_rng = has_extension(input_file, ".rng");
+    bool input_is_rnc = has_extension(input_file, ".rnc");
+
+    if (!input_is_rng && !input_is_rnc) {
+      std::cerr << "xb convert: cannot detect format from extension: "
+                << input_file << " (expected .rng or .rnc)\n";
+      return exit_usage;
+    }
+
+    // Default output format is the "other" one
+    if (output_format.empty()) { output_format = input_is_rng ? "rnc" : "rng"; }
+
+    if (output_format != "rng" && output_format != "rnc") {
+      std::cerr << "xb convert: unknown output format: " << output_format
+                << " (expected 'rng' or 'rnc')\n";
+      return exit_usage;
+    }
+
+    // Parse input
+    xb::rng::pattern pattern = [&]() -> xb::rng::pattern {
+      if (input_is_rnc) {
+        xb::rng_compact_parser parser;
+        return parser.parse(content);
+      }
+      xb::expat_reader reader(content);
+      xb::rng_xml_parser parser;
+      return parser.parse(reader);
+    }();
+
+    // Determine indent: explicit --indent, or default 2 for RNC
+    int indent = config.value("indent", -1);
+    if (indent < 0) { indent = (output_format == "rnc") ? 2 : 0; }
+
+    // Write output
+    if (output_format == "rnc") {
+      std::cout << xb::rng_compact_write(pattern, indent);
+    } else if (indent > 0) {
+      std::cout << xb::rng_write_string(pattern, indent);
+    } else {
+      std::cout << xb::rng_write_string(pattern) << "\n";
+    }
+
+    return exit_success;
+  }
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -523,9 +587,11 @@ namespace {
 int
 xb_cli::run(const nlohmann::json& config) {
   // Detect subcommand from unique config keys:
+  // - "input" key → convert
   // - "element" key → sample-doc
   // - "source" key → fetch
   // - otherwise → generate (root command)
+  if (config.contains("input")) return run_convert(config);
   if (config.contains("element")) return run_sample_doc(config);
   if (config.contains("source")) return run_fetch(config);
   return run_generate(config);

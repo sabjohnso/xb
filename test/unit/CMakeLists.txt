@@ -336,6 +336,21 @@ target_link_libraries(xb_wsdl2_codegen_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_wsdl2_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wsdl2_codegen_test COMMAND xb_wsdl2_codegen_test)
 
+add_executable(xb_rng_writer_test rng_writer_test.cpp)
+target_link_libraries(xb_rng_writer_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_rng_writer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_writer_test COMMAND xb_rng_writer_test)
+
+add_executable(xb_rng_compact_writer_test rng_compact_writer_test.cpp)
+target_link_libraries(xb_rng_compact_writer_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_rng_compact_writer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_compact_writer_test COMMAND xb_rng_compact_writer_test)
+
+add_executable(xb_rng_roundtrip_test rng_roundtrip_test.cpp)
+target_link_libraries(xb_rng_roundtrip_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_rng_roundtrip_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_rng_roundtrip_test COMMAND xb_rng_roundtrip_test)
+
 add_executable(xb_json_value_test json_value_test.cpp)
 target_link_libraries(xb_json_value_test PRIVATE Catch2::Catch2WithMain xb nlohmann_json::nlohmann_json)
 target_compile_features(xb_json_value_test PRIVATE cxx_std_${xb_CXX_STANDARD})

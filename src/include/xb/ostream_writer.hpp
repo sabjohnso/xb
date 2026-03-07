@@ -9,7 +9,7 @@ namespace xb {
 
   class ostream_writer : public xml_writer {
   public:
-    explicit ostream_writer(std::ostream& os);
+    explicit ostream_writer(std::ostream& os, int indent = 0);
     ~ostream_writer() override;
 
     ostream_writer(const ostream_writer&) = delete;
@@ -34,6 +34,9 @@ namespace xb {
     void
     namespace_declaration(std::string_view prefix,
                           std::string_view uri) override;
+
+    void
+    xml_declaration() override;
 
   private:
     struct impl;

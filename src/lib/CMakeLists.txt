@@ -41,6 +41,8 @@ add_library(xb STATIC
   wss_headers.cpp
   mime_multipart.cpp
   xop.cpp
+  rng_writer.cpp
+  rng_compact_writer.cpp
   json_codegen.cpp)
 
 if(CURL_FOUND)

@@ -39,14 +39,23 @@ namespace xb {
     struct element_frame {
       qname name;
       bool has_content;
+      bool has_child_elements;
       // Undo log for namespace bindings declared on this element.
       // Each entry: (uri, previous prefix or nullopt if uri was unbound).
       std::vector<std::pair<std::string, std::optional<std::string>>> ns_undo;
     };
 
     std::vector<element_frame> stack;
+    int indent_size = 0;
 
-    explicit impl(std::ostream& os) : os(os) {}
+    explicit impl(std::ostream& os, int indent) : os(os), indent_size(indent) {}
+
+    void
+    write_indent(int depth) {
+      for (int i = 0; i < depth * indent_size; ++i) {
+        os << ' ';
+      }
+    }
 
     void
     write_prefixed_name(const qname& name) {
@@ -92,6 +101,8 @@ namespace xb {
 
     // Ensure the most recent open tag is flushed and closed with '>'.
     // Called before writing child content (text, child elements).
+    // When indent > 0 and child elements follow, the newline is emitted
+    // by start_element before writing the child's indent.
     void
     flush_and_close_tag() {
       if (tag_pending) {
@@ -102,8 +113,8 @@ namespace xb {
     }
   };
 
-  ostream_writer::ostream_writer(std::ostream& os)
-      : impl_(std::make_unique<impl>(os)) {}
+  ostream_writer::ostream_writer(std::ostream& os, int indent)
+      : impl_(std::make_unique<impl>(os, indent)) {}
 
   ostream_writer::~ostream_writer() = default;
   ostream_writer::ostream_writer(ostream_writer&&) noexcept = default;
@@ -115,10 +126,19 @@ namespace xb {
     // Flush any previously open tag (it now has child content)
     impl_->flush_and_close_tag();
 
-    // Mark parent as having content
-    if (!impl_->stack.empty()) { impl_->stack.back().has_content = true; }
+    // Mark parent as having content and child elements
+    if (!impl_->stack.empty()) {
+      impl_->stack.back().has_content = true;
+      impl_->stack.back().has_child_elements = true;
+    }
 
-    impl_->stack.push_back({name, false, {}});
+    // Write newline + indent before opening tag (not for root element)
+    if (impl_->indent_size > 0 && !impl_->stack.empty()) {
+      impl_->os << '\n';
+      impl_->write_indent(static_cast<int>(impl_->stack.size()));
+    }
+
+    impl_->stack.push_back({name, false, false, {}});
     impl_->tag_pending = true;
     impl_->pending_name = name;
   }
@@ -133,10 +153,18 @@ namespace xb {
       impl_->flush_pending_tag();
       impl_->os << "/>";
     } else {
+      // Indent closing tag if this element had child elements
+      if (impl_->indent_size > 0 && frame.has_child_elements) {
+        impl_->os << '\n';
+        impl_->write_indent(static_cast<int>(impl_->stack.size()));
+      }
       impl_->os << "</";
       impl_->write_prefixed_name(frame.name);
       impl_->os << '>';
     }
+
+    // Trailing newline after root element
+    if (impl_->indent_size > 0 && impl_->stack.empty()) { impl_->os << '\n'; }
 
     // Restore namespace bindings that were overwritten by this element's
     // namespace declarations.
@@ -179,6 +207,11 @@ namespace xb {
     // Buffer the xmlns declaration to be written when the tag is flushed
     impl_->pending_ns_decls.push_back(
         {std::string(prefix), std::move(uri_str)});
+  }
+
+  void
+  ostream_writer::xml_declaration() {
+    impl_->os << R"(<?xml version="1.0" encoding="UTF-8"?>)" << '\n';
   }
 
 } // namespace xb

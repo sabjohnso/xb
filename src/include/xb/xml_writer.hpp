@@ -24,6 +24,9 @@ namespace xb {
 
     virtual void
     namespace_declaration(std::string_view prefix, std::string_view uri) = 0;
+
+    virtual void
+    xml_declaration() {}
   };
 
 } // namespace xb
