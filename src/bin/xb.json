@@ -176,7 +176,7 @@
         {
           "kind": "option",
           "names": ["output-format", "f"],
-          "doc": ["Output format: rng, rnc, or dtd. Default: rng for XSD/DTD input, the other format for RNG/RNC."],
+          "doc": ["Output format: rng, rnc, dtd, or xsd. Default: rng for XSD/DTD input, the other format for RNG/RNC."],
           "type": "string",
           "docv": "FORMAT"
         },

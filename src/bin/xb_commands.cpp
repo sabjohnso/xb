@@ -31,6 +31,7 @@
 #include <xb/schematron_parser.hpp>
 #include <xb/type_map.hpp>
 #include <xb/xsd_to_rng.hpp>
+#include <xb/xsd_writer.hpp>
 
 #ifdef XB_HAS_CURL
 #include <curl/curl.h>
@@ -558,10 +559,52 @@ namespace {
     }
 
     if (output_format != "rng" && output_format != "rnc" &&
-        output_format != "dtd") {
+        output_format != "dtd" && output_format != "xsd") {
       std::cerr << "xb convert: unknown output format: " << output_format
-                << " (expected 'rng', 'rnc', or 'dtd')\n";
+                << " (expected 'rng', 'rnc', 'dtd', or 'xsd')\n";
       return exit_usage;
+    }
+
+    // XSD output path: input → schema_set → xsd_write
+    if (output_format == "xsd") {
+      xb::schema_set ss = [&]() -> xb::schema_set {
+        if (input_is_xsd) {
+          xb::expat_reader reader(content);
+          xb::schema_parser sp;
+          xb::schema_set result;
+          result.add(sp.parse(reader));
+          result.resolve();
+          return result;
+        }
+        if (input_is_dtd) {
+          xb::dtd_parser dp;
+          return xb::dtd_translate(dp.parse(content));
+        }
+        // RNG/RNC → schema_set
+        xb::rng::pattern pat = [&]() -> xb::rng::pattern {
+          if (input_is_rnc) {
+            xb::rng_compact_parser parser;
+            return parser.parse(content);
+          }
+          xb::expat_reader reader(content);
+          xb::rng_xml_parser parser;
+          return parser.parse(reader);
+        }();
+        auto simplified = xb::rng_simplify(std::move(pat));
+        return xb::rng_translate(simplified);
+      }();
+
+      int indent = config.value("indent", -1);
+      if (indent < 0) indent = 0;
+
+      for (const auto& schema : ss.schemas()) {
+        if (indent > 0) {
+          std::cout << xb::xsd_write_string(schema, indent);
+        } else {
+          std::cout << xb::xsd_write_string(schema);
+        }
+      }
+      return exit_success;
     }
 
     // DTD output path: input → schema_set → dtd::document → text
