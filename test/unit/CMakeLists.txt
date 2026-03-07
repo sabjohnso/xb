@@ -365,3 +365,8 @@ add_executable(xb_xsd_to_rng_test xsd_to_rng_test.cpp)
 target_link_libraries(xb_xsd_to_rng_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_xsd_to_rng_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xsd_to_rng_test COMMAND xb_xsd_to_rng_test)
+
+add_executable(xb_dtd_to_rng_test dtd_to_rng_test.cpp)
+target_link_libraries(xb_dtd_to_rng_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_dtd_to_rng_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_dtd_to_rng_test COMMAND xb_dtd_to_rng_test)

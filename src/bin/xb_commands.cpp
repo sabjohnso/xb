@@ -11,6 +11,7 @@
 #include <xb/cpp_writer.hpp>
 #include <xb/doc_generator.hpp>
 #include <xb/dtd_parser.hpp>
+#include <xb/dtd_to_rng.hpp>
 #include <xb/dtd_translator.hpp>
 #include <xb/expat_reader.hpp>
 #include <xb/naming.hpp>
@@ -537,16 +538,17 @@ namespace {
     bool input_is_rng = has_extension(input_file, ".rng");
     bool input_is_rnc = has_extension(input_file, ".rnc");
     bool input_is_xsd = has_extension(input_file, ".xsd");
+    bool input_is_dtd = has_extension(input_file, ".dtd");
 
-    if (!input_is_rng && !input_is_rnc && !input_is_xsd) {
+    if (!input_is_rng && !input_is_rnc && !input_is_xsd && !input_is_dtd) {
       std::cerr << "xb convert: cannot detect format from extension: "
-                << input_file << " (expected .rng, .rnc, or .xsd)\n";
+                << input_file << " (expected .rng, .rnc, .xsd, or .dtd)\n";
       return exit_usage;
     }
 
     // Default output format
     if (output_format.empty()) {
-      if (input_is_xsd) {
+      if (input_is_xsd || input_is_dtd) {
         output_format = "rng";
       } else {
         output_format = input_is_rng ? "rnc" : "rng";
@@ -561,6 +563,10 @@ namespace {
 
     // Parse input
     xb::rng::pattern pattern = [&]() -> xb::rng::pattern {
+      if (input_is_dtd) {
+        xb::dtd_parser dp;
+        return xb::dtd_to_rng(dp.parse(content));
+      }
       if (input_is_xsd) {
         xb::expat_reader reader(content);
         xb::schema_parser sp;
