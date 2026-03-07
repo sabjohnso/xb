@@ -13,6 +13,7 @@
 #include <xb/dtd_parser.hpp>
 #include <xb/dtd_to_rng.hpp>
 #include <xb/dtd_translator.hpp>
+#include <xb/dtd_writer.hpp>
 #include <xb/expat_reader.hpp>
 #include <xb/naming.hpp>
 #include <xb/ostream_writer.hpp>
@@ -25,6 +26,7 @@
 #include <xb/schema_fetcher.hpp>
 #include <xb/schema_parser.hpp>
 #include <xb/schema_set.hpp>
+#include <xb/schema_to_dtd.hpp>
 #include <xb/schematron_overlay.hpp>
 #include <xb/schematron_parser.hpp>
 #include <xb/type_map.hpp>
@@ -555,13 +557,47 @@ namespace {
       }
     }
 
-    if (output_format != "rng" && output_format != "rnc") {
+    if (output_format != "rng" && output_format != "rnc" &&
+        output_format != "dtd") {
       std::cerr << "xb convert: unknown output format: " << output_format
-                << " (expected 'rng' or 'rnc')\n";
+                << " (expected 'rng', 'rnc', or 'dtd')\n";
       return exit_usage;
     }
 
-    // Parse input
+    // DTD output path: input → schema_set → dtd::document → text
+    if (output_format == "dtd") {
+      xb::schema_set ss = [&]() -> xb::schema_set {
+        if (input_is_xsd) {
+          xb::expat_reader reader(content);
+          xb::schema_parser sp;
+          xb::schema_set result;
+          result.add(sp.parse(reader));
+          result.resolve();
+          return result;
+        }
+        if (input_is_dtd) {
+          xb::dtd_parser dp;
+          return xb::dtd_translate(dp.parse(content));
+        }
+        // RNG/RNC → XSD → DTD
+        xb::rng::pattern pat = [&]() -> xb::rng::pattern {
+          if (input_is_rnc) {
+            xb::rng_compact_parser parser;
+            return parser.parse(content);
+          }
+          xb::expat_reader reader(content);
+          xb::rng_xml_parser parser;
+          return parser.parse(reader);
+        }();
+        auto simplified = xb::rng_simplify(std::move(pat));
+        return xb::rng_translate(simplified);
+      }();
+      auto doc = xb::schema_to_dtd(ss);
+      std::cout << xb::dtd_write(doc);
+      return exit_success;
+    }
+
+    // RNG/RNC output path: input → rng::pattern → text
     xb::rng::pattern pattern = [&]() -> xb::rng::pattern {
       if (input_is_dtd) {
         xb::dtd_parser dp;

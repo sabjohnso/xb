@@ -169,14 +169,14 @@
     {
       "name": "convert",
       "doc": [
-        "Convert between schema formats (XSD/DTD -> RNG/RNC, RNG <-> RNC).",
+        "Convert between schema formats (XSD/DTD/RNG/RNC).",
         "Auto-detects input format from file extension (.xsd, .dtd, .rng, .rnc)."
       ],
       "args": [
         {
           "kind": "option",
           "names": ["output-format", "f"],
-          "doc": ["Output format: rng (XML) or rnc (compact). Default: rng for XSD/DTD input, the other format for RNG/RNC."],
+          "doc": ["Output format: rng, rnc, or dtd. Default: rng for XSD/DTD input, the other format for RNG/RNC."],
           "type": "string",
           "docv": "FORMAT"
         },

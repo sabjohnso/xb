@@ -45,6 +45,8 @@ add_library(xb STATIC
   rng_compact_writer.cpp
   xsd_to_rng.cpp
   dtd_to_rng.cpp
+  dtd_writer.cpp
+  schema_to_dtd.cpp
   json_codegen.cpp)
 
 if(CURL_FOUND)
