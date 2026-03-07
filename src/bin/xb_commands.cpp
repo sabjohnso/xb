@@ -27,6 +27,7 @@
 #include <xb/schematron_overlay.hpp>
 #include <xb/schematron_parser.hpp>
 #include <xb/type_map.hpp>
+#include <xb/xsd_to_rng.hpp>
 
 #ifdef XB_HAS_CURL
 #include <curl/curl.h>
@@ -535,15 +536,22 @@ namespace {
     // Auto-detect input format
     bool input_is_rng = has_extension(input_file, ".rng");
     bool input_is_rnc = has_extension(input_file, ".rnc");
+    bool input_is_xsd = has_extension(input_file, ".xsd");
 
-    if (!input_is_rng && !input_is_rnc) {
+    if (!input_is_rng && !input_is_rnc && !input_is_xsd) {
       std::cerr << "xb convert: cannot detect format from extension: "
-                << input_file << " (expected .rng or .rnc)\n";
+                << input_file << " (expected .rng, .rnc, or .xsd)\n";
       return exit_usage;
     }
 
-    // Default output format is the "other" one
-    if (output_format.empty()) { output_format = input_is_rng ? "rnc" : "rng"; }
+    // Default output format
+    if (output_format.empty()) {
+      if (input_is_xsd) {
+        output_format = "rng";
+      } else {
+        output_format = input_is_rng ? "rnc" : "rng";
+      }
+    }
 
     if (output_format != "rng" && output_format != "rnc") {
       std::cerr << "xb convert: unknown output format: " << output_format
@@ -553,6 +561,14 @@ namespace {
 
     // Parse input
     xb::rng::pattern pattern = [&]() -> xb::rng::pattern {
+      if (input_is_xsd) {
+        xb::expat_reader reader(content);
+        xb::schema_parser sp;
+        xb::schema_set ss;
+        ss.add(sp.parse(reader));
+        ss.resolve();
+        return xb::xsd_to_rng(ss);
+      }
       if (input_is_rnc) {
         xb::rng_compact_parser parser;
         return parser.parse(content);

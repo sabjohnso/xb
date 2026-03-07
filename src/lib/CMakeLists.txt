@@ -43,6 +43,7 @@ add_library(xb STATIC
   xop.cpp
   rng_writer.cpp
   rng_compact_writer.cpp
+  xsd_to_rng.cpp
   json_codegen.cpp)
 
 if(CURL_FOUND)
