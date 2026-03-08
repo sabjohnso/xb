@@ -385,3 +385,8 @@ add_executable(xb_xsd_writer_test xsd_writer_test.cpp)
 target_link_libraries(xb_xsd_writer_test PRIVATE Catch2::Catch2WithMain xb)
 target_compile_features(xb_xsd_writer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xsd_writer_test COMMAND xb_xsd_writer_test)
+
+add_executable(xb_code_formatter_test code_formatter_test.cpp)
+target_link_libraries(xb_code_formatter_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_code_formatter_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_code_formatter_test COMMAND xb_code_formatter_test)

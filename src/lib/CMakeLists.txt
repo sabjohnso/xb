@@ -48,7 +48,8 @@ add_library(xb STATIC
   dtd_writer.cpp
   schema_to_dtd.cpp
   xsd_writer.cpp
-  json_codegen.cpp)
+  json_codegen.cpp
+  code_formatter.cpp)
 
 if(CURL_FOUND)
   target_sources(xb PRIVATE http_transport.cpp mtom_transport.cpp)

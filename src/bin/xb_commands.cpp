@@ -7,6 +7,7 @@
 
 #include "xb_main.hpp"
 
+#include <xb/code_formatter.hpp>
 #include <xb/codegen.hpp>
 #include <xb/cpp_writer.hpp>
 #include <xb/doc_generator.hpp>
@@ -148,6 +149,7 @@ namespace {
     std::string output_dir = config.value("output-dir", ".");
     std::string type_map_file = config.value("type-map", "");
     bool list_outputs = config.value("list-outputs", false);
+    bool no_format = config.value("no-format", false);
 
     // Extract namespace map from repeated pairs.
     // json-commander pair type produces [["key","val"], ...], not
@@ -275,6 +277,13 @@ namespace {
     // Create output directory
     fs::create_directories(output_dir);
 
+    // Locate .clang-format style file for formatting
+    std::string style_file;
+    if (!no_format) {
+      auto style_path = fs::path(output_dir) / ".clang-format";
+      if (fs::exists(style_path)) style_file = style_path.string();
+    }
+
     // Write output files
     xb::cpp_writer writer;
     for (const auto& file : files) {
@@ -284,7 +293,10 @@ namespace {
         std::cerr << "xb: cannot write file: " << path.string() << "\n";
         return exit_io;
       }
-      out << writer.write(file);
+      std::string code = writer.write(file);
+      if (!no_format)
+        code = xb::format_cpp_code(code, path.string(), style_file);
+      out << code;
     }
 
     return exit_success;
