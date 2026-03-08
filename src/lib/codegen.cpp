@@ -317,7 +317,8 @@ namespace xb {
                         compositor_kind compositor,
                         std::vector<cpp_field>& fields,
                         const type_resolver& resolver,
-                        const qname& containing_type_name);
+                        const qname& containing_type_name,
+                        occurrence outer_occurs = {});
 
     void
     translate_particle_term(const particle& p, std::vector<cpp_field>& fields,
@@ -415,13 +416,14 @@ namespace xb {
               if (group_def) {
                 translate_particles(group_def->group().particles(),
                                     group_def->group().compositor(), fields,
-                                    resolver, containing_type_name);
+                                    resolver, containing_type_name, p.occurs);
               }
             } else if constexpr (std::is_same_v<T,
                                                 std::unique_ptr<model_group>>) {
               if (term) {
                 translate_particles(term->particles(), term->compositor(),
-                                    fields, resolver, containing_type_name);
+                                    fields, resolver, containing_type_name,
+                                    p.occurs);
               }
             } else if constexpr (std::is_same_v<T, wildcard>) {
               fields.push_back({"std::vector<xb::any_element>", "any", ""});
@@ -435,7 +437,8 @@ namespace xb {
                         compositor_kind compositor,
                         std::vector<cpp_field>& fields,
                         const type_resolver& resolver,
-                        const qname& containing_type_name) {
+                        const qname& containing_type_name,
+                        occurrence outer_occurs) {
       if (compositor == compositor_kind::choice) {
         std::string variant_type = "std::variant<";
         bool first = true;
@@ -470,6 +473,35 @@ namespace xb {
                       type = "std::vector<" + type + ">";
                     add_alt(type);
                   }
+                } else if constexpr (std::is_same_v<T, group_ref>) {
+                  auto* group_def =
+                      resolver.schemas.find_model_group_def(term.ref);
+                  if (!group_def) return;
+                  // Expand group ref's particles into this choice
+                  for (const auto& gp : group_def->group().particles()) {
+                    std::visit(
+                        [&](const auto& gt) {
+                          using GT = std::decay_t<decltype(gt)>;
+                          if constexpr (std::is_same_v<GT, element_decl>) {
+                            std::string type = resolver.resolve(gt.type_name());
+                            if (gp.occurs.is_unbounded() ||
+                                gp.occurs.max_occurs > 1)
+                              type = "std::vector<" + type + ">";
+                            add_alt(type);
+                          } else if constexpr (std::is_same_v<GT,
+                                                              element_ref>) {
+                            auto* elem = resolver.schemas.find_element(gt.ref);
+                            if (!elem) return;
+                            std::string type =
+                                resolver.resolve(elem->type_name());
+                            if (gp.occurs.is_unbounded() ||
+                                gp.occurs.max_occurs > 1)
+                              type = "std::vector<" + type + ">";
+                            add_alt(type);
+                          }
+                        },
+                        gp.term);
+                  }
                 }
               },
               p.term);
@@ -477,6 +509,13 @@ namespace xb {
 
         variant_type += ">";
         if (!first) { // Only add choice field if there are alternatives
+          // Apply outer cardinality from group ref
+          std::string field_type = variant_type;
+          if (outer_occurs.is_unbounded() || outer_occurs.max_occurs > 1)
+            field_type = "std::vector<" + variant_type + ">";
+          else if (outer_occurs.min_occurs == 0 && outer_occurs.max_occurs <= 1)
+            field_type = "std::optional<" + variant_type + ">";
+
           // Ensure unique field name when multiple choice groups exist
           std::string name = "choice";
           int suffix = 2;
@@ -484,7 +523,7 @@ namespace xb {
               std::any_of(fields.begin(), fields.end(),
                           [&](const cpp_field& f) { return f.name == name; }))
             name = "choice_" + std::to_string(suffix++);
-          fields.push_back({variant_type, name, ""});
+          fields.push_back({field_type, name, ""});
         }
         return;
       }
@@ -1644,7 +1683,8 @@ namespace xb {
                          const std::vector<particle>& particles,
                          compositor_kind compositor,
                          const type_resolver& resolver,
-                         const qname& containing_type_name);
+                         const qname& containing_type_name,
+                         occurrence outer_occurs = {});
 
     void
     emit_write_particle_term(std::string& body, const particle& p,
@@ -1783,13 +1823,13 @@ namespace xb {
               if (group_def)
                 emit_write_particles(body, group_def->group().particles(),
                                      group_def->group().compositor(), resolver,
-                                     containing_type_name);
+                                     containing_type_name, p.occurs);
             } else if constexpr (std::is_same_v<T,
                                                 std::unique_ptr<model_group>>) {
               if (term)
                 emit_write_particles(body, term->particles(),
                                      term->compositor(), resolver,
-                                     containing_type_name);
+                                     containing_type_name, p.occurs);
             } else if constexpr (std::is_same_v<T, wildcard>) {
               body += "  for (const auto& e : " +
                       resolver.field_access("value", "any") + ") {\n";
@@ -1805,8 +1845,25 @@ namespace xb {
                          const std::vector<particle>& particles,
                          compositor_kind compositor,
                          const type_resolver& resolver,
-                         const qname& containing_type_name) {
+                         const qname& containing_type_name,
+                         occurrence outer_occurs) {
       if (compositor == compositor_kind::choice) {
+        std::string field = resolver.field_access("value", "choice");
+        bool is_repeating =
+            outer_occurs.is_unbounded() || outer_occurs.max_occurs > 1;
+        bool is_optional = !is_repeating && outer_occurs.min_occurs == 0 &&
+                           outer_occurs.max_occurs <= 1;
+
+        if (is_repeating) {
+          body += "  for (const auto& choice_item : " + field + ") {\n";
+        } else if (is_optional) {
+          body += "  if (" + field + ") {\n";
+        }
+
+        std::string visit_target = is_repeating  ? "choice_item"
+                                   : is_optional ? ("*" + field)
+                                                 : field;
+
         // std::visit dispatch
         body += "  std::visit([&](const auto& v) {\n";
         body += "    using T = std::decay_t<decltype(v)>;\n";
@@ -1907,7 +1964,9 @@ namespace xb {
               p.term);
         }
 
-        body += "  }, " + resolver.field_access("value", "choice") + ");\n";
+        body += "  }, " + visit_target + ");\n";
+
+        if (is_repeating || is_optional) { body += "  }\n"; }
         return;
       }
 
@@ -2291,7 +2350,8 @@ namespace xb {
                         compositor_kind compositor,
                         const type_resolver& resolver,
                         const qname& containing_type_name,
-                        bool has_open_content = false);
+                        bool has_open_content = false,
+                        occurrence outer_occurs = {});
 
     void
     emit_read_particle_match(std::string& body, const particle& p,
@@ -2446,9 +2506,71 @@ namespace xb {
             } else if constexpr (std::is_same_v<T, group_ref>) {
               auto* group_def = resolver.schemas.find_model_group_def(term.ref);
               if (group_def) {
-                for (const auto& gp : group_def->group().particles())
-                  emit_read_particle_match(body, gp, resolver,
-                                           containing_type_name, first_branch);
+                bool grp_is_choice =
+                    group_def->group().compositor() == compositor_kind::choice;
+                bool grp_repeating =
+                    p.occurs.is_unbounded() || p.occurs.max_occurs > 1;
+
+                if (grp_is_choice && grp_repeating) {
+                  // Choice group with repeating cardinality: push_back
+                  for (const auto& gp : group_def->group().particles()) {
+                    std::visit(
+                        [&](const auto& gt) {
+                          using GT = std::decay_t<decltype(gt)>;
+                          if constexpr (std::is_same_v<GT, element_decl>) {
+                            std::string qn =
+                                "xb::qname{\"" + gt.name().namespace_uri() +
+                                "\", \"" + gt.name().local_name() + "\"}";
+                            std::string kw = first_branch ? "if" : "else if";
+                            body += "    " + kw + " (name == " + qn + ") {\n";
+                            std::string cpp_type =
+                                resolver.resolve(gt.type_name());
+                            if (is_complex_type(resolver.schemas,
+                                                gt.type_name())) {
+                              std::string read_fn =
+                                  resolver.qualify_fn("read_", gt.type_name());
+                              body += "      result.choice.push_back(" +
+                                      read_fn + "(reader));\n";
+                            } else {
+                              body += "      result.choice.push_back("
+                                      "xb::read_simple<" +
+                                      cpp_type + ">(reader));\n";
+                            }
+                            body += "    }\n";
+                            first_branch = false;
+                          } else if constexpr (std::is_same_v<GT,
+                                                              element_ref>) {
+                            auto* elem = resolver.schemas.find_element(gt.ref);
+                            if (!elem) return;
+                            std::string qn =
+                                "xb::qname{\"" + elem->name().namespace_uri() +
+                                "\", \"" + elem->name().local_name() + "\"}";
+                            std::string kw = first_branch ? "if" : "else if";
+                            body += "    " + kw + " (name == " + qn + ") {\n";
+                            std::string cpp_type =
+                                resolver.resolve(elem->type_name());
+                            if (is_complex_type(resolver.schemas,
+                                                elem->type_name())) {
+                              std::string read_fn = resolver.qualify_fn(
+                                  "read_", elem->type_name());
+                              body += "      result.choice.push_back(" +
+                                      read_fn + "(reader));\n";
+                            } else {
+                              body += "      result.choice.push_back("
+                                      "xb::read_simple<" +
+                                      cpp_type + ">(reader));\n";
+                            }
+                            body += "    }\n";
+                            first_branch = false;
+                          }
+                        },
+                        gp.term);
+                  }
+                } else {
+                  for (const auto& gp : group_def->group().particles())
+                    emit_read_particle_match(
+                        body, gp, resolver, containing_type_name, first_branch);
+                }
               }
             } else if constexpr (std::is_same_v<T,
                                                 std::unique_ptr<model_group>>) {
@@ -2475,8 +2597,19 @@ namespace xb {
                         compositor_kind compositor,
                         const type_resolver& resolver,
                         const qname& containing_type_name,
-                        bool has_open_content) {
+                        bool has_open_content, occurrence outer_occurs) {
       if (compositor == compositor_kind::choice) {
+        bool outer_repeating =
+            outer_occurs.is_unbounded() || outer_occurs.max_occurs > 1;
+
+        // Helper: emit assignment or push_back depending on outer cardinality
+        auto emit_choice_assign = [&](const std::string& read_expr) {
+          if (outer_repeating)
+            body += "      result.choice.push_back(" + read_expr + ");\n";
+          else
+            body += "      result.choice = " + read_expr + ";\n";
+        };
+
         // Choice: element name selects variant alternative
         bool first_branch = true;
         for (const auto& p : particles) {
@@ -2495,7 +2628,7 @@ namespace xb {
 
                   std::string kw = first_branch ? "if" : "else if";
                   body += "    " + kw + " (name == " + qn + ") {\n";
-                  if (is_repeating) {
+                  if (is_repeating && !outer_repeating) {
                     // Vector alternative: push_back each occurrence
                     std::string vec_type = "std::vector<" + cpp_type + ">";
                     std::string read_expr;
@@ -2515,10 +2648,10 @@ namespace xb {
                   } else if (is_complex) {
                     std::string read_fn =
                         resolver.qualify_fn("read_", term.type_name());
-                    body += "      result.choice = " + read_fn + "(reader);\n";
+                    emit_choice_assign(read_fn + "(reader)");
                   } else {
-                    body += "      result.choice = xb::read_simple<" +
-                            cpp_type + ">(reader);\n";
+                    emit_choice_assign("xb::read_simple<" + cpp_type +
+                                       ">(reader)");
                   }
                   body += "    }\n";
                   first_branch = false;
@@ -2537,8 +2670,7 @@ namespace xb {
                       body += "    " + kw + " (name == " + mqn + ") {\n";
                       std::string read_fn =
                           resolver.qualify_fn("read_", m->type_name());
-                      body +=
-                          "      result.choice = " + read_fn + "(reader);\n";
+                      emit_choice_assign(read_fn + "(reader)");
                       body += "    }\n";
                       first_branch = false;
                     }
@@ -2554,11 +2686,10 @@ namespace xb {
                     if (is_complex) {
                       std::string read_fn =
                           resolver.qualify_fn("read_", elem->type_name());
-                      body +=
-                          "      result.choice = " + read_fn + "(reader);\n";
+                      emit_choice_assign(read_fn + "(reader)");
                     } else {
-                      body += "      result.choice = xb::read_simple<" +
-                              cpp_type + ">(reader);\n";
+                      emit_choice_assign("xb::read_simple<" + cpp_type +
+                                         ">(reader)");
                     }
                     body += "    }\n";
                     first_branch = false;
