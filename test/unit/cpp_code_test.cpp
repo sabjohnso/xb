@@ -269,14 +269,15 @@ TEST_CASE("fields with template types", "[cpp_writer]") {
   file.namespaces.push_back({"ns", {std::move(s)}});
 
   auto result = writer.write(file);
-  CHECK(result.find("using header_t = std::optional<std::string>;") !=
+  CHECK(result.find("using header_type = std::optional<std::string>;") !=
         std::string::npos);
-  CHECK(result.find("header_t header{};") != std::string::npos);
-  CHECK(result.find("using items_t = std::vector<int>;") != std::string::npos);
-  CHECK(result.find("items_t items{};") != std::string::npos);
-  CHECK(result.find("using payload_t = std::variant<int, std::string>;") !=
+  CHECK(result.find("header_type header{};") != std::string::npos);
+  CHECK(result.find("using items_type = std::vector<int>;") !=
         std::string::npos);
-  CHECK(result.find("payload_t payload{};") != std::string::npos);
+  CHECK(result.find("items_type items{};") != std::string::npos);
+  CHECK(result.find("using payload_type = std::variant<int, std::string>;") !=
+        std::string::npos);
+  CHECK(result.find("payload_type payload{};") != std::string::npos);
 }
 
 // Additional: Field with default value
@@ -537,8 +538,11 @@ TEST_CASE("cpp_class renders wrapper with accessors", "[cpp_writer]") {
 
   auto result = writer.write(file);
 
-  // Doc comment
-  CHECK(result.find("/// An order.") != std::string::npos);
+  // Doc comment in Doxygen block format
+  CHECK(result.find("/**") != std::string::npos);
+  CHECK(result.find("@brief") != std::string::npos);
+  CHECK(result.find("An order.") != std::string::npos);
+  CHECK(result.find("*/") != std::string::npos);
   // Class declaration
   CHECK(result.find("class order") != std::string::npos);
   // Raw struct member (no detail:: prefix)
@@ -552,10 +556,10 @@ TEST_CASE("cpp_class renders wrapper with accessors", "[cpp_writer]") {
         std::string::npos);
   // Optional clear
   CHECK(result.find("void clear_side()") != std::string::npos);
-  // Sequence accessor (range)
-  CHECK(result.find("fills() const") != std::string::npos);
-  // Sequence add
-  CHECK(result.find("void add_fill(fill value)") != std::string::npos);
+  // Sequence indexed access
+  CHECK(result.find("fills(std::size_t i)") != std::string::npos);
+  // Sequence push_back
+  CHECK(result.find("fills_push_back(") != std::string::npos);
   // Sequence size
   CHECK(result.find("fills_size()") != std::string::npos);
   // Equality
@@ -603,8 +607,8 @@ TEST_CASE("cpp_class split mode: header has declarations, source has "
   CHECK(source.find("order::set_cl_ord_id(") != std::string::npos);
   CHECK(source.find("order::side()") != std::string::npos);
   CHECK(source.find("order::clear_side()") != std::string::npos);
-  CHECK(source.find("order::fills()") != std::string::npos);
-  CHECK(source.find("order::add_fill(") != std::string::npos);
+  CHECK(source.find("order::fills(std::size_t i)") != std::string::npos);
+  CHECK(source.find("order::fills_push_back(") != std::string::npos);
   CHECK(source.find("order::fills_size()") != std::string::npos);
   CHECK(source.find("return data_.") != std::string::npos);
   // No data() accessor in source either
@@ -663,21 +667,98 @@ TEST_CASE("template specialization fields get type aliases in struct",
 
   auto result = writer.write(file);
   // Type aliases for all template specializations
-  CHECK(result.find("using payload_t = std::variant<int, std::string>;") !=
+  CHECK(result.find("using payload_type = std::variant<int, std::string>;") !=
         std::string::npos);
-  CHECK(result.find("using items_t = std::vector<int>;") != std::string::npos);
-  CHECK(result.find("using header_t = std::optional<std::string>;") !=
+  CHECK(result.find("using items_type = std::vector<int>;") !=
+        std::string::npos);
+  CHECK(result.find("using header_type = std::optional<std::string>;") !=
         std::string::npos);
   // Fields use the aliases
-  CHECK(result.find("payload_t payload{};") != std::string::npos);
-  CHECK(result.find("items_t items{};") != std::string::npos);
-  CHECK(result.find("header_t header{};") != std::string::npos);
+  CHECK(result.find("payload_type payload{};") != std::string::npos);
+  CHECK(result.find("items_type items{};") != std::string::npos);
+  CHECK(result.find("header_type header{};") != std::string::npos);
   // Non-template fields are unchanged
   CHECK(result.find("std::string tag{};") != std::string::npos);
   CHECK(result.find("int count{};") != std::string::npos);
   // No alias for non-template types
-  CHECK(result.find("using tag_t") == std::string::npos);
-  CHECK(result.find("using count_t") == std::string::npos);
+  CHECK(result.find("using tag_type") == std::string::npos);
+  CHECK(result.find("using count_type") == std::string::npos);
+}
+
+TEST_CASE("alias skipped when it would collide with struct field type",
+          "[cpp_writer]") {
+  // A field named "mapping" of type std::vector<mapping_type> would produce
+  // "using mapping_type = std::vector<mapping_type>" — a self-referential
+  // alias. The writer must skip the alias and use the raw type instead.
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_struct s;
+  s.name = "typemap";
+  s.generate_equality = false;
+  s.fields = {
+      {"std::vector<mapping_type>", "mapping", ""},
+  };
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  // No alias should be emitted (it would be self-referential)
+  CHECK(result.find("using mapping_type") == std::string::npos);
+  // Field uses raw type directly
+  CHECK(result.find("std::vector<mapping_type> mapping{};") !=
+        std::string::npos);
+}
+
+TEST_CASE("nested specialization emits inner element alias", "[cpp_writer]") {
+  // std::vector<std::variant<A,B>> should emit two aliases:
+  //   using choice_element_type = std::variant<A, B>;
+  //   using choice_type = std::vector<choice_element_type>;
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_struct s;
+  s.name = "match_type_data";
+  s.generate_equality = false;
+  s.fields = {
+      {"std::vector<std::variant<int, std::string>>", "choice", ""},
+      {"std::optional<std::string>", "value", ""},
+  };
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  // Inner alias for the variant element
+  CHECK(result.find(
+            "using choice_element_type = std::variant<int, std::string>;") !=
+        std::string::npos);
+  // Outer alias uses inner alias
+  CHECK(result.find("using choice_type = std::vector<choice_element_type>;") !=
+        std::string::npos);
+  // Field uses outer alias
+  CHECK(result.find("choice_type choice{};") != std::string::npos);
+  // Non-nested template still gets a simple alias
+  CHECK(result.find("using value_type = std::optional<std::string>;") !=
+        std::string::npos);
+}
+
+TEST_CASE("class accessors reference nested inner alias from raw struct",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "match_type";
+  cls.raw_struct_name = "match_type_data";
+  cls.fields = {
+      {"std::vector<std::variant<int, std::string>>", "choice", ""},
+      {"std::string", "name", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+  // Indexed access uses element alias
+  CHECK(result.find(
+            "match_type_data::choice_element_type& choice(std::size_t i)") !=
+        std::string::npos);
+  // Iterator uses container alias
+  CHECK(result.find("match_type_data::choice_type::iterator choice_begin()") !=
+        std::string::npos);
 }
 
 TEST_CASE("class accessors use template alias from raw struct",
@@ -696,12 +777,243 @@ TEST_CASE("class accessors use template alias from raw struct",
 
   auto result = writer.write(file);
   // Getter/setter for variant field uses alias
-  CHECK(result.find("const event_data::payload_t&") != std::string::npos);
-  CHECK(result.find("event_data::payload_t value") != std::string::npos);
-  // Vector field accessor also uses alias
-  CHECK(result.find("event_data::items_t") != std::string::npos);
+  CHECK(result.find("const event_data::payload_type&") != std::string::npos);
+  CHECK(result.find("event_data::payload_type value") != std::string::npos);
   // Non-template field uses raw type
   CHECK(result.find("const std::string&") != std::string::npos);
+}
+
+TEST_CASE("doc comment uses doxygen block format with brief and details",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  // Class with multi-line doc comment
+  cpp_class cls;
+  cls.name = "person";
+  cls.raw_struct_name = "person_data";
+  cls.doc_comment = "A person record.\nContains name and age.";
+  cls.fields = {{"std::string", "name", ""}};
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+  // Should use /** ... */ block style
+  CHECK(result.find("/**") != std::string::npos);
+  CHECK(result.find(" */") != std::string::npos);
+  // Should have @brief with generated summary
+  CHECK(result.find("@brief") != std::string::npos);
+  // Should have @details with the annotation
+  CHECK(result.find("@details A person record.") != std::string::npos);
+  CHECK(result.find("Contains name and age.") != std::string::npos);
+  // Should have @nosubgrouping for classes
+  CHECK(result.find("@nosubgrouping") != std::string::npos);
+  // Should NOT use old /// style
+  CHECK(result.find("///") == std::string::npos);
+}
+
+TEST_CASE("struct doc comment uses doxygen block format", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_struct s;
+  s.name = "point";
+  s.doc_comment = "A 2D point.";
+  s.fields = {{"int", "x", ""}, {"int", "y", ""}};
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("/**") != std::string::npos);
+  CHECK(result.find("A 2D point.") != std::string::npos);
+  CHECK(result.find(" */") != std::string::npos);
+  CHECK(result.find("///") == std::string::npos);
+}
+
+TEST_CASE("class without doc comment gets generated brief", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_class cls;
+  cls.name = "widget";
+  cls.raw_struct_name = "widget_data";
+  cls.fields = {{"int", "id", ""}};
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+  // Should still get a doc comment with generated brief
+  CHECK(result.find("/**") != std::string::npos);
+  CHECK(result.find("@brief") != std::string::npos);
+  CHECK(result.find("@nosubgrouping") != std::string::npos);
+}
+
+TEST_CASE("sequence field emits iterator-based API in class decl",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "container";
+  cls.raw_struct_name = "container_data";
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::vector<int>", "items", ""},
+      {"std::string", "name", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Indexed access (const and mutable)
+  CHECK(result.find("const int& items(std::size_t i) const;") !=
+        std::string::npos);
+  CHECK(result.find("int& items(std::size_t i);") != std::string::npos);
+
+  // Iterators
+  CHECK(result.find("container_data::items_type::iterator items_begin();") !=
+        std::string::npos);
+  CHECK(result.find("container_data::items_type::iterator items_end();") !=
+        std::string::npos);
+  CHECK(
+      result.find(
+          "container_data::items_type::const_iterator items_begin() const;") !=
+      std::string::npos);
+  CHECK(result.find(
+            "container_data::items_type::const_iterator items_end() const;") !=
+        std::string::npos);
+  CHECK(
+      result.find(
+          "container_data::items_type::const_iterator items_cbegin() const;") !=
+      std::string::npos);
+  CHECK(result.find(
+            "container_data::items_type::const_iterator items_cend() const;") !=
+        std::string::npos);
+
+  // Size and clear (kept from before)
+  CHECK(result.find("std::size_t items_size() const;") != std::string::npos);
+  CHECK(result.find("void clear_items();") != std::string::npos);
+
+  // Mutators
+  CHECK(result.find("items_type::iterator items_insert(") != std::string::npos);
+  CHECK(result.find("items_type::iterator items_erase(") != std::string::npos);
+  CHECK(result.find("void items_push_back(") != std::string::npos);
+  CHECK(result.find("void items_pop_back();") != std::string::npos);
+  CHECK(result.find("items_emplace_back(") != std::string::npos);
+
+  // Should NOT have the old container-ref return
+  CHECK(result.find("const container_data::items_type& items() const") ==
+        std::string::npos);
+  // Should NOT have old add_ method
+  CHECK(result.find("add_item") == std::string::npos);
+}
+
+TEST_CASE(
+    "sequence field with nested type uses element alias in indexed access",
+    "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "match_type";
+  cls.raw_struct_name = "match_type_data";
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::vector<std::variant<int, std::string>>", "choice", ""},
+      {"std::string", "name", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Indexed access uses element alias
+  CHECK(result.find("const match_type_data::choice_element_type& "
+                    "choice(std::size_t i) const;") != std::string::npos);
+  CHECK(result.find(
+            "match_type_data::choice_element_type& choice(std::size_t i);") !=
+        std::string::npos);
+
+  // Iterator types use container alias
+  CHECK(result.find("match_type_data::choice_type::iterator choice_begin();") !=
+        std::string::npos);
+  CHECK(result.find("match_type_data::choice_type::const_iterator "
+                    "choice_begin() const;") != std::string::npos);
+}
+
+TEST_CASE("sole sequence field gets unprefixed aliases", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "list_type";
+  cls.raw_struct_name = "list_type_data";
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::vector<int>", "items", ""},
+      {"std::string", "name", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Prefixed methods should exist
+  CHECK(result.find("items_begin()") != std::string::npos);
+  CHECK(result.find("items_end()") != std::string::npos);
+  CHECK(result.find("items_size()") != std::string::npos);
+  CHECK(result.find("items(std::size_t i)") != std::string::npos);
+
+  // Unprefixed aliases should also exist (sole sequence)
+  CHECK(result.find("begin()") != std::string::npos);
+  CHECK(result.find("end()") != std::string::npos);
+  CHECK(result.find("size()") != std::string::npos);
+  // Indexed access without prefix should not exist (conflicts with field name)
+  // begin/end/size are the unprefixed ones
+}
+
+TEST_CASE("multiple sequence fields do not get unprefixed aliases",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "multi";
+  cls.raw_struct_name = "multi_data";
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::vector<int>", "items", ""},
+      {"std::vector<std::string>", "tags", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Prefixed methods should exist for both
+  CHECK(result.find("items_begin()") != std::string::npos);
+  CHECK(result.find("tags_begin()") != std::string::npos);
+
+  // Check that there is no standalone "begin()" that isn't prefixed.
+  // We search for "\n  ... begin()" patterns without a field prefix.
+  // More precisely: unprefixed begin/end/size should NOT appear
+  auto has_unprefixed = [&](const std::string& method) {
+    // Look for the method not preceded by a field name + underscore
+    std::string pat = " " + method + "(";
+    auto pos = result.find(pat);
+    while (pos != std::string::npos) {
+      // Check if preceded by _ (prefixed) or not
+      if (pos > 0 && result[pos - 1] != '_' && result[pos - 1] != ':') {
+        // Check it's not items_begin or tags_begin
+        bool is_prefixed = false;
+        for (const auto& f : cls.fields) {
+          std::string prefix = f.name + "_" + method;
+          if (pos >= f.name.size() + 1) {
+            auto start = pos - f.name.size() - 1;
+            if (result.substr(start + 1, f.name.size() + 1 + method.size()) ==
+                prefix)
+              is_prefixed = true;
+          }
+        }
+        if (!is_prefixed) return true;
+      }
+      pos = result.find(pat, pos + 1);
+    }
+    return false;
+  };
+  CHECK_FALSE(has_unprefixed("begin"));
+  CHECK_FALSE(has_unprefixed("end"));
+  CHECK_FALSE(has_unprefixed("size"));
 }
 
 TEST_CASE("blank line after each function prototype and definition",

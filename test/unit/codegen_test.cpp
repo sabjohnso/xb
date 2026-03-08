@@ -4973,6 +4973,74 @@ TEST_CASE("group ref choice with unbounded generates vector of variant",
   CHECK(st->fields[0].name == "choice");
 }
 
+TEST_CASE("wrapped mode write function uses iterators for vector fields",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{0, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ListType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  codegen_options opts;
+  opts.encapsulation = encapsulation_mode::wrapped;
+
+  codegen gen(ss, default_types(), opts);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "write_list_type");
+  REQUIRE(fn != nullptr);
+  // Should use iterator-based loop, not range-for over container ref
+  CHECK(fn->body.find("item_begin()") != std::string::npos);
+  CHECK(fn->body.find("item_end()") != std::string::npos);
+  // Should NOT use value.item() (old container-ref style)
+  CHECK(fn->body.find("value.item()") == std::string::npos);
+}
+
+TEST_CASE("wrapped mode read function builds raw struct for vector fields",
+          "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "item"},
+                                      qname{xs_ns, "string"}),
+                         occurrence{0, unbounded});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ListType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  codegen_options opts;
+  opts.encapsulation = encapsulation_mode::wrapped;
+
+  codegen gen(ss, default_types(), opts);
+  auto files = gen.generate();
+
+  auto* fn = find_function(files[0], "read_list_type");
+  REQUIRE(fn != nullptr);
+  // Read function should build raw struct, then wrap
+  CHECK(fn->body.find("list_type_data result") != std::string::npos);
+  CHECK(fn->body.find("result.item.push_back(") != std::string::npos);
+  CHECK(fn->body.find("return list_type(std::move(result))") !=
+        std::string::npos);
+}
+
 TEST_CASE("group ref choice with optional generates optional variant",
           "[codegen]") {
   schema s;

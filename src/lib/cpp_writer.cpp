@@ -11,7 +11,39 @@ namespace {
 
   std::string
   alias_name(const std::string& field_name) {
-    return field_name + "_t";
+    return field_name + "_type";
+  }
+
+  // Extract the template argument from "Wrapper<Arg>" accounting for
+  // nested angle brackets.  Returns "" if type doesn't match the pattern.
+  std::string
+  extract_template_arg(const std::string& type) {
+    auto pos = type.find('<');
+    if (pos == std::string::npos || type.back() != '>') return "";
+    return type.substr(pos + 1, type.size() - pos - 2);
+  }
+
+  // Return the wrapper prefix before '<' (e.g. "std::vector")
+  std::string
+  template_wrapper(const std::string& type) {
+    auto pos = type.find('<');
+    if (pos == std::string::npos) return "";
+    return type.substr(0, pos);
+  }
+
+  // Check whether emitting "using <alias> = <type>" would be
+  // self-referential (the alias name appears inside the type).
+  bool
+  alias_collides(const std::string& alias, const std::string& type) {
+    auto pos = type.find(alias);
+    if (pos == std::string::npos) return false;
+    // Verify it's a whole-word match (not a substring of a longer identifier)
+    auto end = pos + alias.size();
+    if (end < type.size() && (std::isalnum(type[end]) || type[end] == '_'))
+      return false;
+    if (pos > 0 && (std::isalnum(type[pos - 1]) || type[pos - 1] == '_'))
+      return false;
+    return true;
   }
 } // namespace
 
@@ -48,9 +80,11 @@ namespace xb {
     void
     write_field(std::ostream& os, const cpp_field& field,
                 bool use_alias = false) {
-      std::string type = use_alias && is_template_type(field.type)
-                             ? alias_name(field.name)
-                             : field.type;
+      std::string type =
+          use_alias && is_template_type(field.type) &&
+                  !alias_collides(alias_name(field.name), field.type)
+              ? alias_name(field.name)
+              : field.type;
       os << "  " << type << ' ' << field.name;
       if (!field.default_value.empty())
         os << " = " << field.default_value;
@@ -62,10 +96,47 @@ namespace xb {
     void
     write_doc_comment(std::ostream& os, const std::string& doc) {
       if (doc.empty()) return;
+      os << "/**\n";
       std::istringstream iss(doc);
       std::string line;
-      while (std::getline(iss, line))
-        os << "/// " << line << '\n';
+      bool first = true;
+      while (std::getline(iss, line)) {
+        if (first) {
+          os << " * @brief " << line << '\n';
+          first = false;
+        } else {
+          os << " * " << line << '\n';
+        }
+      }
+      os << " */\n";
+    }
+
+    // Write a Doxygen comment block for a class, including @details
+    // and @nosubgrouping.  Generates a brief even if no annotation.
+    void
+    write_class_doc_comment(std::ostream& os, const std::string& name,
+                            const std::string& doc) {
+      os << "/**\n";
+      os << " * @brief Class corresponding to the %" << name
+         << " schema type.\n";
+      if (!doc.empty()) {
+        os << " *\n";
+        os << " * @details ";
+        std::istringstream iss(doc);
+        std::string line;
+        bool first = true;
+        while (std::getline(iss, line)) {
+          if (first) {
+            os << line << '\n';
+            first = false;
+          } else {
+            os << " * " << line << '\n';
+          }
+        }
+      }
+      os << " *\n";
+      os << " * @nosubgrouping\n";
+      os << " */\n";
     }
 
     void
@@ -78,10 +149,24 @@ namespace xb {
 
       os << "struct " << s.name << " {\n";
 
-      // Emit type aliases for variant fields
+      // Emit type aliases for template specialization fields.
+      // For nested specializations (e.g. vector<variant<A,B>>), emit an
+      // inner element alias first, then an outer alias that references it.
       for (const auto& f : s.fields) {
-        if (is_template_type(f.type))
+        if (!is_template_type(f.type)) continue;
+        if (alias_collides(alias_name(f.name), f.type)) continue;
+
+        auto inner = extract_template_arg(f.type);
+        if (is_template_type(inner)) {
+          // Nested: emit inner alias then outer using it
+          std::string inner_alias = f.name + "_element_type";
+          std::string wrapper = template_wrapper(f.type);
+          os << "  using " << inner_alias << " = " << inner << ";\n";
+          os << "  using " << alias_name(f.name) << " = " << wrapper << "<"
+             << inner_alias << ">;\n";
+        } else {
           os << "  using " << alias_name(f.name) << " = " << f.type << ";\n";
+        }
       }
 
       for (const auto& f : s.fields)
@@ -109,26 +194,181 @@ namespace xb {
       return type.substr(prefix.size(), type.size() - prefix.size() - 1);
     }
 
-    // Simple singularization: strip trailing 's' if present
-    std::string
-    singularize(const std::string& name) {
-      if (name.size() > 1 && name.back() == 's')
-        return name.substr(0, name.size() - 1);
-      return name;
-    }
-
-    // Resolve the display type for a class field: for variant fields,
+    // Resolve the display type for a class field: for template fields,
     // use the alias defined in the raw struct.
     std::string
     class_field_type(const cpp_class& cls, const cpp_field& f) {
-      if (is_template_type(f.type))
+      if (is_template_type(f.type) &&
+          !alias_collides(alias_name(f.name), f.type))
         return cls.raw_struct_name + "::" + alias_name(f.name);
       return f.type;
+    }
+
+    // Resolve the element type for a vector field's indexed access.
+    // For nested templates (e.g. vector<variant<A,B>>), returns the
+    // element alias from the raw struct.  Otherwise returns the raw
+    // inner type.
+    std::string
+    class_element_type(const cpp_class& cls, const cpp_field& f) {
+      auto inner = extract_template_arg(f.type);
+      if (is_template_type(inner))
+        return cls.raw_struct_name + "::" + f.name + "_element_type";
+      return inner;
+    }
+
+    // Count how many vector fields a class has
+    std::size_t
+    count_sequence_fields(const cpp_class& cls) {
+      std::size_t n = 0;
+      for (const auto& f : cls.fields)
+        if (extract_inner(f.type, "std::vector") != "") ++n;
+      return n;
+    }
+
+    // Emit sequence (vector) field declarations for a class.
+    // If emit_body is true, inline method bodies are included.
+    // If sole_sequence is true, unprefixed aliases are also emitted.
+    void
+    write_sequence_field(std::ostream& os, const cpp_class& cls,
+                         const cpp_field& f, bool emit_body,
+                         bool sole_sequence) {
+      std::string ftype = class_field_type(cls, f);
+      std::string etype = class_element_type(cls, f);
+      std::string d = "data_." + f.name;
+      auto n = f.name;
+
+      auto def = [&](const std::string& sig, const std::string& body) {
+        if (emit_body)
+          os << "\n  " << sig << " { " << body << " }\n";
+        else
+          os << "\n  " << sig << ";\n";
+      };
+
+      // Indexed access
+      def("const " + etype + "& " + n + "(std::size_t i) const",
+          "return " + d + "[i];");
+      def(etype + "& " + n + "(std::size_t i)", "return " + d + "[i];");
+
+      // Iterators (prefixed)
+      def(ftype + "::iterator " + n + "_begin()", "return " + d + ".begin();");
+      def(ftype + "::iterator " + n + "_end()", "return " + d + ".end();");
+      def(ftype + "::const_iterator " + n + "_begin() const",
+          "return " + d + ".begin();");
+      def(ftype + "::const_iterator " + n + "_end() const",
+          "return " + d + ".end();");
+      def(ftype + "::const_iterator " + n + "_cbegin() const",
+          "return " + d + ".cbegin();");
+      def(ftype + "::const_iterator " + n + "_cend() const",
+          "return " + d + ".cend();");
+
+      // Size and clear
+      def("std::size_t " + n + "_size() const", "return " + d + ".size();");
+      def("void clear_" + n + "()", d + ".clear();");
+
+      // Mutators
+      def(ftype + "::iterator " + n + "_insert(" + ftype +
+              "::const_iterator pos, const " + etype + "& value)",
+          "return " + d + ".insert(pos, value);");
+      def(ftype + "::iterator " + n + "_erase(" + ftype +
+              "::const_iterator pos)",
+          "return " + d + ".erase(pos);");
+      def("void " + n + "_push_back(" + etype + " value)",
+          d + ".push_back(std::move(value));");
+      def("void " + n + "_pop_back()", d + ".pop_back();");
+
+      // emplace_back with forwarding
+      if (emit_body) {
+        os << "\n  template <typename... Args>\n";
+        os << "  " << etype << "& " << n
+           << "_emplace_back(Args&&... args) { return " << d
+           << ".emplace_back(std::forward<Args>(args)...); }\n";
+      } else {
+        os << "\n  template <typename... Args>\n";
+        os << "  " << etype << "& " << n << "_emplace_back(Args&&... args);\n";
+      }
+
+      // Unprefixed aliases for sole sequence
+      if (sole_sequence) {
+        def(ftype + "::iterator begin()", "return " + d + ".begin();");
+        def(ftype + "::iterator end()", "return " + d + ".end();");
+        def(ftype + "::const_iterator begin() const",
+            "return " + d + ".begin();");
+        def(ftype + "::const_iterator end() const", "return " + d + ".end();");
+        def(ftype + "::const_iterator cbegin() const",
+            "return " + d + ".cbegin();");
+        def(ftype + "::const_iterator cend() const",
+            "return " + d + ".cend();");
+        def("std::size_t size() const", "return " + d + ".size();");
+      }
+    }
+
+    // Emit out-of-line sequence method definitions (source file)
+    void
+    write_sequence_source(std::ostream& os, const cpp_class& cls,
+                          const cpp_field& f, bool sole_sequence) {
+      const auto& c = cls.name;
+      std::string ftype = class_field_type(cls, f);
+      std::string etype = class_element_type(cls, f);
+      std::string d = "data_." + f.name;
+      auto n = f.name;
+
+      auto def = [&](const std::string& ret, const std::string& sig,
+                     const std::string& body) {
+        os << ret << " " << c << "::" << sig << " { " << body << " }\n\n";
+      };
+
+      // Indexed access
+      def("const " + etype + "&", n + "(std::size_t i) const",
+          "return " + d + "[i];");
+      def(etype + "&", n + "(std::size_t i)", "return " + d + "[i];");
+
+      // Iterators
+      def(ftype + "::iterator", n + "_begin()", "return " + d + ".begin();");
+      def(ftype + "::iterator", n + "_end()", "return " + d + ".end();");
+      def(ftype + "::const_iterator", n + "_begin() const",
+          "return " + d + ".begin();");
+      def(ftype + "::const_iterator", n + "_end() const",
+          "return " + d + ".end();");
+      def(ftype + "::const_iterator", n + "_cbegin() const",
+          "return " + d + ".cbegin();");
+      def(ftype + "::const_iterator", n + "_cend() const",
+          "return " + d + ".cend();");
+
+      // Size and clear
+      def("std::size_t", n + "_size() const", "return " + d + ".size();");
+      def("void", "clear_" + n + "()", d + ".clear();");
+
+      // Mutators
+      def(ftype + "::iterator",
+          n + "_insert(" + ftype + "::const_iterator pos, const " + etype +
+              "& value)",
+          "return " + d + ".insert(pos, value);");
+      def(ftype + "::iterator", n + "_erase(" + ftype + "::const_iterator pos)",
+          "return " + d + ".erase(pos);");
+      def("void", n + "_push_back(" + etype + " value)",
+          d + ".push_back(std::move(value));");
+      def("void", n + "_pop_back()", d + ".pop_back();");
+
+      // Unprefixed aliases for sole sequence
+      if (sole_sequence) {
+        def(ftype + "::iterator", "begin()", "return " + d + ".begin();");
+        def(ftype + "::iterator", "end()", "return " + d + ".end();");
+        def(ftype + "::const_iterator", "begin() const",
+            "return " + d + ".begin();");
+        def(ftype + "::const_iterator", "end() const",
+            "return " + d + ".end();");
+        def(ftype + "::const_iterator", "cbegin() const",
+            "return " + d + ".cbegin();");
+        def(ftype + "::const_iterator", "cend() const",
+            "return " + d + ".cend();");
+        def("std::size_t", "size() const", "return " + d + ".size();");
+      }
     }
 
     // Emit field accessor declarations (no bodies) for split-mode header
     void
     write_class_field_decls(std::ostream& os, const cpp_class& cls) {
+      bool sole_seq = count_sequence_fields(cls) == 1;
       for (const auto& f : cls.fields) {
         std::string inner;
         std::string ftype = class_field_type(cls, f);
@@ -137,12 +377,8 @@ namespace xb {
           os << "\n  const " << ftype << "& " << f.name << "() const;\n";
           os << "\n  void set_" << f.name << "(" << inner << " value);\n";
           os << "\n  void clear_" << f.name << "();\n";
-        } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
-          auto singular = singularize(f.name);
-          os << "\n  const " << ftype << "& " << f.name << "() const;\n";
-          os << "\n  void add_" << singular << "(" << inner << " value);\n";
-          os << "\n  std::size_t " << f.name << "_size() const;\n";
-          os << "\n  void clear_" << f.name << "();\n";
+        } else if (extract_inner(f.type, "std::vector") != "") {
+          write_sequence_field(os, cls, f, false, sole_seq);
         } else {
           os << "\n  const " << ftype << "& " << f.name << "() const;\n";
           os << "\n  void set_" << f.name << "(" << ftype << " value);\n";
@@ -153,6 +389,7 @@ namespace xb {
     // Emit field accessor definitions (with bodies) inline in the class
     void
     write_class_field_inline(std::ostream& os, const cpp_class& cls) {
+      bool sole_seq = count_sequence_fields(cls) == 1;
       for (const auto& f : cls.fields) {
         std::string inner;
         std::string ftype = class_field_type(cls, f);
@@ -164,17 +401,8 @@ namespace xb {
              << f.name << " = std::move(value); }\n";
           os << "\n  void clear_" << f.name << "() { data_." << f.name
              << ".reset(); }\n";
-        } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
-          auto singular = singularize(f.name);
-          os << "\n  const " << ftype << "& " << f.name
-             << "() const { return data_." << f.name << "; }\n";
-          os << "\n  void add_" << singular << "(" << inner
-             << " value) { data_." << f.name
-             << ".push_back(std::move(value)); }\n";
-          os << "\n  std::size_t " << f.name << "_size() const { return data_."
-             << f.name << ".size(); }\n";
-          os << "\n  void clear_" << f.name << "() { data_." << f.name
-             << ".clear(); }\n";
+        } else if (extract_inner(f.type, "std::vector") != "") {
+          write_sequence_field(os, cls, f, true, sole_seq);
         } else {
           os << "\n  const " << ftype << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
@@ -187,7 +415,7 @@ namespace xb {
     // Emit class declaration (header)
     void
     write_class_header(std::ostream& os, const cpp_class& cls) {
-      write_doc_comment(os, cls.doc_comment);
+      write_class_doc_comment(os, cls.name, cls.doc_comment);
       os << "class " << cls.name << " {\n";
       os << "  " << cls.raw_struct_name << " data_;\n";
       os << "public:\n";
@@ -231,17 +459,8 @@ namespace xb {
              << " value) { data_." << f.name << " = std::move(value); }\n\n";
           os << "void " << c << "::clear_" << f.name << "() { data_." << f.name
              << ".reset(); }\n\n";
-        } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
-          auto singular = singularize(f.name);
-          os << "const " << ftype << "& " << c << "::" << f.name
-             << "() const { return data_." << f.name << "; }\n\n";
-          os << "void " << c << "::add_" << singular << "(" << inner
-             << " value) { data_." << f.name
-             << ".push_back(std::move(value)); }\n\n";
-          os << "std::size_t " << c << "::" << f.name
-             << "_size() const { return data_." << f.name << ".size(); }\n\n";
-          os << "void " << c << "::clear_" << f.name << "() { data_." << f.name
-             << ".clear(); }\n\n";
+        } else if (extract_inner(f.type, "std::vector") != "") {
+          write_sequence_source(os, cls, f, count_sequence_fields(cls) == 1);
         } else {
           os << "const " << ftype << "& " << c << "::" << f.name
              << "() const { return data_." << f.name << "; }\n\n";

@@ -61,6 +61,33 @@ namespace xb {
       return var + "." + field;
     }
 
+    // Generate a for-loop header for iterating over a sequence field.
+    // Raw mode:    "for (const auto& VAR : value.field) {\n"
+    // Wrapped:     "for (auto VAR_it = value.field_begin(); ...
+    //               VAR_it != value.field_end(); ++VAR_it) {\n"
+    //              "  const auto& VAR = *VAR_it;\n"
+    std::string
+    sequence_for_begin(const std::string& var, const std::string& field,
+                       const std::string& item_var) const {
+      if (is_wrapped()) {
+        std::string it = item_var + "_it";
+        return "for (auto " + it + " = " + var + "." + field + "_begin(); " +
+               it + " != " + var + "." + field + "_end(); ++" + it + ") {\n" +
+               "    const auto& " + item_var + " = *" + it + ";\n";
+      }
+      return "for (const auto& " + item_var + " : " + var + "." + field +
+             ") {\n";
+    }
+
+    // Generate field_size expression.
+    // Raw mode:    "value.field.size()"
+    // Wrapped:     "value.field_size()"
+    std::string
+    field_size(const std::string& var, const std::string& field) const {
+      if (is_wrapped()) return var + "." + field + "_size()";
+      return var + "." + field + ".size()";
+    }
+
     std::string
     qualify_fn(const std::string& prefix, const qname& qn) const {
       std::string fn = prefix + to_cpp_identifier(qn.local_name());

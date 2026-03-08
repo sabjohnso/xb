@@ -1635,7 +1635,8 @@ namespace xb {
 
       if (info.occurs.is_unbounded() || info.occurs.max_occurs > 1) {
         // vector field
-        body += "  for (const auto& item : " + field + ") {\n";
+        body += "  " +
+                resolver.sequence_for_begin("value", info.field_name, "item");
         if (is_complex) {
           std::string write_fn = resolver.qualify_fn("write_", info.type_name);
           body += "    writer.start_element(" + qn + ");\n";
@@ -1731,7 +1732,8 @@ namespace xb {
                 };
 
                 if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
-                  body += "  for (const auto& item : " + field + ") {\n";
+                  body += "  " +
+                          resolver.sequence_for_begin("value", fname, "item");
                   emit_visit("item");
                   body += "  }\n";
                 } else if (p.occurs.min_occurs == 0) {
@@ -1798,7 +1800,8 @@ namespace xb {
                   };
 
                   if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
-                    body += "  for (const auto& item : " + field + ") {\n";
+                    body += "  " +
+                            resolver.sequence_for_begin("value", fname, "item");
                     emit_visit("item");
                     body += "  }\n";
                   } else if (p.occurs.min_occurs == 0) {
@@ -1831,8 +1834,7 @@ namespace xb {
                                      term->compositor(), resolver,
                                      containing_type_name, p.occurs);
             } else if constexpr (std::is_same_v<T, wildcard>) {
-              body += "  for (const auto& e : " +
-                      resolver.field_access("value", "any") + ") {\n";
+              body += "  " + resolver.sequence_for_begin("value", "any", "e");
               body += "    e.write(writer);\n";
               body += "  }\n";
             }
@@ -1855,7 +1857,8 @@ namespace xb {
                            outer_occurs.max_occurs <= 1;
 
         if (is_repeating) {
-          body += "  for (const auto& choice_item : " + field + ") {\n";
+          body += "  " +
+                  resolver.sequence_for_begin("value", "choice", "choice_item");
         } else if (is_optional) {
           body += "  if (" + field + ") {\n";
         }
