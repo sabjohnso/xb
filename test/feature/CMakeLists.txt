@@ -60,6 +60,18 @@ target_link_libraries(xb_cmake_gen_split_test
 target_compile_features(xb_cmake_gen_split_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_cmake_gen_split_test COMMAND xb_cmake_gen_split_test)
 
+xb_add_library(
+  TARGET xb_cmake_add_lib_test_types
+  SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xb-typemap.xsd
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_cmake_add_lib
+  MODE HEADER_ONLY)
+
+add_executable(xb_cmake_add_lib_test cmake_add_library_test.cpp)
+target_link_libraries(xb_cmake_add_lib_test
+  PRIVATE Catch2::Catch2WithMain xb_cmake_add_lib_test_types)
+target_compile_features(xb_cmake_add_lib_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_cmake_add_lib_test COMMAND xb_cmake_add_lib_test)
+
 add_executable(xb_json_round_trip_test json_round_trip_test.cpp)
 target_link_libraries(xb_json_round_trip_test PRIVATE Catch2::Catch2WithMain xb nlohmann_json::nlohmann_json)
 target_compile_features(xb_json_round_trip_test PRIVATE cxx_std_${xb_CXX_STANDARD})

@@ -16,6 +16,15 @@ at build time.
       [TYPE_MAP <file>]
       [NAMESPACE_MAP <uri=ns> ...]
       [MODE <HEADER_ONLY|SPLIT|FILE_PER_TYPE>]
+      [ENCAPSULATION <raw-struct|wrapped>]
+      [HEADER_SUFFIX <ext>]
+      [SOURCE_SUFFIX <ext>]
+      [TYPE_STYLE <style>]
+      [FIELD_STYLE <style>]
+      [ENUM_STYLE <style>]
+      [GENERATE_DOCS]
+      [SEPARATE_FWD_HEADER]
+      [NO_FORMAT]
     )
 
   ``MODE`` controls the output layout:
@@ -29,13 +38,36 @@ at build time.
   - ``FILE_PER_TYPE``: Per-type headers + umbrella header + ``.cpp``.
     Same library strategy as ``SPLIT``.
 
+  ``ENCAPSULATION`` selects the generated type style:
+
+  - ``raw-struct`` (default): Plain C++ structs with public fields.
+  - ``wrapped``: Wrapper classes with accessor/mutator methods.
+
+  ``HEADER_SUFFIX`` / ``SOURCE_SUFFIX`` override file extensions
+  (defaults: ``.hpp`` / ``.cpp``).
+
+  ``TYPE_STYLE`` / ``FIELD_STYLE`` / ``ENUM_STYLE`` select naming
+  conventions: ``snake``, ``pascal``, ``camel``, ``upper-snake``, or
+  ``original``.
+
+  ``GENERATE_DOCS`` emits Doxygen comments from XSD annotations.
+
+  ``SEPARATE_FWD_HEADER`` emits separate ``_fwd`` headers for forward
+  declarations.
+
+  ``NO_FORMAT`` skips clang-format post-processing of generated files.
+
   Consumers link to ``<name>`` for the include path and build-order
   dependency, and to ``xb::xb`` (or ``xb``) for the runtime.
 
 #]=======================================================================]
 
 function(xb_generate_cpp)
-  cmake_parse_arguments(XB_GEN "" "TARGET;OUTPUT_DIR;TYPE_MAP;MODE" "SCHEMAS;NAMESPACE_MAP" ${ARGN})
+  cmake_parse_arguments(XB_GEN
+    "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT"
+    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE"
+    "SCHEMAS;NAMESPACE_MAP"
+    ${ARGN})
 
   # --- Validate required arguments ---
   if(NOT XB_GEN_TARGET)
@@ -96,12 +128,58 @@ function(xb_generate_cpp)
     list(APPEND xb_cmd -n "${ns_mapping}")
   endforeach()
 
+  if(XB_GEN_ENCAPSULATION)
+    list(APPEND xb_cmd --encapsulation "${XB_GEN_ENCAPSULATION}")
+  endif()
+
+  if(XB_GEN_HEADER_SUFFIX)
+    list(APPEND xb_cmd --header-suffix "${XB_GEN_HEADER_SUFFIX}")
+  endif()
+
+  if(XB_GEN_SOURCE_SUFFIX)
+    list(APPEND xb_cmd --source-suffix "${XB_GEN_SOURCE_SUFFIX}")
+  endif()
+
+  if(XB_GEN_TYPE_STYLE)
+    list(APPEND xb_cmd --type-style "${XB_GEN_TYPE_STYLE}")
+  endif()
+
+  if(XB_GEN_FIELD_STYLE)
+    list(APPEND xb_cmd --field-style "${XB_GEN_FIELD_STYLE}")
+  endif()
+
+  if(XB_GEN_ENUM_STYLE)
+    list(APPEND xb_cmd --enum-style "${XB_GEN_ENUM_STYLE}")
+  endif()
+
+  if(XB_GEN_GENERATE_DOCS)
+    list(APPEND xb_cmd --generate-docs)
+  endif()
+
+  if(XB_GEN_SEPARATE_FWD_HEADER)
+    list(APPEND xb_cmd --separate-fwd-header)
+  endif()
+
+  if(XB_GEN_NO_FORMAT)
+    list(APPEND xb_cmd --no-format)
+  endif()
+
   list(APPEND xb_cmd ${XB_GEN_SCHEMAS})
 
   # --- Collect dependencies for the custom command ---
   set(xb_deps ${XB_GEN_SCHEMAS})
   if(XB_GEN_TYPE_MAP)
     list(APPEND xb_deps "${XB_GEN_TYPE_MAP}")
+  endif()
+
+  # --- Determine header/source suffixes for file matching ---
+  set(hdr_suffix ".hpp")
+  set(src_suffix ".cpp")
+  if(XB_GEN_HEADER_SUFFIX)
+    set(hdr_suffix "${XB_GEN_HEADER_SUFFIX}")
+  endif()
+  if(XB_GEN_SOURCE_SUFFIX)
+    set(src_suffix "${XB_GEN_SOURCE_SUFFIX}")
   endif()
 
   # --- Try to discover output filenames at configure time ---
@@ -132,6 +210,12 @@ function(xb_generate_cpp)
         foreach(ns_mapping IN LISTS XB_GEN_NAMESPACE_MAP)
           list(APPEND list_cmd -n "${ns_mapping}")
         endforeach()
+        if(XB_GEN_HEADER_SUFFIX)
+          list(APPEND list_cmd --header-suffix "${XB_GEN_HEADER_SUFFIX}")
+        endif()
+        if(XB_GEN_SOURCE_SUFFIX)
+          list(APPEND list_cmd --source-suffix "${XB_GEN_SOURCE_SUFFIX}")
+        endif()
         list(APPEND list_cmd ${XB_GEN_SCHEMAS})
 
         execute_process(
@@ -154,9 +238,9 @@ function(xb_generate_cpp)
     set(gen_headers)
     set(gen_sources)
     foreach(f IN LISTS xb_output_files)
-      if(f MATCHES "\\.hpp$")
+      if(f MATCHES "${hdr_suffix}$")
         list(APPEND gen_headers "${XB_GEN_OUTPUT_DIR}/${f}")
-      elseif(f MATCHES "\\.cpp$")
+      elseif(f MATCHES "${src_suffix}$")
         list(APPEND gen_sources "${XB_GEN_OUTPUT_DIR}/${f}")
       endif()
     endforeach()
