@@ -4961,7 +4961,8 @@ TEST_CASE("group ref choice with unbounded generates vector of variant",
                    false, std::move(ct)));
 
   auto ss = make_schema_set(std::move(s));
-  codegen gen(ss, default_types());
+  auto types = default_types();
+  codegen gen(ss, types);
   auto files = gen.generate();
   REQUIRE(files.size() == 1);
   auto* st = find_struct(files[0], "container_type");
@@ -4995,7 +4996,8 @@ TEST_CASE("wrapped mode write function uses iterators for vector fields",
   codegen_options opts;
   opts.encapsulation = encapsulation_mode::wrapped;
 
-  codegen gen(ss, default_types(), opts);
+  auto types = default_types();
+  codegen gen(ss, types, opts);
   auto files = gen.generate();
 
   auto* fn = find_function(files[0], "write_list_type");
@@ -5029,7 +5031,8 @@ TEST_CASE("wrapped mode read function builds raw struct for vector fields",
   codegen_options opts;
   opts.encapsulation = encapsulation_mode::wrapped;
 
-  codegen gen(ss, default_types(), opts);
+  auto types = default_types();
+  codegen gen(ss, types, opts);
   auto files = gen.generate();
 
   auto* fn = find_function(files[0], "read_list_type");
@@ -5070,7 +5073,8 @@ TEST_CASE("group ref choice with optional generates optional variant",
                    false, std::move(ct)));
 
   auto ss = make_schema_set(std::move(s));
-  codegen gen(ss, default_types());
+  auto types = default_types();
+  codegen gen(ss, types);
   auto files = gen.generate();
   REQUIRE(files.size() == 1);
   auto* st = find_struct(files[0], "opt_container_type");
