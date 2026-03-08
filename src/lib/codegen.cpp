@@ -692,6 +692,7 @@ namespace xb {
         cls.raw_struct_name = s.name + "_data";
         cls.fields = std::move(s.fields);
         cls.generate_equality = s.generate_equality;
+        cls.generate_member_docs = resolver.options.generate_docs;
         cls.doc_comment = std::move(s.doc_comment);
         return cls;
       }

@@ -225,6 +225,13 @@ namespace xb {
       return n;
     }
 
+    // Emit a single-line Doxygen brief if docs are enabled.
+    void
+    member_doc(std::ostream& os, bool enabled, const std::string& brief) {
+      if (!enabled) return;
+      os << "\n  /** @brief " << brief << " */";
+    }
+
     // Emit sequence (vector) field declarations for a class.
     // If emit_body is true, inline method bodies are included.
     // If sole_sequence is true, unprefixed aliases are also emitted.
@@ -236,6 +243,7 @@ namespace xb {
       std::string etype = class_element_type(cls, f);
       std::string d = "data_." + f.name;
       auto n = f.name;
+      bool docs = cls.generate_member_docs;
 
       auto def = [&](const std::string& sig, const std::string& body) {
         if (emit_body)
@@ -245,38 +253,53 @@ namespace xb {
       };
 
       // Indexed access
+      member_doc(os, docs, "Access " + n + " element at index.");
       def("const " + etype + "& " + n + "(std::size_t i) const",
           "return " + d + "[i];");
+      member_doc(os, docs, "Access " + n + " element at index.");
       def(etype + "& " + n + "(std::size_t i)", "return " + d + "[i];");
 
       // Iterators (prefixed)
+      member_doc(os, docs, "Return iterator to the beginning of " + n + ".");
       def(ftype + "::iterator " + n + "_begin()", "return " + d + ".begin();");
+      member_doc(os, docs, "Return iterator past the end of " + n + ".");
       def(ftype + "::iterator " + n + "_end()", "return " + d + ".end();");
+      member_doc(os, docs, "Return iterator to the beginning of " + n + ".");
       def(ftype + "::const_iterator " + n + "_begin() const",
           "return " + d + ".begin();");
+      member_doc(os, docs, "Return iterator past the end of " + n + ".");
       def(ftype + "::const_iterator " + n + "_end() const",
           "return " + d + ".end();");
+      member_doc(os, docs, "Return iterator to the beginning of " + n + ".");
       def(ftype + "::const_iterator " + n + "_cbegin() const",
           "return " + d + ".cbegin();");
+      member_doc(os, docs, "Return iterator past the end of " + n + ".");
       def(ftype + "::const_iterator " + n + "_cend() const",
           "return " + d + ".cend();");
 
       // Size and clear
+      member_doc(os, docs, "Return the number of " + n + " elements.");
       def("std::size_t " + n + "_size() const", "return " + d + ".size();");
+      member_doc(os, docs, "Remove all " + n + " elements.");
       def("void clear_" + n + "()", d + ".clear();");
 
       // Mutators
+      member_doc(os, docs, "Insert an element into " + n + ".");
       def(ftype + "::iterator " + n + "_insert(" + ftype +
               "::const_iterator pos, const " + etype + "& value)",
           "return " + d + ".insert(pos, value);");
+      member_doc(os, docs, "Erase an element from " + n + ".");
       def(ftype + "::iterator " + n + "_erase(" + ftype +
               "::const_iterator pos)",
           "return " + d + ".erase(pos);");
+      member_doc(os, docs, "Append an element to " + n + ".");
       def("void " + n + "_push_back(" + etype + " value)",
           d + ".push_back(std::move(value));");
+      member_doc(os, docs, "Remove the last " + n + " element.");
       def("void " + n + "_pop_back()", d + ".pop_back();");
 
       // emplace with forwarding
+      member_doc(os, docs, "Emplace an element into " + n + ".");
       if (emit_body) {
         os << "\n  template <typename... Args>\n";
         os << "  " << ftype << "::iterator " << n << "_emplace(" << ftype
@@ -289,6 +312,7 @@ namespace xb {
       }
 
       // insert_range
+      member_doc(os, docs, "Insert a range of elements into " + n + ".");
       if (emit_body) {
         os << "\n  template <typename Range>\n";
         os << "  void " << n << "_insert_range(" << ftype
@@ -302,6 +326,7 @@ namespace xb {
       }
 
       // append_range
+      member_doc(os, docs, "Append a range of elements to " + n + ".");
       if (emit_body) {
         os << "\n  template <typename Range>\n";
         os << "  void " << n << "_append_range(Range&& range)"
@@ -313,6 +338,7 @@ namespace xb {
       }
 
       // emplace_back with forwarding
+      member_doc(os, docs, "Emplace an element at the end of " + n + ".");
       if (emit_body) {
         os << "\n  template <typename... Args>\n";
         os << "  " << etype << "& " << n
@@ -405,18 +431,24 @@ namespace xb {
     void
     write_class_field_decls(std::ostream& os, const cpp_class& cls) {
       bool sole_seq = count_sequence_fields(cls) == 1;
+      bool docs = cls.generate_member_docs;
       for (const auto& f : cls.fields) {
         std::string inner;
         std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
+          member_doc(os, docs, "Get the " + f.name + " value.");
           os << "\n  const " << ftype << "& " << f.name << "() const;\n";
+          member_doc(os, docs, "Set the " + f.name + " value.");
           os << "\n  void set_" << f.name << "(" << inner << " value);\n";
+          member_doc(os, docs, "Clear the " + f.name + " value.");
           os << "\n  void clear_" << f.name << "();\n";
         } else if (extract_inner(f.type, "std::vector") != "") {
           write_sequence_field(os, cls, f, false, sole_seq);
         } else {
+          member_doc(os, docs, "Get the " + f.name + " value.");
           os << "\n  const " << ftype << "& " << f.name << "() const;\n";
+          member_doc(os, docs, "Set the " + f.name + " value.");
           os << "\n  void set_" << f.name << "(" << ftype << " value);\n";
         }
       }
@@ -426,22 +458,28 @@ namespace xb {
     void
     write_class_field_inline(std::ostream& os, const cpp_class& cls) {
       bool sole_seq = count_sequence_fields(cls) == 1;
+      bool docs = cls.generate_member_docs;
       for (const auto& f : cls.fields) {
         std::string inner;
         std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
+          member_doc(os, docs, "Get the " + f.name + " value.");
           os << "\n  const " << ftype << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
+          member_doc(os, docs, "Set the " + f.name + " value.");
           os << "\n  void set_" << f.name << "(" << inner << " value) { data_."
              << f.name << " = std::move(value); }\n";
+          member_doc(os, docs, "Clear the " + f.name + " value.");
           os << "\n  void clear_" << f.name << "() { data_." << f.name
              << ".reset(); }\n";
         } else if (extract_inner(f.type, "std::vector") != "") {
           write_sequence_field(os, cls, f, true, sole_seq);
         } else {
+          member_doc(os, docs, "Get the " + f.name + " value.");
           os << "\n  const " << ftype << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
+          member_doc(os, docs, "Set the " + f.name + " value.");
           os << "\n  void set_" << f.name << "(" << ftype << " value) { data_."
              << f.name << " = std::move(value); }\n";
         }
@@ -452,12 +490,15 @@ namespace xb {
     void
     write_class_header(std::ostream& os, const cpp_class& cls) {
       write_class_doc_comment(os, cls.name, cls.doc_comment);
+      bool docs = cls.generate_member_docs;
       os << "class " << cls.name << " {\n";
       os << "  " << cls.raw_struct_name << " data_;\n";
       os << "public:\n";
 
-      os << "  " << cls.name << "() = default;\n";
-      os << "  explicit " << cls.name << "(" << cls.raw_struct_name << " d)";
+      member_doc(os, docs, "Default constructor.");
+      os << "\n  " << cls.name << "() = default;\n";
+      member_doc(os, docs, "Construct from raw data.");
+      os << "\n  explicit " << cls.name << "(" << cls.raw_struct_name << " d)";
 
       if (cls.inline_methods) {
         os << " : data_(std::move(d)) {}\n";
@@ -468,6 +509,7 @@ namespace xb {
       }
 
       if (cls.generate_equality) {
+        member_doc(os, docs, "Equality comparison.");
         os << '\n';
         os << "  bool operator==(const " << cls.name << "&) const = default;\n";
       }

@@ -81,6 +81,7 @@ namespace xb {
     std::vector<cpp_field> fields;
     bool generate_equality = true;
     bool inline_methods = true;
+    bool generate_member_docs = false;
     std::string doc_comment;
 
     bool

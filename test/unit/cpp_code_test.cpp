@@ -845,6 +845,91 @@ TEST_CASE("class without doc comment gets generated brief", "[cpp_writer]") {
   CHECK(result.find("@nosubgrouping") != std::string::npos);
 }
 
+TEST_CASE("generate_member_docs emits doxygen for all public members",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_class cls;
+  cls.name = "order";
+  cls.raw_struct_name = "order_data";
+  cls.generate_member_docs = true;
+  cls.fields = {
+      {"std::string", "cl_ord_id", ""},
+      {"std::optional<std::string>", "side", ""},
+      {"std::vector<fill>", "fills", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Constructor doc
+  CHECK(result.find("/** @brief Construct from raw data. */") !=
+        std::string::npos);
+  // Default constructor doc
+  CHECK(result.find("/** @brief Default constructor. */") != std::string::npos);
+
+  // Scalar getter doc
+  CHECK(result.find("/** @brief Get the cl_ord_id value. */") !=
+        std::string::npos);
+  // Scalar setter doc
+  CHECK(result.find("/** @brief Set the cl_ord_id value. */") !=
+        std::string::npos);
+
+  // Optional getter doc
+  CHECK(result.find("/** @brief Get the side value. */") != std::string::npos);
+  // Optional setter doc
+  CHECK(result.find("/** @brief Set the side value. */") != std::string::npos);
+  // Optional clear doc
+  CHECK(result.find("/** @brief Clear the side value. */") !=
+        std::string::npos);
+
+  // Sequence indexed access doc
+  CHECK(result.find("/** @brief Access fills element at index. */") !=
+        std::string::npos);
+  // Sequence iterator doc
+  CHECK(
+      result.find("/** @brief Return iterator to the beginning of fills. */") !=
+      std::string::npos);
+  CHECK(result.find("/** @brief Return iterator past the end of fills. */") !=
+        std::string::npos);
+  // Sequence size doc
+  CHECK(result.find("/** @brief Return the number of fills elements. */") !=
+        std::string::npos);
+  // Sequence clear doc
+  CHECK(result.find("/** @brief Remove all fills elements. */") !=
+        std::string::npos);
+  // Sequence push_back doc
+  CHECK(result.find("/** @brief Append an element to fills. */") !=
+        std::string::npos);
+  // Sequence pop_back doc
+  CHECK(result.find("/** @brief Remove the last fills element. */") !=
+        std::string::npos);
+
+  // Equality doc
+  CHECK(result.find("/** @brief Equality comparison. */") != std::string::npos);
+}
+
+TEST_CASE("generate_member_docs false suppresses member docs", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_class cls;
+  cls.name = "widget";
+  cls.raw_struct_name = "widget_data";
+  cls.generate_member_docs = false;
+  cls.fields = {{"int", "id", ""}};
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Class-level doc is always generated
+  CHECK(result.find("@brief Class corresponding to") != std::string::npos);
+  // But member docs should not appear
+  CHECK(result.find("Default constructor") == std::string::npos);
+  CHECK(result.find("Get the id") == std::string::npos);
+}
+
 TEST_CASE("sequence field emits iterator-based API in class decl",
           "[cpp_writer]") {
   cpp_file file;
