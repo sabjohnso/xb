@@ -1048,8 +1048,31 @@ TEST_CASE("sole sequence field gets unprefixed aliases", "[cpp_writer]") {
   CHECK(result.find("begin()") != std::string::npos);
   CHECK(result.find("end()") != std::string::npos);
   CHECK(result.find("size()") != std::string::npos);
-  // Indexed access without prefix should not exist (conflicts with field name)
-  // begin/end/size are the unprefixed ones
+}
+
+TEST_CASE("unprefixed aliases get docs noting they alias prefixed methods",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "list_type";
+  cls.raw_struct_name = "list_type_data";
+  cls.generate_member_docs = true;
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::vector<int>", "items", ""},
+      {"std::string", "name", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Unprefixed aliases should have docs noting the aliased method
+  CHECK(result.find("Alias for items_begin") != std::string::npos);
+  CHECK(result.find("Alias for items_end") != std::string::npos);
+  CHECK(result.find("Alias for items_cbegin") != std::string::npos);
+  CHECK(result.find("Alias for items_cend") != std::string::npos);
+  CHECK(result.find("Alias for items_size") != std::string::npos);
 }
 
 TEST_CASE("multiple sequence fields do not get unprefixed aliases",

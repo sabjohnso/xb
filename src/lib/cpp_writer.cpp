@@ -351,15 +351,22 @@ namespace xb {
 
       // Unprefixed aliases for sole sequence
       if (sole_sequence) {
+        member_doc(os, docs, "Alias for " + n + "_begin.");
         def(ftype + "::iterator begin()", "return " + d + ".begin();");
+        member_doc(os, docs, "Alias for " + n + "_end.");
         def(ftype + "::iterator end()", "return " + d + ".end();");
+        member_doc(os, docs, "Alias for " + n + "_begin.");
         def(ftype + "::const_iterator begin() const",
             "return " + d + ".begin();");
+        member_doc(os, docs, "Alias for " + n + "_end.");
         def(ftype + "::const_iterator end() const", "return " + d + ".end();");
+        member_doc(os, docs, "Alias for " + n + "_cbegin.");
         def(ftype + "::const_iterator cbegin() const",
             "return " + d + ".cbegin();");
+        member_doc(os, docs, "Alias for " + n + "_cend.");
         def(ftype + "::const_iterator cend() const",
             "return " + d + ".cend();");
+        member_doc(os, docs, "Alias for " + n + "_size.");
         def("std::size_t size() const", "return " + d + ".size();");
       }
     }
