@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pre-commit
+      - run: pre-commit run --all-files
+
+  build-and-test:
+    runs-on: ubuntu-24.04
+    needs: format-check
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Release, RelWithDebInfo]
+    env:
+      CC: clang-20
+      CXX: clang++-20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install LLVM 20
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 20
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libexpat1-dev libcurl4-openssl-dev ninja-build
+
+      - name: Configure
+        run: cmake --preset ci
+
+      - name: Build
+        run: cmake --build build-ci --config ${{ matrix.config }}
+
+      - name: Test
+        run: ctest --test-dir build-ci -C ${{ matrix.config }} --output-on-failure

@@ -18,6 +18,12 @@
                 "xb_BUILD_EXAMPLES" : "ONE"
 	    },
             "binaryDir" : "${sourceDir}/build"
+	},
+	{
+	    "name": "ci",
+	    "inherits": "default",
+	    "hidden": false,
+	    "binaryDir": "${sourceDir}/build-ci"
 	}
     ]
 }
