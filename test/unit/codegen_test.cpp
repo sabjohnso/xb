@@ -1129,8 +1129,8 @@ TEST_CASE("recursive via vector uses plain vector", "[codegen]") {
   REQUIRE(st != nullptr);
   auto* f = find_field(*st, "children");
   REQUIRE(f != nullptr);
-  // Vector provides indirection, no unique_ptr needed
-  CHECK(f->type == "std::vector<folder_type>");
+  // unique_ptr breaks the recursion; vector requires complete types
+  CHECK(f->type == "std::vector<std::unique_ptr<folder_type>>");
 }
 
 // TDD step 10: Mixed content

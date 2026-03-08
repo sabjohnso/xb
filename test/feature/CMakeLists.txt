@@ -82,6 +82,16 @@ target_compile_definitions(xb_json_round_trip_test PRIVATE
   XB_SANITIZERS=$<IF:$<CONFIG:RelWithDebInfo>,1,0>)
 add_test(NAME xb_json_round_trip_test COMMAND xb_json_round_trip_test)
 
+add_executable(xb_xeag_lexer_test xeag_lexer_test.cpp)
+target_link_libraries(xb_xeag_lexer_test PRIVATE Catch2::Catch2WithMain xb)
+target_compile_features(xb_xeag_lexer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+target_compile_definitions(xb_xeag_lexer_test PRIVATE
+  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema
+  XB_INCLUDE_DIR=${PROJECT_SOURCE_DIR}/src/include
+  XB_LIB_FILE=$<TARGET_FILE:xb>
+  XB_SANITIZERS=$<IF:$<CONFIG:RelWithDebInfo>,1,0>)
+add_test(NAME xb_xeag_lexer_test COMMAND xb_xeag_lexer_test)
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})

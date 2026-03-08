@@ -1,5 +1,6 @@
 #include <xb/cpp_writer.hpp>
 
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -79,12 +80,10 @@ namespace xb {
 
     void
     write_field(std::ostream& os, const cpp_field& field,
-                bool use_alias = false) {
-      std::string type =
-          use_alias && is_template_type(field.type) &&
-                  !alias_collides(alias_name(field.name), field.type)
-              ? alias_name(field.name)
-              : field.type;
+                const std::set<std::string>* emitted_aliases = nullptr) {
+      bool use_alias =
+          emitted_aliases && emitted_aliases->count(alias_name(field.name)) > 0;
+      std::string type = use_alias ? alias_name(field.name) : field.type;
       os << "  " << type << ' ' << field.name;
       if (!field.default_value.empty())
         os << " = " << field.default_value;
@@ -149,15 +148,56 @@ namespace xb {
 
       os << "struct " << s.name << " {\n";
 
+      // Collect all field names and bare type names so we can detect
+      // alias collisions (e.g. alias "md_sec_size_type" from field
+      // "md_sec_size" would shadow the actual type "md_sec_size_type").
+      std::set<std::string> reserved_names;
+      reserved_names.insert(s.name); // prevent alias shadowing enclosing type
+      for (const auto& f : s.fields) {
+        reserved_names.insert(f.name);
+        // Extract the bare type name (strip std::optional, std::vector, etc.)
+        auto t = f.type;
+        for (const auto* prefix : {"std::optional<", "std::vector<"}) {
+          if (t.starts_with(prefix)) {
+            t = t.substr(std::string_view(prefix).size());
+            if (!t.empty() && t.back() == '>') t.pop_back();
+          }
+        }
+        reserved_names.insert(t);
+      }
+
       // Emit type aliases for template specialization fields.
       // For nested specializations (e.g. vector<variant<A,B>>), emit an
       // inner element alias first, then an outer alias that references it.
+      // Track which aliases we actually emit so write_field can use them.
+      std::set<std::string> emitted_aliases;
       for (const auto& f : s.fields) {
         if (!is_template_type(f.type)) continue;
         if (alias_collides(alias_name(f.name), f.type)) continue;
+        // Skip if the alias name collides with a field name or type name
+        if (reserved_names.count(alias_name(f.name))) continue;
 
         auto inner = extract_template_arg(f.type);
-        if (is_template_type(inner)) {
+        // Check if the inner type is itself a single template specialization
+        // (e.g. std::variant<A,B>). We need to find the first comma at depth 0
+        // (outside angle brackets). If there's no top-level comma but there IS
+        // a '<', then the inner is a single template type.
+        bool has_top_level_comma = false;
+        bool has_lt = false;
+        int depth = 0;
+        for (char c : inner) {
+          if (c == '<') {
+            has_lt = true;
+            ++depth;
+          } else if (c == '>')
+            --depth;
+          else if (c == ',' && depth == 0) {
+            has_top_level_comma = true;
+            break;
+          }
+        }
+        bool inner_is_template = has_lt && !has_top_level_comma;
+        if (inner_is_template) {
           // Nested: emit inner alias then outer using it
           std::string inner_alias = f.name + "_element_type";
           std::string wrapper = template_wrapper(f.type);
@@ -167,10 +207,11 @@ namespace xb {
         } else {
           os << "  using " << alias_name(f.name) << " = " << f.type << ";\n";
         }
+        emitted_aliases.insert(alias_name(f.name));
       }
 
       for (const auto& f : s.fields)
-        write_field(os, f, true);
+        write_field(os, f, &emitted_aliases);
 
       if (s.generate_equality) {
         if (!s.fields.empty()) os << '\n';

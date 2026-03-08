@@ -254,14 +254,19 @@ namespace xb {
       if (elem.nillable() && !is_recursive)
         base_type = "std::optional<" + base_type + ">";
 
+      // Cycle/self-reference -> unique_ptr to break the cycle.
+      // This applies both to single-occurrence and sequence fields,
+      // because std::vector<T> requires T to be complete when the
+      // containing type is defined.
+      if (is_recursive) base_type = "std::unique_ptr<" + base_type + ">";
+
       // Apply cardinality
       if (occurs.is_unbounded() || occurs.max_occurs > 1)
         return "std::vector<" + base_type + ">";
 
-      // Cycle/self-reference -> unique_ptr to break the cycle
-      if (is_recursive) return "std::unique_ptr<" + base_type + ">";
-
-      if (occurs.min_occurs == 0) return "std::optional<" + base_type + ">";
+      // unique_ptr already encodes optionality via nullptr
+      if (occurs.min_occurs == 0 && !is_recursive)
+        return "std::optional<" + base_type + ">";
 
       return base_type;
     }
@@ -455,6 +460,8 @@ namespace xb {
                 using T = std::decay_t<decltype(term)>;
                 if constexpr (std::is_same_v<T, element_decl>) {
                   std::string type = resolver.resolve(term.type_name());
+                  if (resolver.is_cycle_type(term.type_name()))
+                    type = "std::unique_ptr<" + type + ">";
                   if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
                     type = "std::vector<" + type + ">";
                   add_alt(type);
@@ -469,6 +476,8 @@ namespace xb {
                       add_alt(resolver.resolve(m->type_name()));
                   } else {
                     std::string type = resolver.resolve(elem->type_name());
+                    if (resolver.is_cycle_type(elem->type_name()))
+                      type = "std::unique_ptr<" + type + ">";
                     if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
                       type = "std::vector<" + type + ">";
                     add_alt(type);
@@ -484,6 +493,8 @@ namespace xb {
                           using GT = std::decay_t<decltype(gt)>;
                           if constexpr (std::is_same_v<GT, element_decl>) {
                             std::string type = resolver.resolve(gt.type_name());
+                            if (resolver.is_cycle_type(gt.type_name()))
+                              type = "std::unique_ptr<" + type + ">";
                             if (gp.occurs.is_unbounded() ||
                                 gp.occurs.max_occurs > 1)
                               type = "std::vector<" + type + ">";
@@ -494,6 +505,8 @@ namespace xb {
                             if (!elem) return;
                             std::string type =
                                 resolver.resolve(elem->type_name());
+                            if (resolver.is_cycle_type(elem->type_name()))
+                              type = "std::unique_ptr<" + type + ">";
                             if (gp.occurs.is_unbounded() ||
                                 gp.occurs.max_occurs > 1)
                               type = "std::vector<" + type + ">";
@@ -1330,8 +1343,25 @@ namespace xb {
             if constexpr (std::is_same_v<T, cpp_struct> ||
                           std::is_same_v<T, cpp_class>) {
               for (const auto& f : d.fields) {
-                if (f.type.find("unique_ptr") != std::string::npos) continue;
-                extract_type_refs(f.type);
+                // Strip unique_ptr<...> segments so we don't depend on
+                // forward-declared cycle types, but keep other type refs
+                // (e.g. char_class_type in a variant alongside unique_ptrs).
+                auto type_str = f.type;
+                for (;;) {
+                  auto pos = type_str.find("unique_ptr<");
+                  if (pos == std::string::npos) break;
+                  int depth = 1;
+                  auto i = pos + 11; // past "unique_ptr<"
+                  while (i < type_str.size() && depth > 0) {
+                    if (type_str[i] == '<')
+                      ++depth;
+                    else if (type_str[i] == '>')
+                      --depth;
+                    ++i;
+                  }
+                  type_str.erase(pos, i - pos);
+                }
+                extract_type_refs(type_str);
               }
             } else if constexpr (std::is_same_v<T, cpp_type_alias>) {
               extract_type_refs(d.target);
@@ -1640,8 +1670,9 @@ namespace xb {
                 resolver.sequence_for_begin("value", info.field_name, "item");
         if (is_complex) {
           std::string write_fn = resolver.qualify_fn("write_", info.type_name);
+          std::string val = info.is_recursive ? "*item" : "item";
           body += "    writer.start_element(" + qn + ");\n";
-          body += "    " + write_fn + "(item, writer);\n";
+          body += "    " + write_fn + "(" + val + ", writer);\n";
           body += "    writer.end_element();\n";
         } else {
           emit_simple_element_write(body, "    ", qn, "item", info.type_name,
@@ -1880,8 +1911,11 @@ namespace xb {
                 if constexpr (std::is_same_v<TermT, element_decl>) {
                   std::string cpp_type = resolver.resolve(term.type_name());
                   std::string match_type = cpp_type;
+                  bool is_cycle = resolver.is_cycle_type(term.type_name());
                   if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
                     match_type = "std::vector<" + cpp_type + ">";
+                  else if (is_cycle)
+                    match_type = "std::unique_ptr<" + cpp_type + ">";
                   std::string qn = "xb::qname{\"" +
                                    term.name().namespace_uri() + "\", \"" +
                                    term.name().local_name() + "\"}";
@@ -1890,6 +1924,7 @@ namespace xb {
                           match_type + ">) {\n";
                   bool is_complex =
                       is_complex_type(resolver.schemas, term.type_name());
+                  std::string val = is_cycle ? "*v" : "v";
                   if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1) {
                     // Vector alternative: iterate and write each
                     body += "      for (const auto& item : v) {\n";
@@ -1909,10 +1944,10 @@ namespace xb {
                     std::string write_fn =
                         resolver.qualify_fn("write_", term.type_name());
                     body += "      writer.start_element(" + qn + ");\n";
-                    body += "      " + write_fn + "(v, writer);\n";
+                    body += "      " + write_fn + "(" + val + ", writer);\n";
                     body += "      writer.end_element();\n";
                   } else {
-                    emit_simple_element_write(body, "      ", qn, "v",
+                    emit_simple_element_write(body, "      ", qn, val,
                                               term.type_name(),
                                               resolver.schemas);
                   }
@@ -1943,20 +1978,25 @@ namespace xb {
                     }
                   } else {
                     std::string cpp_type = resolver.resolve(elem->type_name());
+                    bool is_cycle = resolver.is_cycle_type(elem->type_name());
+                    std::string match_type =
+                        is_cycle ? "std::unique_ptr<" + cpp_type + ">"
+                                 : cpp_type;
+                    std::string val = is_cycle ? "*v" : "v";
                     std::string qn = "xb::qname{\"" +
                                      elem->name().namespace_uri() + "\", \"" +
                                      elem->name().local_name() + "\"}";
                     std::string kw = first ? "if" : "else if";
                     body += "    " + kw + " constexpr (std::is_same_v<T, " +
-                            cpp_type + ">) {\n";
+                            match_type + ">) {\n";
                     if (is_complex_type(resolver.schemas, elem->type_name())) {
                       std::string write_fn =
                           resolver.qualify_fn("write_", elem->type_name());
                       body += "      writer.start_element(" + qn + ");\n";
-                      body += "      " + write_fn + "(v, writer);\n";
+                      body += "      " + write_fn + "(" + val + ", writer);\n";
                       body += "      writer.end_element();\n";
                     } else {
-                      emit_simple_element_write(body, "      ", qn, "v",
+                      emit_simple_element_write(body, "      ", qn, val,
                                                 elem->type_name(),
                                                 resolver.schemas);
                     }
@@ -2332,6 +2372,9 @@ namespace xb {
         // vector field -> push_back
         if (is_complex) {
           std::string read_fn = resolver.qualify_fn("read_", info.type_name);
+          if (info.is_recursive)
+            return "      " + field + ".push_back(std::make_unique<" +
+                   cpp_type + ">(" + read_fn + "(reader)));\n";
           return "      " + field + ".push_back(" + read_fn + "(reader));\n";
         }
         return "      " + field + ".push_back(xb::read_simple<" + cpp_type +
@@ -2529,12 +2572,20 @@ namespace xb {
                             body += "    " + kw + " (name == " + qn + ") {\n";
                             std::string cpp_type =
                                 resolver.resolve(gt.type_name());
+                            bool is_cycle =
+                                resolver.is_cycle_type(gt.type_name());
                             if (is_complex_type(resolver.schemas,
                                                 gt.type_name())) {
                               std::string read_fn =
                                   resolver.qualify_fn("read_", gt.type_name());
-                              body += "      result.choice.push_back(" +
-                                      read_fn + "(reader));\n";
+                              if (is_cycle)
+                                body += "      result.choice.push_back("
+                                        "std::make_unique<" +
+                                        cpp_type + ">(" + read_fn +
+                                        "(reader)));\n";
+                              else
+                                body += "      result.choice.push_back(" +
+                                        read_fn + "(reader));\n";
                             } else {
                               body += "      result.choice.push_back("
                                       "xb::read_simple<" +
@@ -2553,12 +2604,20 @@ namespace xb {
                             body += "    " + kw + " (name == " + qn + ") {\n";
                             std::string cpp_type =
                                 resolver.resolve(elem->type_name());
+                            bool is_cycle =
+                                resolver.is_cycle_type(elem->type_name());
                             if (is_complex_type(resolver.schemas,
                                                 elem->type_name())) {
                               std::string read_fn = resolver.qualify_fn(
                                   "read_", elem->type_name());
-                              body += "      result.choice.push_back(" +
-                                      read_fn + "(reader));\n";
+                              if (is_cycle)
+                                body += "      result.choice.push_back("
+                                        "std::make_unique<" +
+                                        cpp_type + ">(" + read_fn +
+                                        "(reader)));\n";
+                              else
+                                body += "      result.choice.push_back(" +
+                                        read_fn + "(reader));\n";
                             } else {
                               body += "      result.choice.push_back("
                                       "xb::read_simple<" +
@@ -2652,7 +2711,11 @@ namespace xb {
                   } else if (is_complex) {
                     std::string read_fn =
                         resolver.qualify_fn("read_", term.type_name());
-                    emit_choice_assign(read_fn + "(reader)");
+                    if (resolver.is_cycle_type(term.type_name()))
+                      emit_choice_assign("std::make_unique<" + cpp_type + ">(" +
+                                         read_fn + "(reader))");
+                    else
+                      emit_choice_assign(read_fn + "(reader)");
                   } else {
                     emit_choice_assign("xb::read_simple<" + cpp_type +
                                        ">(reader)");
@@ -2674,7 +2737,13 @@ namespace xb {
                       body += "    " + kw + " (name == " + mqn + ") {\n";
                       std::string read_fn =
                           resolver.qualify_fn("read_", m->type_name());
-                      emit_choice_assign(read_fn + "(reader)");
+                      if (resolver.is_cycle_type(m->type_name())) {
+                        std::string cpp_type = resolver.resolve(m->type_name());
+                        emit_choice_assign("std::make_unique<" + cpp_type +
+                                           ">(" + read_fn + "(reader))");
+                      } else {
+                        emit_choice_assign(read_fn + "(reader)");
+                      }
                       body += "    }\n";
                       first_branch = false;
                     }
@@ -2690,7 +2759,11 @@ namespace xb {
                     if (is_complex) {
                       std::string read_fn =
                           resolver.qualify_fn("read_", elem->type_name());
-                      emit_choice_assign(read_fn + "(reader)");
+                      if (resolver.is_cycle_type(elem->type_name()))
+                        emit_choice_assign("std::make_unique<" + cpp_type +
+                                           ">(" + read_fn + "(reader))");
+                      else
+                        emit_choice_assign(read_fn + "(reader)");
                     } else {
                       emit_choice_assign("xb::read_simple<" + cpp_type +
                                          ">(reader)");
@@ -3117,11 +3190,14 @@ namespace xb {
 
                 if (is_collection) {
                   // vector field: check min/max size
+                  std::string size_expr =
+                      wrapped ? struct_prefix + fname + "_size()"
+                              : field + ".size()";
                   if (p.occurs.min_occurs > 0)
-                    checks.push_back(field + ".size() >= " +
+                    checks.push_back(size_expr + " >= " +
                                      std::to_string(p.occurs.min_occurs));
                   if (!p.occurs.is_unbounded())
-                    checks.push_back(field + ".size() <= " +
+                    checks.push_back(size_expr + " <= " +
                                      std::to_string(p.occurs.max_occurs));
                 } else if (is_optional && p.occurs.min_occurs == 1) {
                   // optional with min=1: must have value (shouldn't occur
@@ -3335,9 +3411,29 @@ namespace xb {
           auto ordered = order_declarations(std::move(types), cycle_names);
 
           ns.declarations.clear();
-          ns.declarations.reserve(ordered.size() + functions.size());
+          ns.declarations.reserve(ordered.size() + functions.size() * 2);
           for (auto& d : ordered)
             ns.declarations.push_back(std::move(d));
+
+          // When cycle types exist, inline functions may be mutually
+          // recursive (e.g. read_A calls read_B and vice versa).
+          // Emit forward declarations for all inline functions so any
+          // call order works. Use cpp_raw_text to avoid interfering
+          // with find_function lookups on the IR.
+          if (!cycle_names.empty()) {
+            std::string fwd_block;
+            for (const auto& decl : functions) {
+              auto* fn = std::get_if<cpp_function>(&decl);
+              if (!fn || !fn->is_inline) continue;
+              fwd_block += fn->return_type + " " + fn->name + "(" +
+                           fn->parameters + ");\n";
+            }
+            if (!fwd_block.empty()) {
+              fwd_block += "\n";
+              ns.declarations.push_back(cpp_raw_text{std::move(fwd_block)});
+            }
+          }
+
           for (auto& d : functions)
             ns.declarations.push_back(std::move(d));
         }

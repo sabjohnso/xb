@@ -1,0 +1,391 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema
+  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  xmlns:xlex="http://xeag.org/lexer"
+  targetNamespace="http://xeag.org/lexer"
+  elementFormDefault="qualified"
+  xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning"
+  vc:minVersion="1.1">
+
+  <xs:annotation>
+    <xs:documentation>
+      XEAG Lexer Schema (v0.5.0)
+
+      Defines a regular lexer for tokenization.  Match definitions
+      map character patterns to named token types.  Skip patterns
+      define content silently consumed between tokens.
+
+      Matches use longest-match and definition-order priority
+      (conventional lexer semantics).
+    </xs:documentation>
+  </xs:annotation>
+
+  <!-- ==========================================================
+     Root Element
+     ========================================================== -->
+
+  <xs:element name="lexer" type="xlex:Lexer-Type">
+    <xs:annotation>
+      <xs:documentation>
+        Root element of a standalone lexer definition.
+        Token names must be unique across all match definitions.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:unique name="unique-match-name">
+      <xs:selector xpath="xlex:match"/>
+      <xs:field xpath="@name"/>
+    </xs:unique>
+  </xs:element>
+
+  <!-- ==========================================================
+     Lexer Definitions
+     ========================================================== -->
+
+  <xs:complexType name="Lexer-Type">
+    <xs:annotation>
+      <xs:documentation>
+        A lexer consists of zero or more skip patterns followed
+        by one or more match definitions.  Skip patterns define
+        content silently consumed between tokens (e.g. whitespace,
+        comments).  Match definitions map character patterns to
+        named token types.
+
+        Definition order determines priority: when two matches
+        produce tokens of equal length, the one defined first wins.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="skip" type="xlex:Skip-Type"
+            minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="match" type="xlex:Match-Type"
+            minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Match-Type">
+    <xs:annotation>
+      <xs:documentation>
+        A named token definition.  Each match associates a token
+        name with a character pattern.
+
+        Three forms are supported (exactly one must be used):
+
+        1. Literal shorthand — value attribute:
+             &lt;match name="PLUS" value="+"/&gt;
+
+        2. Character class shorthand — chars attribute:
+             &lt;match name="NUMBER" chars="0-9"
+                    repetition="one-or-more"/&gt;
+
+        3. Complex pattern — child pattern elements:
+             &lt;match name="IDENT"&gt;
+               &lt;char-class chars="a-zA-Z_"/&gt;
+               &lt;char-class chars="a-zA-Z0-9_"
+                            repetition="zero-or-more"/&gt;
+             &lt;/match&gt;
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="xlex:regular-pattern"
+           minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xlex:Name-Type" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Token name.  Referenced by &lt;tok name="..."/&gt; in
+          the phrase grammar.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="value" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>
+          Literal string shorthand.  The token matches this
+          exact character sequence.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="chars" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>
+          Character class shorthand.  Specifies a set of
+          characters using range notation (e.g. "a-zA-Z0-9").
+          Use with repetition for multi-character tokens.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="complement" type="xs:boolean"
+           default="false">
+      <xs:annotation>
+        <xs:documentation>
+          When true, inverts the chars character class to match
+          any character NOT in the set.  Only meaningful with
+          the chars attribute.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="repetition" type="xlex:Repetition-Type">
+      <xs:annotation>
+        <xs:documentation>
+          Repetition modifier for the chars shorthand.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+
+    <xs:assert test="(@value and not(@chars) and not(*)) or
+                     (@chars and not(@value) and not(*)) or
+                     (not(@value) and not(@chars) and *)">
+      <xs:annotation>
+        <xs:documentation>
+          A match must be defined by exactly one of: a value
+          attribute (literal), a chars attribute (character
+          class), or child pattern elements (complex pattern).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:assert>
+  </xs:complexType>
+
+  <xs:complexType name="Skip-Type">
+    <xs:annotation>
+      <xs:documentation>
+        A pattern for content silently consumed between tokens
+        (e.g. whitespace, comments).  Skipped content does not
+        produce tokens.
+
+        Two forms are supported (exactly one must be used):
+
+        1. Character class shorthand — chars attribute:
+             &lt;skip chars=" &#10;&#9;" repetition="one-or-more"/&gt;
+
+        2. Complex pattern — child pattern elements:
+             &lt;skip&gt;
+               &lt;literal value="//"/&gt;
+               &lt;char-class chars="&#10;" complement="true"
+                            repetition="zero-or-more"/&gt;
+             &lt;/skip&gt;
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="xlex:regular-pattern"
+           minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="chars" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>
+          Character class shorthand.  Specifies a set of
+          characters using range notation.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="complement" type="xs:boolean"
+           default="false">
+      <xs:annotation>
+        <xs:documentation>
+          When true, inverts the chars character class.
+          Only meaningful with the chars attribute.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="repetition" type="xlex:Repetition-Type">
+      <xs:annotation>
+        <xs:documentation>
+          Repetition modifier for the chars shorthand.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+
+    <xs:assert test="(@chars and not(*)) or
+                     (not(@chars) and *)">
+      <xs:annotation>
+        <xs:documentation>
+          A skip must be defined by either a chars attribute
+          (character class) or child pattern elements.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:assert>
+  </xs:complexType>
+
+  <!-- ==========================================================
+     Regular Patterns
+
+     Pattern elements used in match and skip definitions.
+     Children of a match or group form an implicit sequence
+     (concatenation).
+     ========================================================== -->
+
+  <xs:group name="regular-pattern">
+    <xs:annotation>
+      <xs:documentation>
+        The set of pattern elements available within match and
+        skip definitions.  Multiple sibling patterns form an
+        implicit sequence (concatenation).
+
+        - literal:    exact string match
+        - char-class: single character from a set (with optional
+                      repetition)
+        - choice:     alternation of two or more options
+        - group:      sub-sequence with optional repetition
+      </xs:documentation>
+    </xs:annotation>
+    <xs:choice>
+      <xs:element name="literal"    type="xlex:Pattern-Literal-Type"/>
+      <xs:element name="char-class" type="xlex:Char-Class-Type"/>
+      <xs:element name="choice"     type="xlex:Pattern-Choice-Type"/>
+      <xs:element name="group"      type="xlex:Pattern-Group-Type"/>
+    </xs:choice>
+  </xs:group>
+
+  <xs:complexType name="Pattern-Literal-Type">
+    <xs:annotation>
+      <xs:documentation>
+        Matches an exact character sequence.
+
+        Example: &lt;literal value="begin"/&gt;
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="value" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          The exact string to match.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="Char-Class-Type">
+    <xs:annotation>
+      <xs:documentation>
+        Matches one character from a set, optionally repeated.
+        The chars attribute uses range notation: individual
+        characters and hyphen-separated ranges (e.g. "a-zA-Z0-9_").
+
+        Examples:
+          &lt;char-class chars="0-9" repetition="one-or-more"/&gt;
+          &lt;char-class chars="&#10;" complement="true"
+                       repetition="zero-or-more"/&gt;
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="chars" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Character set in range notation.  Individual characters
+          are listed directly; ranges use hyphens (e.g. "a-z").
+          A literal hyphen must appear first or last.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="complement" type="xs:boolean"
+           default="false">
+      <xs:annotation>
+        <xs:documentation>
+          When true, matches any character NOT in the set.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="repetition" type="xlex:Repetition-Type">
+      <xs:annotation>
+        <xs:documentation>
+          Repetition modifier.  Without this attribute, the
+          class matches exactly one character.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="Pattern-Choice-Type">
+    <xs:annotation>
+      <xs:documentation>
+        Alternation of two or more options.  Each option is a
+        pattern group (implicit sequence).  The lexer tries all
+        options and selects the longest match.
+
+        Example:
+          &lt;choice&gt;
+            &lt;option&gt;&lt;literal value="true"/&gt;&lt;/option&gt;
+            &lt;option&gt;&lt;literal value="false"/&gt;&lt;/option&gt;
+          &lt;/choice&gt;
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="option" type="xlex:Pattern-Group-Type"
+            minOccurs="2" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="repetition" type="xlex:Repetition-Type">
+      <xs:annotation>
+        <xs:documentation>
+          Repetition modifier applied to the entire choice.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="Pattern-Group-Type">
+    <xs:annotation>
+      <xs:documentation>
+        A sub-sequence of patterns with optional repetition.
+        Used for grouping within a choice or for repeating
+        a multi-element pattern.
+
+        Example:
+          &lt;group repetition="zero-or-more"&gt;
+            &lt;literal value="_"/&gt;
+            &lt;char-class chars="a-z"/&gt;
+          &lt;/group&gt;
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="xlex:regular-pattern"
+           minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="repetition" type="xlex:Repetition-Type">
+      <xs:annotation>
+        <xs:documentation>
+          Repetition modifier applied to the entire group.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ==========================================================
+     Simple Types
+     ========================================================== -->
+
+  <xs:simpleType name="Name-Type">
+    <xs:annotation>
+      <xs:documentation>
+        Hyphenated identifier for token and skip names.
+        Segments of letters and digits joined by hyphens.
+
+        Examples: "IDENT", "NUMBER", "line-comment",
+                  "ELSE-IF", "char2"
+
+        Pattern: [a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z][a-zA-Z0-9]*)*
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern
+        value="[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z][a-zA-Z0-9]*)*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Repetition-Type">
+    <xs:annotation>
+      <xs:documentation>
+        Repetition modifier for character classes and pattern
+        groups.
+
+        - zero-or-more:  Kleene star   (0..∞)
+        - one-or-more:   Kleene plus   (1..∞)
+        - optional:      question mark (0..1)
+
+        When omitted, the element matches exactly once.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="zero-or-more"/>
+      <xs:enumeration value="one-or-more"/>
+      <xs:enumeration value="optional"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
