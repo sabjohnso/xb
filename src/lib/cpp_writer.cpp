@@ -5,13 +5,13 @@
 
 namespace {
   bool
-  is_variant(const std::string& type) {
-    return type.substr(0, 13) == "std::variant<";
+  is_template_type(const std::string& type) {
+    return type.find('<') != std::string::npos;
   }
 
   std::string
   alias_name(const std::string& field_name) {
-    return field_name + "_type";
+    return field_name + "_t";
   }
 } // namespace
 
@@ -48,7 +48,7 @@ namespace xb {
     void
     write_field(std::ostream& os, const cpp_field& field,
                 bool use_alias = false) {
-      std::string type = use_alias && is_variant(field.type)
+      std::string type = use_alias && is_template_type(field.type)
                              ? alias_name(field.name)
                              : field.type;
       os << "  " << type << ' ' << field.name;
@@ -80,7 +80,7 @@ namespace xb {
 
       // Emit type aliases for variant fields
       for (const auto& f : s.fields) {
-        if (is_variant(f.type))
+        if (is_template_type(f.type))
           os << "  using " << alias_name(f.name) << " = " << f.type << ";\n";
       }
 
@@ -121,7 +121,7 @@ namespace xb {
     // use the alias defined in the raw struct.
     std::string
     class_field_type(const cpp_class& cls, const cpp_field& f) {
-      if (is_variant(f.type))
+      if (is_template_type(f.type))
         return cls.raw_struct_name + "::" + alias_name(f.name);
       return f.type;
     }
@@ -134,12 +134,12 @@ namespace xb {
         std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
-          os << "\n  const " << f.type << "& " << f.name << "() const;\n";
+          os << "\n  const " << ftype << "& " << f.name << "() const;\n";
           os << "\n  void set_" << f.name << "(" << inner << " value);\n";
           os << "\n  void clear_" << f.name << "();\n";
         } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
           auto singular = singularize(f.name);
-          os << "\n  auto " << f.name << "() const;\n";
+          os << "\n  const " << ftype << "& " << f.name << "() const;\n";
           os << "\n  void add_" << singular << "(" << inner << " value);\n";
           os << "\n  std::size_t " << f.name << "_size() const;\n";
           os << "\n  void clear_" << f.name << "();\n";
@@ -158,7 +158,7 @@ namespace xb {
         std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
-          os << "\n  const " << f.type << "& " << f.name
+          os << "\n  const " << ftype << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
           os << "\n  void set_" << f.name << "(" << inner << " value) { data_."
              << f.name << " = std::move(value); }\n";
@@ -166,9 +166,8 @@ namespace xb {
              << ".reset(); }\n";
         } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
           auto singular = singularize(f.name);
-          os << "\n  auto " << f.name
-             << "() const { return std::views::all(data_." << f.name
-             << "); }\n";
+          os << "\n  const " << ftype << "& " << f.name
+             << "() const { return data_." << f.name << "; }\n";
           os << "\n  void add_" << singular << "(" << inner
              << " value) { data_." << f.name
              << ".push_back(std::move(value)); }\n";
@@ -226,7 +225,7 @@ namespace xb {
         std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
-          os << "const " << f.type << "& " << c << "::" << f.name
+          os << "const " << ftype << "& " << c << "::" << f.name
              << "() const { return data_." << f.name << "; }\n\n";
           os << "void " << c << "::set_" << f.name << "(" << inner
              << " value) { data_." << f.name << " = std::move(value); }\n\n";
@@ -234,9 +233,8 @@ namespace xb {
              << ".reset(); }\n\n";
         } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
           auto singular = singularize(f.name);
-          os << "auto " << c << "::" << f.name
-             << "() const { return std::views::all(data_." << f.name
-             << "); }\n\n";
+          os << "const " << ftype << "& " << c << "::" << f.name
+             << "() const { return data_." << f.name << "; }\n\n";
           os << "void " << c << "::add_" << singular << "(" << inner
              << " value) { data_." << f.name
              << ".push_back(std::move(value)); }\n\n";

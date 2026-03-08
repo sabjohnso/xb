@@ -269,12 +269,14 @@ TEST_CASE("fields with template types", "[cpp_writer]") {
   file.namespaces.push_back({"ns", {std::move(s)}});
 
   auto result = writer.write(file);
-  CHECK(result.find("std::optional<std::string> header{};") !=
+  CHECK(result.find("using header_t = std::optional<std::string>;") !=
         std::string::npos);
-  CHECK(result.find("std::vector<int> items{};") != std::string::npos);
-  CHECK(result.find("using payload_type = std::variant<int, std::string>;") !=
+  CHECK(result.find("header_t header{};") != std::string::npos);
+  CHECK(result.find("using items_t = std::vector<int>;") != std::string::npos);
+  CHECK(result.find("items_t items{};") != std::string::npos);
+  CHECK(result.find("using payload_t = std::variant<int, std::string>;") !=
         std::string::npos);
-  CHECK(result.find("payload_type payload{};") != std::string::npos);
+  CHECK(result.find("payload_t payload{};") != std::string::npos);
 }
 
 // Additional: Field with default value
@@ -643,7 +645,8 @@ TEST_CASE("struct field with explicit default keeps it", "[cpp_writer]") {
   CHECK(result.find("retries{}") == std::string::npos);
 }
 
-TEST_CASE("variant field gets type alias in struct", "[cpp_writer]") {
+TEST_CASE("template specialization fields get type aliases in struct",
+          "[cpp_writer]") {
   cpp_file file;
   file.filename = "test.hpp";
   cpp_struct s;
@@ -651,21 +654,34 @@ TEST_CASE("variant field gets type alias in struct", "[cpp_writer]") {
   s.generate_equality = false;
   s.fields = {
       {"std::variant<int, std::string>", "payload", ""},
+      {"std::vector<int>", "items", ""},
+      {"std::optional<std::string>", "header", ""},
       {"std::string", "tag", ""},
+      {"int", "count", ""},
   };
   file.namespaces.push_back({"ns", {std::move(s)}});
 
   auto result = writer.write(file);
-  // Type alias declared inside the struct
-  CHECK(result.find("using payload_type = std::variant<int, std::string>;") !=
+  // Type aliases for all template specializations
+  CHECK(result.find("using payload_t = std::variant<int, std::string>;") !=
         std::string::npos);
-  // Field uses the alias, not the raw variant type
-  CHECK(result.find("payload_type payload{};") != std::string::npos);
-  // Non-variant field is unchanged
+  CHECK(result.find("using items_t = std::vector<int>;") != std::string::npos);
+  CHECK(result.find("using header_t = std::optional<std::string>;") !=
+        std::string::npos);
+  // Fields use the aliases
+  CHECK(result.find("payload_t payload{};") != std::string::npos);
+  CHECK(result.find("items_t items{};") != std::string::npos);
+  CHECK(result.find("header_t header{};") != std::string::npos);
+  // Non-template fields are unchanged
   CHECK(result.find("std::string tag{};") != std::string::npos);
+  CHECK(result.find("int count{};") != std::string::npos);
+  // No alias for non-template types
+  CHECK(result.find("using tag_t") == std::string::npos);
+  CHECK(result.find("using count_t") == std::string::npos);
 }
 
-TEST_CASE("class accessors use variant alias from raw struct", "[cpp_writer]") {
+TEST_CASE("class accessors use template alias from raw struct",
+          "[cpp_writer]") {
   cpp_file file;
   file.filename = "test.hpp";
   cpp_class cls;
@@ -673,15 +689,19 @@ TEST_CASE("class accessors use variant alias from raw struct", "[cpp_writer]") {
   cls.raw_struct_name = "event_data";
   cls.fields = {
       {"std::variant<int, std::string>", "payload", ""},
+      {"std::vector<int>", "items", ""},
       {"std::string", "tag", ""},
   };
   file.namespaces.push_back({"ns", {cls}});
 
   auto result = writer.write(file);
-  // Getter return type references the alias through the raw struct
-  CHECK(result.find("const event_data::payload_type&") != std::string::npos);
-  // Setter parameter type references the alias
-  CHECK(result.find("event_data::payload_type value") != std::string::npos);
+  // Getter/setter for variant field uses alias
+  CHECK(result.find("const event_data::payload_t&") != std::string::npos);
+  CHECK(result.find("event_data::payload_t value") != std::string::npos);
+  // Vector field accessor also uses alias
+  CHECK(result.find("event_data::items_t") != std::string::npos);
+  // Non-template field uses raw type
+  CHECK(result.find("const std::string&") != std::string::npos);
 }
 
 TEST_CASE("blank line after each function prototype and definition",
