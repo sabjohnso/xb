@@ -91,26 +91,38 @@ namespace xb {
       return name;
     }
 
+    // Emit field accessor declarations (no bodies) for split-mode header
     void
-    write_class(std::ostream& os, const cpp_class& cls) {
-      write_doc_comment(os, cls.doc_comment);
-      os << "class " << cls.name << " {\n";
-      os << "  detail::" << cls.detail_struct_name << " data_;\n";
-      os << "public:\n";
-
-      // Default constructor
-      os << "  " << cls.name << "() = default;\n";
-
-      // Constructor from detail struct
-      os << "  explicit " << cls.name << "(detail::" << cls.detail_struct_name
-         << " d) : data_(std::move(d)) {}\n";
-
+    write_class_field_decls(std::ostream& os, const cpp_class& cls) {
       for (const auto& f : cls.fields) {
         std::string inner;
         os << '\n';
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
-          // Optional field: getter, setter, clear
+          os << "  const " << f.type << "& " << f.name << "() const;\n";
+          os << "  void set_" << f.name << "(" << inner << " value);\n";
+          os << "  void clear_" << f.name << "();\n";
+        } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
+          auto singular = singularize(f.name);
+          os << "  auto " << f.name << "() const;\n";
+          os << "  void add_" << singular << "(" << inner << " value);\n";
+          os << "  std::size_t " << f.name << "_size() const;\n";
+          os << "  void clear_" << f.name << "();\n";
+        } else {
+          os << "  const " << f.type << "& " << f.name << "() const;\n";
+          os << "  void set_" << f.name << "(" << f.type << " value);\n";
+        }
+      }
+    }
+
+    // Emit field accessor definitions (with bodies) inline in the class
+    void
+    write_class_field_inline(std::ostream& os, const cpp_class& cls) {
+      for (const auto& f : cls.fields) {
+        std::string inner;
+        os << '\n';
+
+        if ((inner = extract_inner(f.type, "std::optional")) != "") {
           os << "  const " << f.type << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
           os << "  void set_" << f.name << "(" << inner << " value) { data_."
@@ -118,7 +130,6 @@ namespace xb {
           os << "  void clear_" << f.name << "() { data_." << f.name
              << ".reset(); }\n";
         } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
-          // Sequence field: range getter, add, size, clear
           auto singular = singularize(f.name);
           os << "  auto " << f.name
              << "() const { return std::views::all(data_." << f.name
@@ -130,12 +141,32 @@ namespace xb {
           os << "  void clear_" << f.name << "() { data_." << f.name
              << ".clear(); }\n";
         } else {
-          // Scalar field: const ref getter, setter
           os << "  const " << f.type << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
           os << "  void set_" << f.name << "(" << f.type << " value) { data_."
              << f.name << " = std::move(value); }\n";
         }
+      }
+    }
+
+    // Emit class declaration (header)
+    void
+    write_class_header(std::ostream& os, const cpp_class& cls) {
+      write_doc_comment(os, cls.doc_comment);
+      os << "class " << cls.name << " {\n";
+      os << "  detail::" << cls.detail_struct_name << " data_;\n";
+      os << "public:\n";
+
+      os << "  " << cls.name << "() = default;\n";
+      os << "  explicit " << cls.name << "(detail::" << cls.detail_struct_name
+         << " d)";
+
+      if (cls.inline_methods) {
+        os << " : data_(std::move(d)) {}\n";
+        write_class_field_inline(os, cls);
+      } else {
+        os << ";\n";
+        write_class_field_decls(os, cls);
       }
 
       if (cls.generate_equality) {
@@ -143,14 +174,67 @@ namespace xb {
         os << "  bool operator==(const " << cls.name << "&) const = default;\n";
       }
 
-      // data() accessor (const and mutable)
       os << '\n';
-      os << "  const detail::" << cls.detail_struct_name
-         << "& data() const { return data_; }\n";
-      os << "  detail::" << cls.detail_struct_name
-         << "& data() { return data_; }\n";
+      if (cls.inline_methods) {
+        os << "  const detail::" << cls.detail_struct_name
+           << "& data() const { return data_; }\n";
+        os << "  detail::" << cls.detail_struct_name
+           << "& data() { return data_; }\n";
+      } else {
+        os << "  const detail::" << cls.detail_struct_name
+           << "& data() const;\n";
+        os << "  detail::" << cls.detail_struct_name << "& data();\n";
+      }
 
       os << "};\n";
+    }
+
+    // Emit out-of-line method definitions (source file)
+    void
+    write_class_source(std::ostream& os, const cpp_class& cls) {
+      const auto& c = cls.name;
+      const auto& d = cls.detail_struct_name;
+
+      // Constructor
+      os << c << "::" << c << "(detail::" << d
+         << " d) : data_(std::move(d)) {}\n";
+
+      for (const auto& f : cls.fields) {
+        std::string inner;
+        os << '\n';
+
+        if ((inner = extract_inner(f.type, "std::optional")) != "") {
+          os << "const " << f.type << "& " << c << "::" << f.name
+             << "() const { return data_." << f.name << "; }\n";
+          os << "void " << c << "::set_" << f.name << "(" << inner
+             << " value) { data_." << f.name << " = std::move(value); }\n";
+          os << "void " << c << "::clear_" << f.name << "() { data_." << f.name
+             << ".reset(); }\n";
+        } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
+          auto singular = singularize(f.name);
+          os << "auto " << c << "::" << f.name
+             << "() const { return std::views::all(data_." << f.name
+             << "); }\n";
+          os << "void " << c << "::add_" << singular << "(" << inner
+             << " value) { data_." << f.name
+             << ".push_back(std::move(value)); }\n";
+          os << "std::size_t " << c << "::" << f.name
+             << "_size() const { return data_." << f.name << ".size(); }\n";
+          os << "void " << c << "::clear_" << f.name << "() { data_." << f.name
+             << ".clear(); }\n";
+        } else {
+          os << "const " << f.type << "& " << c << "::" << f.name
+             << "() const { return data_." << f.name << "; }\n";
+          os << "void " << c << "::set_" << f.name << "(" << f.type
+             << " value) { data_." << f.name << " = std::move(value); }\n";
+        }
+      }
+
+      // data() accessors
+      os << '\n';
+      os << "const detail::" << d << "& " << c
+         << "::data() const { return data_; }\n";
+      os << "detail::" << d << "& " << c << "::data() { return data_; }\n";
     }
 
     void
@@ -236,6 +320,12 @@ namespace xb {
             using T = std::decay_t<decltype(d)>;
             if constexpr (std::is_same_v<T, cpp_function>) {
               write_function(os, d, kind);
+            } else if constexpr (std::is_same_v<T, cpp_class>) {
+              if (kind == file_kind::source) {
+                if (!d.inline_methods) write_class_source(os, d);
+              } else {
+                write_class_header(os, d);
+              }
             } else if (kind == file_kind::source) {
               // Source mode: skip all non-function declarations
               return;
@@ -249,8 +339,6 @@ namespace xb {
               write_forward_decl(os, d);
             } else if constexpr (std::is_same_v<T, cpp_raw_text>) {
               os << d.text;
-            } else if constexpr (std::is_same_v<T, cpp_class>) {
-              write_class(os, d);
             }
           },
           decl);
@@ -263,6 +351,9 @@ namespace xb {
             using T = std::decay_t<decltype(d)>;
             if constexpr (std::is_same_v<T, cpp_function>) {
               if (kind == file_kind::source) return !d.is_inline;
+              return true;
+            } else if constexpr (std::is_same_v<T, cpp_class>) {
+              if (kind == file_kind::source) return !d.inline_methods;
               return true;
             } else {
               return kind == file_kind::header;

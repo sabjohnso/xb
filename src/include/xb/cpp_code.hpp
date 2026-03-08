@@ -80,6 +80,7 @@ namespace xb {
     std::string detail_struct_name;
     std::vector<cpp_field> fields;
     bool generate_equality = true;
+    bool inline_methods = true;
     std::string doc_comment;
 
     bool

@@ -226,10 +226,34 @@ namespace {
       }
     }
 
+    // Parse naming style string to enum
+    auto parse_naming_style = [](const std::string& s) -> xb::naming_style {
+      if (s == "pascal") return xb::naming_style::pascal_case;
+      if (s == "camel") return xb::naming_style::camel_case;
+      if (s == "upper-snake") return xb::naming_style::upper_snake;
+      if (s == "original") return xb::naming_style::original;
+      return xb::naming_style::snake_case;
+    };
+
     // Set up codegen options
     xb::codegen_options codegen_opts;
     codegen_opts.namespace_map = namespace_map;
     codegen_opts.mode = mode;
+    codegen_opts.header_suffix = config.value("header-suffix", ".hpp");
+    codegen_opts.source_suffix = config.value("source-suffix", ".cpp");
+    codegen_opts.generate_docs = config.value("generate-docs", false);
+    codegen_opts.separate_fwd_header =
+        config.value("separate-fwd-header", false);
+    codegen_opts.naming.type_style =
+        parse_naming_style(config.value("type-style", "snake"));
+    codegen_opts.naming.field_style =
+        parse_naming_style(config.value("field-style", "snake"));
+    codegen_opts.naming.enum_style =
+        parse_naming_style(config.value("enum-style", "snake"));
+
+    std::string encap_str = config.value("encapsulation", "raw-struct");
+    if (encap_str == "wrapped")
+      codegen_opts.encapsulation = xb::encapsulation_mode::wrapped;
 
     // Generate code
     std::vector<xb::cpp_file> files;

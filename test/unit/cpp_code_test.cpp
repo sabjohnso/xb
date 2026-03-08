@@ -560,3 +560,42 @@ TEST_CASE("cpp_class renders wrapper with accessors", "[cpp_writer]") {
   // data() accessor
   CHECK(result.find("data()") != std::string::npos);
 }
+
+TEST_CASE("cpp_class split mode: header has declarations, source has "
+          "definitions",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_class cls;
+  cls.name = "order";
+  cls.detail_struct_name = "order_data";
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::string", "cl_ord_id", ""},
+      {"std::optional<std::string>", "side", ""},
+      {"std::vector<fill>", "fills", ""},
+  };
+
+  file.namespaces.push_back({"ns", {cls}});
+
+  // Header: declarations only, no bodies
+  auto header = writer.write(file, {file_kind::header});
+  CHECK(header.find("class order") != std::string::npos);
+  CHECK(header.find("cl_ord_id() const;") != std::string::npos);
+  CHECK(header.find("set_cl_ord_id(") != std::string::npos);
+  // Should NOT contain function bodies (return data_.)
+  CHECK(header.find("return data_.") == std::string::npos);
+  CHECK(header.find("std::move(value)") == std::string::npos);
+
+  // Source: out-of-line definitions with class:: prefix
+  auto source = writer.write(file, {file_kind::source});
+  CHECK(source.find("order::cl_ord_id()") != std::string::npos);
+  CHECK(source.find("order::set_cl_ord_id(") != std::string::npos);
+  CHECK(source.find("order::side()") != std::string::npos);
+  CHECK(source.find("order::clear_side()") != std::string::npos);
+  CHECK(source.find("order::fills()") != std::string::npos);
+  CHECK(source.find("order::add_fill(") != std::string::npos);
+  CHECK(source.find("order::fills_size()") != std::string::npos);
+  CHECK(source.find("return data_.") != std::string::npos);
+}

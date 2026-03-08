@@ -67,6 +67,64 @@
           ]
         },
         {
+          "kind": "option",
+          "names": ["encapsulation"],
+          "doc": ["Encapsulation mode: raw-struct (default) or wrapped."],
+          "type": "string",
+          "docv": "MODE",
+          "default": "raw-struct"
+        },
+        {
+          "kind": "option",
+          "names": ["header-suffix"],
+          "doc": ["File suffix for generated headers (default: .hpp)."],
+          "type": "string",
+          "docv": "EXT",
+          "default": ".hpp"
+        },
+        {
+          "kind": "option",
+          "names": ["source-suffix"],
+          "doc": ["File suffix for generated sources (default: .cpp)."],
+          "type": "string",
+          "docv": "EXT",
+          "default": ".cpp"
+        },
+        {
+          "kind": "option",
+          "names": ["type-style"],
+          "doc": ["Naming style for types: snake, pascal, camel, upper-snake, original."],
+          "type": "string",
+          "docv": "STYLE",
+          "default": "snake"
+        },
+        {
+          "kind": "option",
+          "names": ["field-style"],
+          "doc": ["Naming style for fields: snake, pascal, camel, upper-snake, original."],
+          "type": "string",
+          "docv": "STYLE",
+          "default": "snake"
+        },
+        {
+          "kind": "option",
+          "names": ["enum-style"],
+          "doc": ["Naming style for enum values: snake, pascal, camel, upper-snake, original."],
+          "type": "string",
+          "docv": "STYLE",
+          "default": "snake"
+        },
+        {
+          "kind": "flag",
+          "names": ["generate-docs"],
+          "doc": ["Emit /// doxygen comments from XSD annotations."]
+        },
+        {
+          "kind": "flag",
+          "names": ["separate-fwd-header"],
+          "doc": ["Emit separate _fwd header files for forward declarations."]
+        },
+        {
           "kind": "positional",
           "name": "schemas",
           "doc": ["XSD schema files to process."],

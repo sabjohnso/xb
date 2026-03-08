@@ -3340,12 +3340,14 @@ namespace xb {
           ordered_types.push_back(std::move(d));
       }
 
-      // In split mode, mark read_/write_ functions as non-inline
+      // In split mode, mark functions and class methods as non-inline
       if (options_.mode == output_mode::split ||
           options_.mode == output_mode::file_per_type) {
         for (auto& decl : ordered_types) {
           if (auto* fn = std::get_if<cpp_function>(&decl))
             fn->is_inline = false;
+          else if (auto* cls = std::get_if<cpp_class>(&decl))
+            cls->inline_methods = false;
         }
       }
 
