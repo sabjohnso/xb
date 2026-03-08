@@ -1,5 +1,6 @@
 #pragma once
 
+#include <xb/annotation.hpp>
 #include <xb/qname.hpp>
 #include <xb/type_alternative.hpp>
 
@@ -18,6 +19,7 @@ namespace xb {
     std::optional<std::string> fixed_value_;
     std::optional<qname> substitution_group_;
     std::vector<type_alternative> type_alternatives_;
+    std::optional<annotation> doc_annotation_;
 
   public:
     element_decl() = default;
@@ -73,6 +75,16 @@ namespace xb {
     const std::vector<type_alternative>&
     type_alternatives() const {
       return type_alternatives_;
+    }
+
+    const std::optional<xb::annotation>&
+    doc_annotation() const {
+      return doc_annotation_;
+    }
+
+    void
+    set_doc_annotation(xb::annotation a) {
+      doc_annotation_ = std::move(a);
     }
 
     bool

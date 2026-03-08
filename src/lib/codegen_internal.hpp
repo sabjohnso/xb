@@ -26,9 +26,16 @@ namespace xb {
     }
 
     std::string
+    type_name(const std::string& xml_local_name) const {
+      return apply_naming(xml_local_name, naming_category::type_,
+                          options.naming);
+    }
+
+    std::string
     field_name(const std::string& xml_local_name,
                const std::string& enclosing_type = {}) const {
-      auto name = to_cpp_identifier(xml_local_name);
+      auto name =
+          apply_naming(xml_local_name, naming_category::field, options.naming);
       if (schema_type_names && name != enclosing_type &&
           schema_type_names->count(name))
         name += '_';
@@ -36,11 +43,16 @@ namespace xb {
     }
 
     std::string
-    qualify_fn(const std::string& prefix, const qname& type_name) const {
-      std::string fn = prefix + to_cpp_identifier(type_name.local_name());
-      if (!type_name.namespace_uri().empty() &&
-          type_name.namespace_uri() != current_ns) {
-        std::string ns = cpp_namespace_for(type_name.namespace_uri(), options);
+    enum_value_name(const std::string& xml_value) const {
+      return apply_naming(xml_value, naming_category::enum_value,
+                          options.naming);
+    }
+
+    std::string
+    qualify_fn(const std::string& prefix, const qname& qn) const {
+      std::string fn = prefix + to_cpp_identifier(qn.local_name());
+      if (!qn.namespace_uri().empty() && qn.namespace_uri() != current_ns) {
+        std::string ns = cpp_namespace_for(qn.namespace_uri(), options);
         if (!ns.empty()) return ns + "::" + fn;
       }
       return fn;
@@ -86,17 +98,16 @@ namespace xb {
       if (auto* mapping = types.find(type_name.local_name()))
         return mapping->cpp_type;
 
-      return to_cpp_identifier(type_name.local_name());
+      return this->type_name(type_name.local_name());
     }
 
     std::string
-    qualify(const qname& type_name) const {
-      std::string name = to_cpp_identifier(type_name.local_name());
+    qualify(const qname& qn) const {
+      std::string name = type_name(qn.local_name());
 
-      if (!type_name.namespace_uri().empty() &&
-          type_name.namespace_uri() != current_ns) {
-        referenced_namespaces.insert(type_name.namespace_uri());
-        std::string ns = cpp_namespace_for(type_name.namespace_uri(), options);
+      if (!qn.namespace_uri().empty() && qn.namespace_uri() != current_ns) {
+        referenced_namespaces.insert(qn.namespace_uri());
+        std::string ns = cpp_namespace_for(qn.namespace_uri(), options);
         if (!ns.empty()) return ns + "::" + name;
       }
 

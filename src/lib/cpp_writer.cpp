@@ -1,6 +1,7 @@
 #include <xb/cpp_writer.hpp>
 
 #include <sstream>
+#include <string>
 
 namespace xb {
 
@@ -40,7 +41,17 @@ namespace xb {
     }
 
     void
+    write_doc_comment(std::ostream& os, const std::string& doc) {
+      if (doc.empty()) return;
+      std::istringstream iss(doc);
+      std::string line;
+      while (std::getline(iss, line))
+        os << "/// " << line << '\n';
+    }
+
+    void
     write_struct(std::ostream& os, const cpp_struct& s) {
+      write_doc_comment(os, s.doc_comment);
       if (s.fields.empty() && !s.generate_equality) {
         os << "struct " << s.name << " {};\n";
         return;
@@ -61,8 +72,90 @@ namespace xb {
       os << "};\n";
     }
 
+    // Extract the inner type from wrapper<inner> (e.g. "std::optional<int>"
+    // → "int")
+    std::string
+    extract_inner(const std::string& type, const std::string& wrapper) {
+      auto prefix = wrapper + "<";
+      if (type.size() <= prefix.size() + 1) return "";
+      if (type.substr(0, prefix.size()) != prefix) return "";
+      if (type.back() != '>') return "";
+      return type.substr(prefix.size(), type.size() - prefix.size() - 1);
+    }
+
+    // Simple singularization: strip trailing 's' if present
+    std::string
+    singularize(const std::string& name) {
+      if (name.size() > 1 && name.back() == 's')
+        return name.substr(0, name.size() - 1);
+      return name;
+    }
+
+    void
+    write_class(std::ostream& os, const cpp_class& cls) {
+      write_doc_comment(os, cls.doc_comment);
+      os << "class " << cls.name << " {\n";
+      os << "  detail::" << cls.detail_struct_name << " data_;\n";
+      os << "public:\n";
+
+      // Default constructor
+      os << "  " << cls.name << "() = default;\n";
+
+      // Constructor from detail struct
+      os << "  explicit " << cls.name << "(detail::" << cls.detail_struct_name
+         << " d) : data_(std::move(d)) {}\n";
+
+      for (const auto& f : cls.fields) {
+        std::string inner;
+        os << '\n';
+
+        if ((inner = extract_inner(f.type, "std::optional")) != "") {
+          // Optional field: getter, setter, clear
+          os << "  const " << f.type << "& " << f.name
+             << "() const { return data_." << f.name << "; }\n";
+          os << "  void set_" << f.name << "(" << inner << " value) { data_."
+             << f.name << " = std::move(value); }\n";
+          os << "  void clear_" << f.name << "() { data_." << f.name
+             << ".reset(); }\n";
+        } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
+          // Sequence field: range getter, add, size, clear
+          auto singular = singularize(f.name);
+          os << "  auto " << f.name
+             << "() const { return std::views::all(data_." << f.name
+             << "); }\n";
+          os << "  void add_" << singular << "(" << inner << " value) { data_."
+             << f.name << ".push_back(std::move(value)); }\n";
+          os << "  std::size_t " << f.name << "_size() const { return data_."
+             << f.name << ".size(); }\n";
+          os << "  void clear_" << f.name << "() { data_." << f.name
+             << ".clear(); }\n";
+        } else {
+          // Scalar field: const ref getter, setter
+          os << "  const " << f.type << "& " << f.name
+             << "() const { return data_." << f.name << "; }\n";
+          os << "  void set_" << f.name << "(" << f.type << " value) { data_."
+             << f.name << " = std::move(value); }\n";
+        }
+      }
+
+      if (cls.generate_equality) {
+        os << '\n';
+        os << "  bool operator==(const " << cls.name << "&) const = default;\n";
+      }
+
+      // data() accessor (const and mutable)
+      os << '\n';
+      os << "  const detail::" << cls.detail_struct_name
+         << "& data() const { return data_; }\n";
+      os << "  detail::" << cls.detail_struct_name
+         << "& data() { return data_; }\n";
+
+      os << "};\n";
+    }
+
     void
     write_enum(std::ostream& os, const cpp_enum& e) {
+      write_doc_comment(os, e.doc_comment);
       os << "enum class " << e.name << " {\n";
       for (const auto& v : e.values)
         os << "  " << v.name << ",\n";
@@ -156,6 +249,8 @@ namespace xb {
               write_forward_decl(os, d);
             } else if constexpr (std::is_same_v<T, cpp_raw_text>) {
               os << d.text;
+            } else if constexpr (std::is_same_v<T, cpp_class>) {
+              write_class(os, d);
             }
           },
           decl);

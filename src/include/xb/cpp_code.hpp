@@ -24,6 +24,7 @@ namespace xb {
   struct cpp_enum {
     std::string name;
     std::vector<cpp_enumerator> values;
+    std::string doc_comment;
 
     bool
     operator==(const cpp_enum&) const = default;
@@ -42,6 +43,7 @@ namespace xb {
     std::string name;
     std::vector<cpp_field> fields;
     bool generate_equality = true;
+    std::string doc_comment;
 
     bool
     operator==(const cpp_struct&) const = default;
@@ -73,6 +75,17 @@ namespace xb {
     operator==(const cpp_function&) const = default;
   };
 
+  struct cpp_class {
+    std::string name;
+    std::string detail_struct_name;
+    std::vector<cpp_field> fields;
+    bool generate_equality = true;
+    std::string doc_comment;
+
+    bool
+    operator==(const cpp_class&) const = default;
+  };
+
   struct cpp_raw_text {
     std::string text;
 
@@ -80,8 +93,9 @@ namespace xb {
     operator==(const cpp_raw_text&) const = default;
   };
 
-  using cpp_decl = std::variant<cpp_struct, cpp_enum, cpp_type_alias,
-                                cpp_forward_decl, cpp_function, cpp_raw_text>;
+  using cpp_decl =
+      std::variant<cpp_struct, cpp_enum, cpp_type_alias, cpp_forward_decl,
+                   cpp_function, cpp_raw_text, cpp_class>;
 
   struct cpp_namespace {
     std::string name;

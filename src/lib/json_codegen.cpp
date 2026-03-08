@@ -168,7 +168,7 @@ namespace xb {
     if (seen_variant_types.count(variant_key)) return std::nullopt;
     seen_variant_types.insert(variant_key);
 
-    std::string name = to_cpp_identifier(st.name().local_name());
+    std::string name = resolver.type_name(st.name().local_name());
     cpp_function fn;
     fn.return_type = "void";
     fn.name = "to_json";
@@ -200,7 +200,7 @@ namespace xb {
     if (seen_variant_types.count(variant_key)) return std::nullopt;
     seen_variant_types.insert(variant_key);
 
-    std::string name = to_cpp_identifier(st.name().local_name());
+    std::string name = resolver.type_name(st.name().local_name());
     cpp_function fn;
     fn.return_type = "void";
     fn.name = "from_json";
@@ -214,7 +214,7 @@ namespace xb {
 
       if (is_enum) {
         std::string enum_name =
-            to_cpp_identifier(member_st->name().local_name());
+            resolver.type_name(member_st->name().local_name());
         body += "  if (j.is_string()) {\n";
         body += "    try { v = " + enum_name +
                 "_from_string(j.get<std::string>()); return; }\n";

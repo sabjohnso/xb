@@ -1,5 +1,6 @@
 #pragma once
 
+#include <xb/annotation.hpp>
 #include <xb/assertion.hpp>
 #include <xb/attribute_decl.hpp>
 #include <xb/content_type.hpp>
@@ -22,6 +23,7 @@ namespace xb {
     std::optional<wildcard> attribute_wildcard_;
     std::optional<open_content> open_content_;
     std::vector<assertion> assertions_;
+    std::optional<annotation> doc_annotation_;
 
   public:
     complex_type() = default;
@@ -94,6 +96,16 @@ namespace xb {
     void
     add_assertion(assertion a) {
       assertions_.push_back(std::move(a));
+    }
+
+    const std::optional<xb::annotation>&
+    doc_annotation() const {
+      return doc_annotation_;
+    }
+
+    void
+    set_doc_annotation(xb::annotation a) {
+      doc_annotation_ = std::move(a);
     }
 
     bool

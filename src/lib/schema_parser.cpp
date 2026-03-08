@@ -1,5 +1,6 @@
 #include <xb/schema_parser.hpp>
 
+#include <xb/annotation.hpp>
 #include <xb/assertion.hpp>
 #include <xb/open_content.hpp>
 #include <xb/type_alternative.hpp>
@@ -93,6 +94,46 @@ namespace xb {
           return;
         }
       }
+    }
+
+    // Parse xs:annotation element. Reader is on the xs:annotation start tag.
+    // Returns the concatenated xs:documentation text.
+    std::optional<annotation>
+    parse_annotation(xml_reader& reader) {
+      std::size_t depth = reader.depth();
+      std::string doc;
+
+      while (read_skip_ws(reader)) {
+        if (reader.node_type() == xml_node_type::end_element &&
+            reader.depth() == depth) {
+          break;
+        }
+        if (reader.node_type() == xml_node_type::start_element &&
+            reader.name().namespace_uri() == xs_ns &&
+            reader.name().local_name() == "documentation") {
+          std::size_t doc_depth = reader.depth();
+          while (read_skip_ws(reader)) {
+            if (reader.node_type() == xml_node_type::end_element &&
+                reader.depth() == doc_depth) {
+              break;
+            }
+            if (reader.node_type() == xml_node_type::characters) {
+              doc += reader.text();
+            }
+          }
+        } else if (reader.node_type() == xml_node_type::start_element) {
+          skip_element(reader);
+        }
+      }
+
+      if (doc.empty()) return std::nullopt;
+
+      // Trim leading/trailing whitespace
+      auto start = doc.find_first_not_of(" \t\n\r");
+      auto end = doc.find_last_not_of(" \t\n\r");
+      if (start != std::string::npos) doc = doc.substr(start, end - start + 1);
+
+      return annotation{std::move(doc)};
     }
 
     // Parse occurrence attributes from a particle-bearing element
@@ -224,6 +265,7 @@ namespace xb {
       std::optional<qname> item_type;
       std::vector<qname> member_types;
       std::vector<assertion> assertions;
+      std::optional<annotation> ann;
 
       while (read_skip_ws(reader)) {
         if (reader.node_type() == xml_node_type::end_element &&
@@ -238,7 +280,9 @@ namespace xb {
 
         const auto& local = reader.name().local_name();
 
-        if (local == "restriction") {
+        if (local == "annotation") {
+          ann = parse_annotation(reader);
+        } else if (local == "restriction") {
           variety = simple_type_variety::atomic;
           auto result = parse_restriction(reader);
           base_type = std::move(result.base_type);
@@ -267,16 +311,20 @@ namespace xb {
         }
       }
 
-      return simple_type(qname(tns, name), variety, std::move(base_type),
-                         std::move(facets), std::move(item_type),
-                         std::move(member_types), std::move(assertions));
+      auto st = simple_type(qname(tns, name), variety, std::move(base_type),
+                            std::move(facets), std::move(item_type),
+                            std::move(member_types), std::move(assertions));
+      if (ann) st.set_doc_annotation(std::move(*ann));
+      return st;
     }
 
     // Parse xs:alternative children of an element declaration.
     // The reader must be positioned on the xs:element start tag.
     // Reads children and returns any xs:alternative elements found.
+    // Optionally captures annotation if present.
     std::vector<type_alternative>
-    parse_alternatives(xml_reader& reader, std::size_t elem_depth) {
+    parse_alternatives(xml_reader& reader, std::size_t elem_depth,
+                       std::optional<annotation>* out_annotation = nullptr) {
       std::vector<type_alternative> alts;
       while (read_skip_ws(reader)) {
         if (reader.node_type() == xml_node_type::end_element &&
@@ -288,7 +336,10 @@ namespace xb {
           skip_element(reader);
           continue;
         }
-        if (reader.name().local_name() == "alternative") {
+        if (reader.name().local_name() == "annotation") {
+          auto ann = parse_annotation(reader);
+          if (ann && out_annotation) *out_annotation = std::move(*ann);
+        } else if (reader.name().local_name() == "alternative") {
           auto test = opt_attr(reader, "test");
           auto type_str = req_attr(reader, "type");
           qname type_name = resolve_qname(reader, type_str);
@@ -337,16 +388,15 @@ namespace xb {
 
     // Forward declare for mutual recursion with parse_complex_type_body
     void
-    parse_complex_type_body(xml_reader& reader, const std::string& tns,
-                            content_type& content,
-                            std::vector<attribute_use>& attributes,
-                            std::vector<attribute_group_ref>& attr_group_refs,
-                            std::optional<wildcard>& attr_wildcard,
-                            bool& is_mixed,
-                            std::vector<simple_type>& anon_simple_types,
-                            std::vector<complex_type>& anon_complex_types,
-                            std::optional<open_content>& oc,
-                            std::vector<assertion>& assertions);
+    parse_complex_type_body(
+        xml_reader& reader, const std::string& tns, content_type& content,
+        std::vector<attribute_use>& attributes,
+        std::vector<attribute_group_ref>& attr_group_refs,
+        std::optional<wildcard>& attr_wildcard, bool& is_mixed,
+        std::vector<simple_type>& anon_simple_types,
+        std::vector<complex_type>& anon_complex_types,
+        std::optional<open_content>& oc, std::vector<assertion>& assertions,
+        std::optional<annotation>* out_annotation = nullptr);
 
     particle
     parse_particle(xml_reader& reader, const std::string& tns,
@@ -480,7 +530,8 @@ namespace xb {
                             std::vector<simple_type>& anon_simple_types,
                             std::vector<complex_type>& anon_complex_types,
                             std::optional<open_content>& oc,
-                            std::vector<assertion>& assertions) {
+                            std::vector<assertion>& assertions,
+                            std::optional<annotation>* out_annotation) {
       std::size_t depth = reader.depth();
 
       while (read_skip_ws(reader)) {
@@ -496,7 +547,10 @@ namespace xb {
 
         const auto& local = reader.name().local_name();
 
-        if (local == "sequence" || local == "choice" || local == "all") {
+        if (local == "annotation") {
+          auto ann = parse_annotation(reader);
+          if (ann && out_annotation) *out_annotation = std::move(*ann);
+        } else if (local == "sequence" || local == "choice" || local == "all") {
           compositor_kind ck = compositor_kind::sequence;
           if (local == "choice") ck = compositor_kind::choice;
           if (local == "all") ck = compositor_kind::all;
@@ -768,10 +822,11 @@ namespace xb {
         }
 
         std::vector<type_alternative> alts;
+        std::optional<annotation> elem_ann;
 
         if (type_str.has_value()) {
           type_name = resolve_qname(reader, type_str.value());
-          alts = parse_alternatives(reader, reader.depth());
+          alts = parse_alternatives(reader, reader.depth(), &elem_ann);
         } else {
           // Look for anonymous type child
           std::string synth_name = name + "_type";
@@ -789,7 +844,10 @@ namespace xb {
               continue;
             }
 
-            if (reader.name().local_name() == "simpleType") {
+            if (reader.name().local_name() == "annotation") {
+              auto ann = parse_annotation(reader);
+              if (ann) elem_ann = std::move(*ann);
+            } else if (reader.name().local_name() == "simpleType") {
               auto st = parse_simple_type(reader, target_ns, synth_name);
               anon_simple_types.push_back(std::move(st));
               has_anon_type = true;
@@ -827,9 +885,11 @@ namespace xb {
           if (!has_anon_type) { type_name = qname(xs_ns, "anyType"); }
         }
 
-        result.add_element(
+        auto ed =
             element_decl(qname(target_ns, name), type_name, nillable, abstract,
-                         default_val, fixed_val, subst_group, std::move(alts)));
+                         default_val, fixed_val, subst_group, std::move(alts));
+        if (elem_ann) ed.set_doc_annotation(std::move(*elem_ann));
+        result.add_element(std::move(ed));
       } else if (local == "attribute") {
         auto name = req_attr(reader, "name");
         auto type_str = opt_attr(reader, "type");
@@ -858,15 +918,18 @@ namespace xb {
         std::optional<wildcard> ct_awild;
         std::optional<open_content> ct_oc;
         std::vector<assertion> ct_asserts;
+        std::optional<annotation> ct_ann;
 
         parse_complex_type_body(reader, target_ns, ct_content, ct_attrs,
                                 ct_agrefs, ct_awild, mixed, anon_simple_types,
-                                anon_complex_types, ct_oc, ct_asserts);
+                                anon_complex_types, ct_oc, ct_asserts, &ct_ann);
 
-        result.add_complex_type(complex_type(
-            qname(target_ns, name), abstract, mixed, std::move(ct_content),
-            std::move(ct_attrs), std::move(ct_agrefs), std::move(ct_awild),
-            std::move(ct_oc), std::move(ct_asserts)));
+        auto ct = complex_type(qname(target_ns, name), abstract, mixed,
+                               std::move(ct_content), std::move(ct_attrs),
+                               std::move(ct_agrefs), std::move(ct_awild),
+                               std::move(ct_oc), std::move(ct_asserts));
+        if (ct_ann) ct.set_doc_annotation(std::move(*ct_ann));
+        result.add_complex_type(std::move(ct));
       } else if (local == "group") {
         auto name = req_attr(reader, "name");
         // Parse the compositor child

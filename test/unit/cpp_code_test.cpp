@@ -40,7 +40,7 @@ TEST_CASE("local include", "[cpp_writer]") {
 TEST_CASE("empty struct", "[cpp_writer]") {
   cpp_file file;
   file.filename = "test.hpp";
-  file.namespaces.push_back({"ns", {cpp_struct{"foo_bar", {}, false}}});
+  file.namespaces.push_back({"ns", {cpp_struct{"foo_bar", {}, false, {}}}});
 
   auto result = writer.write(file);
   auto expected = R"(#pragma once
@@ -513,4 +513,50 @@ TEST_CASE("render non-inline function in header is declaration only",
   CHECK(result.find("void setup(int x);") != std::string::npos);
   CHECK(result.find("(void)x") == std::string::npos);
   CHECK(result.find("inline void setup") == std::string::npos);
+}
+
+TEST_CASE("cpp_class renders wrapper with accessors", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_class cls;
+  cls.name = "order";
+  cls.detail_struct_name = "order_data";
+  cls.fields = {
+      {"std::string", "cl_ord_id", ""},
+      {"std::optional<std::string>", "side", ""},
+      {"std::vector<fill>", "fills", ""},
+  };
+  cls.doc_comment = "An order.";
+
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+
+  // Doc comment
+  CHECK(result.find("/// An order.") != std::string::npos);
+  // Class declaration
+  CHECK(result.find("class order") != std::string::npos);
+  // Detail struct member
+  CHECK(result.find("detail::order_data data_") != std::string::npos);
+  // Const ref getter for scalar
+  CHECK(result.find("const std::string& cl_ord_id() const") !=
+        std::string::npos);
+  // Setter for scalar
+  CHECK(result.find("void set_cl_ord_id(std::string value)") !=
+        std::string::npos);
+  // Optional clear
+  CHECK(result.find("void clear_side()") != std::string::npos);
+  // Sequence accessor (range)
+  CHECK(result.find("fills() const") != std::string::npos);
+  // Sequence add
+  CHECK(result.find("void add_fill(fill value)") != std::string::npos);
+  // Sequence size
+  CHECK(result.find("fills_size()") != std::string::npos);
+  // Equality
+  CHECK(result.find("operator==") != std::string::npos);
+  // Constructor from detail struct
+  CHECK(result.find("explicit order(detail::order_data") != std::string::npos);
+  // data() accessor
+  CHECK(result.find("data()") != std::string::npos);
 }

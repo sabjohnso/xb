@@ -328,7 +328,7 @@ namespace xb {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
               auto enc_type =
-                  to_cpp_identifier(containing_type_name.local_name());
+                  resolver.type_name(containing_type_name.local_name());
               // Check for conditional type assignment (CTA)
               auto deduped =
                   deduplicate_alternatives(term.type_alternatives(), resolver);
@@ -373,7 +373,7 @@ namespace xb {
               }
             } else if constexpr (std::is_same_v<T, element_ref>) {
               auto enc_type =
-                  to_cpp_identifier(containing_type_name.local_name());
+                  resolver.type_name(containing_type_name.local_name());
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
 
@@ -646,12 +646,28 @@ namespace xb {
     }
 
     cpp_decl
+    wrap_if_needed(cpp_struct s, const type_resolver& resolver) {
+      if (resolver.options.encapsulation == encapsulation_mode::wrapped) {
+        cpp_class cls;
+        cls.name = s.name;
+        cls.detail_struct_name = s.name + "_data";
+        cls.fields = std::move(s.fields);
+        cls.generate_equality = s.generate_equality;
+        cls.doc_comment = std::move(s.doc_comment);
+        return cls;
+      }
+      return s;
+    }
+
+    cpp_decl
     translate_complex_type(const complex_type& ct,
                            const type_resolver& resolver,
                            const schema& current_schema) {
       cpp_struct s;
-      s.name = to_cpp_identifier(ct.name().local_name());
+      s.name = resolver.type_name(ct.name().local_name());
       s.generate_equality = true;
+      if (resolver.options.generate_docs && ct.doc_annotation().has_value())
+        s.doc_comment = ct.doc_annotation()->documentation;
 
       // Disambiguate field names that shadow type names in the same namespace.
       // Appends '_' (same convention as C++ keyword escaping in naming.cpp).
@@ -704,7 +720,7 @@ namespace xb {
           s.fields.push_back(
               {"std::vector<xb::any_attribute>", "any_attribute", ""});
         disambiguate_fields();
-        return s;
+        return wrap_if_needed(std::move(s), resolver);
       }
 
       // Handle mixed content
@@ -739,7 +755,7 @@ namespace xb {
           s.fields.push_back(
               {"std::vector<xb::any_element>", "open_content", ""});
         disambiguate_fields();
-        return s;
+        return wrap_if_needed(std::move(s), resolver);
       }
 
       // Handle element_only content
@@ -775,7 +791,7 @@ namespace xb {
             {"std::vector<xb::any_element>", "open_content", ""});
 
       disambiguate_fields();
-      return s;
+      return wrap_if_needed(std::move(s), resolver);
     }
 
     cpp_decl
@@ -784,9 +800,11 @@ namespace xb {
         std::map<std::string, std::string>& union_variant_map) {
       if (!st.facets().enumeration.empty()) {
         cpp_enum e;
-        e.name = to_cpp_identifier(st.name().local_name());
+        e.name = resolver.type_name(st.name().local_name());
+        if (resolver.options.generate_docs && st.doc_annotation().has_value())
+          e.doc_comment = st.doc_annotation()->documentation;
         for (const auto& val : st.facets().enumeration)
-          e.values.push_back({to_cpp_identifier(val), val});
+          e.values.push_back({resolver.enum_value_name(val), val});
 
         // Disambiguate case-only collisions (e.g. "A" and "a" both map
         // to "a"). Append "_upper" to the uppercase variant.
@@ -807,7 +825,7 @@ namespace xb {
         std::string item_type = "void";
         if (st.item_type_name().has_value())
           item_type = resolver.resolve(st.item_type_name().value());
-        return cpp_type_alias{to_cpp_identifier(st.name().local_name()),
+        return cpp_type_alias{resolver.type_name(st.name().local_name()),
                               "std::vector<" + item_type + ">"};
       }
 
@@ -822,7 +840,7 @@ namespace xb {
           if (base_st &&
               base_st->variety() == simple_type_variety::union_type) {
             std::string base_cpp = resolver.resolve(base);
-            return cpp_type_alias{to_cpp_identifier(st.name().local_name()),
+            return cpp_type_alias{resolver.type_name(st.name().local_name()),
                                   base_cpp};
           }
         }
@@ -846,16 +864,16 @@ namespace xb {
         auto it = union_variant_map.find(variant_key);
         if (it != union_variant_map.end()) {
           // Alias to the first union with this variant signature
-          return cpp_type_alias{to_cpp_identifier(st.name().local_name()),
+          return cpp_type_alias{resolver.type_name(st.name().local_name()),
                                 it->second};
         }
-        std::string name = to_cpp_identifier(st.name().local_name());
+        std::string name = resolver.type_name(st.name().local_name());
         union_variant_map[variant_key] = name;
         return cpp_type_alias{name, variant};
       }
 
       std::string base = resolver.resolve(st.base_type_name());
-      return cpp_type_alias{to_cpp_identifier(st.name().local_name()), base};
+      return cpp_type_alias{resolver.type_name(st.name().local_name()), base};
     }
 
     // Generate a format() overload for a union simple type.
@@ -865,7 +883,7 @@ namespace xb {
     generate_format_function(const simple_type& st,
                              const type_resolver& resolver,
                              std::set<std::string>& seen_variant_types) {
-      std::string name = to_cpp_identifier(st.name().local_name());
+      std::string name = resolver.type_name(st.name().local_name());
 
       // Union type: std::visit over member types.
       // Skip if this is a restriction of another union type (it's a type
@@ -929,7 +947,7 @@ namespace xb {
     generate_parse_function(const simple_type& st,
                             const type_resolver& resolver,
                             std::set<std::string>& seen_variant_types) {
-      std::string name = to_cpp_identifier(st.name().local_name());
+      std::string name = resolver.type_name(st.name().local_name());
 
       if (st.variety() == simple_type_variety::union_type &&
           !st.member_type_names().empty()) {
@@ -966,7 +984,7 @@ namespace xb {
             // Last member: no try/catch, just return
             if (member_st && !member_st->facets().enumeration.empty()) {
               std::string enum_name =
-                  to_cpp_identifier(member_st->name().local_name());
+                  resolver.type_name(member_st->name().local_name());
               body += "  return " + enum_name + "_from_string(text);\n";
             } else {
               body += "  return xb::parse<" + cpp_type + ">(text);\n";
@@ -976,7 +994,7 @@ namespace xb {
             body += "  try {\n";
             if (member_st && !member_st->facets().enumeration.empty()) {
               std::string enum_name =
-                  to_cpp_identifier(member_st->name().local_name());
+                  resolver.type_name(member_st->name().local_name());
               body += "    return " + enum_name + "_from_string(text);\n";
             } else {
               body += "    return xb::parse<" + cpp_type + ">(text);\n";
@@ -1066,11 +1084,12 @@ namespace xb {
     void
     add_cross_namespace_includes(std::set<std::string>& includes,
                                  const std::set<std::string>& referenced_ns,
-                                 const std::vector<schema>& schemas) {
+                                 const std::vector<schema>& schemas,
+                                 const std::string& header_suffix = ".hpp") {
       for (const auto& ref_ns : referenced_ns) {
         for (const auto& s : schemas) {
           if (s.target_namespace() == ref_ns) {
-            std::string filename = ns_stem(ref_ns) + ".hpp";
+            std::string filename = ns_stem(ref_ns) + header_suffix;
             includes.insert("\"" + filename + "\"");
           }
         }
@@ -1117,7 +1136,8 @@ namespace xb {
                      const std::vector<schema>& schemas,
                      const std::vector<cpp_decl>& declarations,
                      file_kind kind = file_kind::header,
-                     const std::string& self_header = "") {
+                     const std::string& self_header = "",
+                     const std::string& hdr_suffix = ".hpp") {
       std::set<std::string> includes;
 
       if (kind == file_kind::source) {
@@ -1140,6 +1160,9 @@ namespace xb {
               [&](const auto& d) {
                 using T = std::decay_t<decltype(d)>;
                 if constexpr (std::is_same_v<T, cpp_struct>) {
+                  for (const auto& f : d.fields)
+                    add_type_includes(includes, f.type);
+                } else if constexpr (std::is_same_v<T, cpp_class>) {
                   for (const auto& f : d.fields)
                     add_type_includes(includes, f.type);
                 } else if constexpr (std::is_same_v<T, cpp_type_alias>) {
@@ -1186,7 +1209,8 @@ namespace xb {
           includes.insert("\"xb/json_value.hpp\"");
         }
 
-        add_cross_namespace_includes(includes, referenced_namespaces, schemas);
+        add_cross_namespace_includes(includes, referenced_namespaces, schemas,
+                                     hdr_suffix);
       }
 
       std::vector<cpp_include> result;
@@ -1217,6 +1241,8 @@ namespace xb {
             else if constexpr (std::is_same_v<T, cpp_forward_decl>)
               return d.name;
             else if constexpr (std::is_same_v<T, cpp_function>)
+              return d.name;
+            else if constexpr (std::is_same_v<T, cpp_class>)
               return d.name;
             else
               return "";
@@ -1261,10 +1287,9 @@ namespace xb {
       std::visit(
           [&](const auto& d) {
             using T = std::decay_t<decltype(d)>;
-            if constexpr (std::is_same_v<T, cpp_struct>) {
+            if constexpr (std::is_same_v<T, cpp_struct> ||
+                          std::is_same_v<T, cpp_class>) {
               for (const auto& f : d.fields) {
-                // Skip unique_ptr fields — they only need a forward
-                // declaration of T, not a complete type definition.
                 if (f.type.find("unique_ptr") != std::string::npos) continue;
                 extract_type_refs(f.type);
               }
@@ -1446,15 +1471,15 @@ namespace xb {
 
       // Forward declare XSD-identified cycle types
       for (auto idx : cycle_indices) {
-        if (auto* s = std::get_if<cpp_struct>(&decls[idx]))
-          result.push_back(cpp_forward_decl{s->name});
+        auto n = decl_name(decls[idx]);
+        if (!n.empty()) result.push_back(cpp_forward_decl{n});
       }
 
       // Forward declare hard-dep cycle types (not already forward-declared)
       for (auto idx : hard_cycle_members) {
         if (!cycle_indices.count(idx)) {
-          if (auto* s = std::get_if<cpp_struct>(&decls[idx]))
-            result.push_back(cpp_forward_decl{s->name});
+          auto n = decl_name(decls[idx]);
+          if (!n.empty()) result.push_back(cpp_forward_decl{n});
         }
       }
 
@@ -1630,7 +1655,7 @@ namespace xb {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
               auto enc_type =
-                  to_cpp_identifier(containing_type_name.local_name());
+                  resolver.type_name(containing_type_name.local_name());
               auto deduped =
                   deduplicate_alternatives(term.type_alternatives(), resolver);
               if (deduped.size() > 1) {
@@ -1697,7 +1722,7 @@ namespace xb {
               }
             } else if constexpr (std::is_same_v<T, element_ref>) {
               auto enc_type =
-                  to_cpp_identifier(containing_type_name.local_name());
+                  resolver.type_name(containing_type_name.local_name());
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
 
@@ -1896,7 +1921,7 @@ namespace xb {
     collect_element_field_names(const complex_type& ct,
                                 const type_resolver& resolver) {
       std::set<std::string> names;
-      auto enc_type = to_cpp_identifier(ct.name().local_name());
+      auto enc_type = resolver.type_name(ct.name().local_name());
 
       if (ct.mixed()) { names.insert("content"); }
 
@@ -2031,7 +2056,7 @@ namespace xb {
                             const type_resolver& resolver,
                             const schema& current_schema) {
       cpp_function fn;
-      std::string struct_name = to_cpp_identifier(ct.name().local_name());
+      std::string struct_name = resolver.type_name(ct.name().local_name());
       fn.return_type = "void";
       fn.name = "write_" + struct_name;
       fn.parameters =
@@ -2171,8 +2196,8 @@ namespace xb {
         auto* st = schemas.find_simple_type(type_name);
         while (st && st->facets().enumeration.empty())
           st = schemas.find_simple_type(st->base_type_name());
-        std::string enum_name = st ? to_cpp_identifier(st->name().local_name())
-                                   : to_cpp_identifier(type_name.local_name());
+        std::string enum_name = st ? resolver.type_name(st->name().local_name())
+                                   : resolver.type_name(type_name.local_name());
         return enum_name + "_from_string(" + text_expr + ")";
       }
       if (is_union_type(schemas, type_name)) {
@@ -2201,8 +2226,8 @@ namespace xb {
           if (it != resolver.union_variant_map->end()) union_name = it->second;
         }
         if (union_name.empty())
-          union_name = st ? to_cpp_identifier(st->name().local_name())
-                          : to_cpp_identifier(type_name.local_name());
+          union_name = st ? resolver.type_name(st->name().local_name())
+                          : resolver.type_name(type_name.local_name());
         return "parse_" + union_name + "(" + text_expr + ")";
       }
       std::string cpp_type = resolver.resolve(type_name);
@@ -2272,7 +2297,7 @@ namespace xb {
             using T = std::decay_t<decltype(term)>;
             if constexpr (std::is_same_v<T, element_decl>) {
               auto enc_type =
-                  to_cpp_identifier(containing_type_name.local_name());
+                  resolver.type_name(containing_type_name.local_name());
               std::string qn = "xb::qname{\"" + term.name().namespace_uri() +
                                "\", \"" + term.name().local_name() + "\"}";
               std::string kw = first_branch ? "if" : "else if";
@@ -2364,7 +2389,7 @@ namespace xb {
               first_branch = false;
             } else if constexpr (std::is_same_v<T, element_ref>) {
               auto enc_type =
-                  to_cpp_identifier(containing_type_name.local_name());
+                  resolver.type_name(containing_type_name.local_name());
               auto* elem = resolver.schemas.find_element(term.ref);
               if (!elem) return;
 
@@ -2660,7 +2685,7 @@ namespace xb {
                            const type_resolver& resolver,
                            const schema& current_schema) {
       cpp_function fn;
-      std::string struct_name = to_cpp_identifier(ct.name().local_name());
+      std::string struct_name = resolver.type_name(ct.name().local_name());
       fn.return_type = struct_name;
       fn.name = "read_" + struct_name;
       fn.parameters = "xb::xml_reader& reader";
@@ -3007,7 +3032,7 @@ namespace xb {
       if (ct.assertions().empty() && !has_sc_facets && !has_card)
         return std::nullopt;
 
-      std::string struct_name = to_cpp_identifier(ct.name().local_name());
+      std::string struct_name = resolver.type_name(ct.name().local_name());
       xpath_context ctx{"value."};
 
       cpp_function fn;
@@ -3065,7 +3090,7 @@ namespace xb {
       bool has_facets = has_constraining_facets(st.facets());
       if (st.assertions().empty() && !has_facets) return std::nullopt;
 
-      std::string type_name = to_cpp_identifier(st.name().local_name());
+      std::string type_name = resolver.type_name(st.name().local_name());
       std::string cpp_type = resolver.resolve(st.base_type_name());
       xpath_context ctx{"value"};
 
@@ -3196,7 +3221,8 @@ namespace xb {
     // Convert cycle qnames to C++ identifier names for order_declarations
     std::set<std::string> cycle_type_cpp_names;
     for (const auto& ct : cycle_types)
-      cycle_type_cpp_names.insert(to_cpp_identifier(ct.local_name()));
+      cycle_type_cpp_names.insert(apply_naming(
+          ct.local_name(), naming_category::type_, options_.naming));
 
     for (const auto& s : schemas_.schemas()) {
       std::set<std::string> referenced_namespaces;
@@ -3205,9 +3231,11 @@ namespace xb {
       // field names that would shadow a sibling type can be disambiguated.
       std::set<std::string> schema_type_names;
       for (const auto& st : s.simple_types())
-        schema_type_names.insert(to_cpp_identifier(st.name().local_name()));
+        schema_type_names.insert(apply_naming(
+            st.name().local_name(), naming_category::type_, options_.naming));
       for (const auto& ct : s.complex_types())
-        schema_type_names.insert(to_cpp_identifier(ct.name().local_name()));
+        schema_type_names.insert(apply_naming(
+            ct.name().local_name(), naming_category::type_, options_.naming));
 
       type_resolver resolver{schemas_,
                              types_,
@@ -3242,14 +3270,15 @@ namespace xb {
       // Build a map from type name -> complex_type for ordered generation
       std::unordered_map<std::string, const complex_type*> ct_by_name;
       for (const auto& ct : s.complex_types())
-        ct_by_name[to_cpp_identifier(ct.name().local_name())] = &ct;
+        ct_by_name[apply_naming(ct.name().local_name(), naming_category::type_,
+                                options_.naming)] = &ct;
 
       // Generate read_/write_ functions in dependency order
       std::vector<const complex_type*> ordered_cts;
       for (const auto& decl : ordered_types) {
-        auto* st_decl = std::get_if<cpp_struct>(&decl);
-        if (!st_decl) continue;
-        auto it = ct_by_name.find(st_decl->name);
+        auto n = decl_name(decl);
+        if (n.empty()) continue;
+        auto it = ct_by_name.find(n);
         if (it != ct_by_name.end()) ordered_cts.push_back(it->second);
       }
       for (const auto* ct_ptr : ordered_cts) {
@@ -3278,7 +3307,7 @@ namespace xb {
         for (const auto& st : s.simple_types()) {
           if (!st.facets().enumeration.empty()) {
             cpp_enum e;
-            e.name = to_cpp_identifier(st.name().local_name());
+            e.name = resolver.type_name(st.name().local_name());
             if (auto tj = generate_enum_to_json(e))
               json_decls.push_back(std::move(*tj));
             if (auto fj = generate_enum_from_json(e))
@@ -3292,11 +3321,18 @@ namespace xb {
             json_decls.push_back(std::move(*fj));
         }
 
-        // Complex types (structs)
+        // Complex types (structs or classes)
         for (const auto& decl : ordered_types) {
           if (auto* st_decl = std::get_if<cpp_struct>(&decl)) {
             json_decls.push_back(generate_to_json_function(*st_decl));
             json_decls.push_back(generate_from_json_function(*st_decl));
+          } else if (auto* cls_decl = std::get_if<cpp_class>(&decl)) {
+            // Generate JSON for the underlying fields using a temporary struct
+            cpp_struct tmp;
+            tmp.name = cls_decl->name;
+            tmp.fields = cls_decl->fields;
+            json_decls.push_back(generate_to_json_function(tmp));
+            json_decls.push_back(generate_from_json_function(tmp));
           }
         }
 
@@ -3315,7 +3351,7 @@ namespace xb {
 
       std::string ns_name = cpp_namespace_for(s.target_namespace(), options_);
       std::string stem = stem_for_namespace(s.target_namespace());
-      std::string header_filename = stem + ".hpp";
+      std::string header_filename = stem + options_.header_suffix;
 
       if (options_.mode == output_mode::header_only) {
         // Single header file per namespace (current behavior)
@@ -3323,8 +3359,9 @@ namespace xb {
         ns.name = ns_name;
         ns.declarations = std::move(ordered_types);
 
-        auto includes = compute_includes(referenced_namespaces,
-                                         schemas_.schemas(), ns.declarations);
+        auto includes = compute_includes(
+            referenced_namespaces, schemas_.schemas(), ns.declarations,
+            file_kind::header, "", options_.header_suffix);
 
         cpp_file file;
         file.filename = header_filename;
@@ -3335,17 +3372,51 @@ namespace xb {
         files.push_back(std::move(file));
       } else if (options_.mode == output_mode::split) {
         // Header + source file per namespace
+
+        // Extract forward declarations into a separate file if requested
+        std::vector<cpp_decl> fwd_decls;
+        if (options_.separate_fwd_header) {
+          std::vector<cpp_decl> non_fwd;
+          for (auto& decl : ordered_types) {
+            if (std::holds_alternative<cpp_forward_decl>(decl))
+              fwd_decls.push_back(std::move(decl));
+            else
+              non_fwd.push_back(std::move(decl));
+          }
+          ordered_types = std::move(non_fwd);
+        }
+
         cpp_namespace ns;
         ns.name = ns_name;
         ns.declarations = std::move(ordered_types);
 
-        auto header_includes =
-            compute_includes(referenced_namespaces, schemas_.schemas(),
-                             ns.declarations, file_kind::header);
+        auto header_includes = compute_includes(
+            referenced_namespaces, schemas_.schemas(), ns.declarations,
+            file_kind::header, "", options_.header_suffix);
+
+        // If we extracted forward declarations, emit a _fwd header
+        if (!fwd_decls.empty()) {
+          std::string fwd_filename = stem + "_fwd" + options_.header_suffix;
+
+          cpp_namespace fwd_ns;
+          fwd_ns.name = ns_name;
+          fwd_ns.declarations = std::move(fwd_decls);
+
+          cpp_file fwd_file;
+          fwd_file.filename = fwd_filename;
+          fwd_file.kind = file_kind::header;
+          fwd_file.namespaces.push_back(std::move(fwd_ns));
+
+          files.push_back(std::move(fwd_file));
+
+          // Main header includes the fwd file
+          header_includes.insert(header_includes.begin(),
+                                 cpp_include{"\"" + fwd_filename + "\""});
+        }
 
         auto source_includes = compute_includes(
             referenced_namespaces, schemas_.schemas(), ns.declarations,
-            file_kind::source, header_filename);
+            file_kind::source, header_filename, options_.header_suffix);
 
         cpp_file header;
         header.filename = header_filename;
@@ -3354,7 +3425,7 @@ namespace xb {
         header.namespaces.push_back(ns); // copy — shared with source
 
         cpp_file source;
-        source.filename = stem + ".cpp";
+        source.filename = stem + options_.source_suffix;
         source.kind = file_kind::source;
         source.includes = std::move(source_includes);
         source.namespaces.push_back(std::move(ns));
@@ -3377,6 +3448,8 @@ namespace xb {
         for (auto& decl : ordered_types) {
           if (auto* st = std::get_if<cpp_struct>(&decl)) {
             groups.push_back({st->name, {std::move(decl)}});
+          } else if (auto* cls = std::get_if<cpp_class>(&decl)) {
+            groups.push_back({cls->name, {std::move(decl)}});
           } else if (auto* en = std::get_if<cpp_enum>(&decl)) {
             groups.push_back({en->name, {std::move(decl)}});
           } else if (auto* alias = std::get_if<cpp_type_alias>(&decl)) {
@@ -3404,14 +3477,15 @@ namespace xb {
         // Emit per-type header files
         std::vector<std::string> per_type_filenames;
         for (const auto& group : groups) {
-          std::string type_filename = stem + "_" + group.type_name + ".hpp";
+          std::string type_filename =
+              stem + "_" + group.type_name + options_.header_suffix;
           per_type_filenames.push_back(type_filename);
 
           // Compute includes for this type's declarations
           std::set<std::string> empty_ns_refs;
           auto type_includes =
               compute_includes(empty_ns_refs, schemas_.schemas(), group.decls,
-                               file_kind::header);
+                               file_kind::header, "", options_.header_suffix);
 
           // Add includes for cross-type dependencies within the namespace
           auto deps = decl_dependencies(group.decls.back());
@@ -3419,8 +3493,8 @@ namespace xb {
             for (const auto& other : groups) {
               if (other.type_name == dep_name &&
                   other.type_name != group.type_name) {
-                type_includes.push_back(
-                    {"\"" + stem + "_" + other.type_name + ".hpp\""});
+                type_includes.push_back({"\"" + stem + "_" + other.type_name +
+                                         options_.header_suffix + "\""});
                 break;
               }
             }
@@ -3446,7 +3520,8 @@ namespace xb {
                 file.filename != header_filename) {
               std::set<std::string> inc_set;
               add_cross_namespace_includes(inc_set, referenced_namespaces,
-                                           schemas_.schemas());
+                                           schemas_.schemas(),
+                                           options_.header_suffix);
               for (auto& inc : inc_set)
                 file.includes.push_back({inc});
             }
@@ -3468,10 +3543,10 @@ namespace xb {
 
         auto source_includes = compute_includes(
             referenced_namespaces, schemas_.schemas(), fn_ns.declarations,
-            file_kind::source, header_filename);
+            file_kind::source, header_filename, options_.header_suffix);
 
         cpp_file source;
-        source.filename = stem + ".cpp";
+        source.filename = stem + options_.source_suffix;
         source.kind = file_kind::source;
         source.includes = std::move(source_includes);
         source.namespaces.push_back(std::move(fn_ns));
@@ -3480,7 +3555,23 @@ namespace xb {
       }
     }
 
-    return merge_same_name_files(std::move(files), cycle_type_cpp_names);
+    auto result = merge_same_name_files(std::move(files), cycle_type_cpp_names);
+
+    // When separate_fwd_header is enabled, strip any forward declarations
+    // that merge_same_name_files may have re-introduced via order_declarations.
+    if (options_.separate_fwd_header) {
+      for (auto& file : result) {
+        // Only strip from non-fwd files
+        if (file.filename.find("_fwd") != std::string::npos) continue;
+        for (auto& ns : file.namespaces) {
+          std::erase_if(ns.declarations, [](const cpp_decl& d) {
+            return std::holds_alternative<cpp_forward_decl>(d);
+          });
+        }
+      }
+    }
+
+    return result;
   }
 
 } // namespace xb

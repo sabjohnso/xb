@@ -1,5 +1,6 @@
 #pragma once
 
+#include <xb/annotation.hpp>
 #include <xb/assertion.hpp>
 #include <xb/facet_set.hpp>
 #include <xb/qname.hpp>
@@ -18,6 +19,7 @@ namespace xb {
     std::optional<qname> item_type_name_;
     std::vector<qname> member_type_names_;
     std::vector<assertion> assertions_;
+    std::optional<annotation> doc_annotation_;
 
   public:
     simple_type() = default;
@@ -67,6 +69,16 @@ namespace xb {
     const std::vector<assertion>&
     assertions() const {
       return assertions_;
+    }
+
+    const std::optional<xb::annotation>&
+    doc_annotation() const {
+      return doc_annotation_;
+    }
+
+    void
+    set_doc_annotation(xb::annotation a) {
+      doc_annotation_ = std::move(a);
     }
 
     bool

@@ -1100,3 +1100,75 @@ TEST_CASE("schema_parser: unqualified type base resolves to default namespace",
   CHECK(side.base_type_name().namespace_uri() == "urn:test");
   CHECK(side.base_type_name().local_name() == "char");
 }
+
+// --- Group 4: Annotation parsing ---
+
+TEST_CASE("schema_parser: complex type annotation", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:t="urn:test">
+      <xs:complexType name="Person">
+        <xs:annotation>
+          <xs:documentation>A person record.</xs:documentation>
+        </xs:annotation>
+        <xs:sequence>
+          <xs:element name="name" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  auto& ct = s.complex_types()[0];
+  REQUIRE(ct.doc_annotation().has_value());
+  CHECK(ct.doc_annotation()->documentation == "A person record.");
+}
+
+TEST_CASE("schema_parser: simple type annotation", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:t="urn:test">
+      <xs:simpleType name="Color">
+        <xs:annotation>
+          <xs:documentation>Color enumeration.</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="red"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:schema>
+  )");
+  REQUIRE(s.simple_types().size() == 1);
+  auto& st = s.simple_types()[0];
+  REQUIRE(st.doc_annotation().has_value());
+  CHECK(st.doc_annotation()->documentation == "Color enumeration.");
+}
+
+TEST_CASE("schema_parser: element annotation", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:t="urn:test">
+      <xs:element name="order" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>The order element.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:schema>
+  )");
+  REQUIRE(s.elements().size() == 1);
+  auto& elem = s.elements()[0];
+  REQUIRE(elem.doc_annotation().has_value());
+  CHECK(elem.doc_annotation()->documentation == "The order element.");
+}
+
+TEST_CASE("schema_parser: no annotation", "[schema_parser]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:t="urn:test">
+      <xs:complexType name="Empty">
+        <xs:sequence/>
+      </xs:complexType>
+    </xs:schema>
+  )");
+  REQUIRE(s.complex_types().size() == 1);
+  CHECK(!s.complex_types()[0].doc_annotation().has_value());
+}

@@ -4452,3 +4452,478 @@ TEST_CASE("mixed content read function handles text and element nodes",
   // Read function should handle element dispatching
   CHECK(fn->body.find("start_element") != std::string::npos);
 }
+
+TEST_CASE("custom file suffixes in split mode", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/suffix-test");
+
+  model_group seq(compositor_kind::sequence);
+  content_type ct_content(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/suffix-test", "ItemType"}, false,
+                   false, std::move(ct_content)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.header_suffix = ".h";
+  opts.source_suffix = ".cc";
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() >= 2);
+
+  bool found_h = false, found_cc = false;
+  for (const auto& f : files) {
+    if (f.filename.ends_with(".h")) found_h = true;
+    if (f.filename.ends_with(".cc")) found_cc = true;
+    // Must NOT have default suffixes
+    CHECK(!f.filename.ends_with(".hpp"));
+    CHECK(!f.filename.ends_with(".cpp"));
+  }
+  CHECK(found_h);
+  CHECK(found_cc);
+}
+
+TEST_CASE("custom file suffixes in file_per_type mode", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/suffix-test");
+
+  model_group seq(compositor_kind::sequence);
+  content_type ct_content(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/suffix-test", "WidgetType"}, false,
+                   false, std::move(ct_content)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::file_per_type;
+  opts.header_suffix = ".hxx";
+  opts.source_suffix = ".cxx";
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header)
+      CHECK(f.filename.ends_with(".hxx"));
+    else
+      CHECK(f.filename.ends_with(".cxx"));
+  }
+}
+
+// --- Group 2: Naming Conventions in Codegen ---
+
+TEST_CASE("pascal_case type names in codegen", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "PersonType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.naming.type_style = naming_style::pascal_case;
+  opts.naming.field_style = naming_style::snake_case;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  // Type name should be PascalCase
+  auto* st = find_struct(files[0], "PersonType");
+  REQUIRE(st != nullptr);
+  // Field name should still be snake_case
+  CHECK(st->fields[0].name == "name");
+}
+
+TEST_CASE("camel_case field names in codegen", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "first_name"}, qname{xs_ns, "string"}));
+  particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "last_name"}, qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "PersonType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.naming.field_style = naming_style::camel_case;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* st = find_struct(files[0], "person_type");
+  REQUIRE(st != nullptr);
+  REQUIRE(st->fields.size() == 2);
+  CHECK(st->fields[0].name == "firstName");
+  CHECK(st->fields[1].name == "lastName");
+}
+
+TEST_CASE("upper_snake enum values in codegen", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.enumeration = {"red", "green", "blue"};
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "ColorType"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.naming.enum_style = naming_style::upper_snake;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* en = find_enum(files[0], "color_type");
+  REQUIRE(en != nullptr);
+  REQUIRE(en->values.size() == 3);
+  CHECK(en->values[0].name == "RED");
+  CHECK(en->values[1].name == "GREEN");
+  CHECK(en->values[2].name == "BLUE");
+}
+
+// --- Group 3: Separate Forward Declaration File ---
+
+// Helper to count forward declarations in a file
+static int
+count_forward_decls(const cpp_file& file) {
+  int count = 0;
+  for (const auto& ns : file.namespaces)
+    for (const auto& decl : ns.declarations)
+      if (std::holds_alternative<cpp_forward_decl>(decl)) ++count;
+  return count;
+}
+
+// Helper to find a file by name suffix
+static const cpp_file*
+find_file_ending_with(const std::vector<cpp_file>& files,
+                      const std::string& suffix) {
+  for (const auto& f : files)
+    if (f.filename.ends_with(suffix)) return &f;
+  return nullptr;
+}
+
+TEST_CASE("separate_fwd_header in split mode", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  // Two types in a mutual cycle: A references B and B references A
+  // Type A
+  {
+    std::vector<particle> particles;
+    particles.emplace_back(element_decl(
+        qname{"http://example.com/test", "name"}, qname{xs_ns, "string"}));
+    particles.emplace_back(
+        element_decl(qname{"http://example.com/test", "b_ref"},
+                     qname{"http://example.com/test", "TypeB"}),
+        occurrence{0, 1});
+    model_group seq(compositor_kind::sequence, std::move(particles));
+    content_type ct(content_kind::element_only,
+                    complex_content(qname{}, derivation_method::restriction,
+                                    std::move(seq)));
+    s.add_complex_type(complex_type(qname{"http://example.com/test", "TypeA"},
+                                    false, false, std::move(ct)));
+  }
+  // Type B
+  {
+    std::vector<particle> particles;
+    particles.emplace_back(element_decl(
+        qname{"http://example.com/test", "value"}, qname{xs_ns, "int"}));
+    particles.emplace_back(
+        element_decl(qname{"http://example.com/test", "a_ref"},
+                     qname{"http://example.com/test", "TypeA"}),
+        occurrence{0, 1});
+    model_group seq(compositor_kind::sequence, std::move(particles));
+    content_type ct(content_kind::element_only,
+                    complex_content(qname{}, derivation_method::restriction,
+                                    std::move(seq)));
+    s.add_complex_type(complex_type(qname{"http://example.com/test", "TypeB"},
+                                    false, false, std::move(ct)));
+  }
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.separate_fwd_header = true;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Should have 3 files: _fwd.hpp, .hpp, .cpp
+  auto* fwd_file = find_file_ending_with(files, "_fwd.hpp");
+  REQUIRE(fwd_file != nullptr);
+  CHECK(fwd_file->kind == file_kind::header);
+  CHECK(count_forward_decls(*fwd_file) > 0);
+
+  // Main header should NOT contain forward declarations
+  auto* main_hdr = find_file_ending_with(files, "test.hpp");
+  REQUIRE(main_hdr != nullptr);
+  CHECK(count_forward_decls(*main_hdr) == 0);
+
+  // Main header should include the fwd file
+  bool includes_fwd = false;
+  for (const auto& inc : main_hdr->includes)
+    if (inc.path.find("_fwd") != std::string::npos) includes_fwd = true;
+  CHECK(includes_fwd);
+}
+
+TEST_CASE("separate_fwd_header defaults to false", "[codegen]") {
+  codegen_options opts;
+  CHECK(opts.separate_fwd_header == false);
+}
+
+TEST_CASE("no fwd file when no forward decls needed", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  // Non-recursive type -> no forward declarations
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Simple"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.separate_fwd_header = true;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // No forward decls needed -> no fwd file
+  auto* fwd_file = find_file_ending_with(files, "_fwd.hpp");
+  CHECK(fwd_file == nullptr);
+}
+
+// --- Group 4: Documentation from Annotations ---
+
+TEST_CASE("generate_docs populates doc_comment on struct", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  auto ctype = complex_type(qname{"http://example.com/test", "PersonType"},
+                            false, false, std::move(ct));
+  ctype.set_doc_annotation({"A person record."});
+  s.add_complex_type(std::move(ctype));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.generate_docs = true;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* st = find_struct(files[0], "person_type");
+  REQUIRE(st != nullptr);
+  CHECK(st->doc_comment == "A person record.");
+}
+
+TEST_CASE("generate_docs disabled produces no doc_comment", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  auto ctype = complex_type(qname{"http://example.com/test", "PersonType"},
+                            false, false, std::move(ct));
+  ctype.set_doc_annotation({"A person record."});
+  s.add_complex_type(std::move(ctype));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types); // generate_docs defaults to false
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* st = find_struct(files[0], "person_type");
+  REQUIRE(st != nullptr);
+  CHECK(st->doc_comment.empty());
+}
+
+// --- Group 5: Encapsulation ---
+
+// Helper to find a class declaration in a cpp_file
+static const cpp_class*
+find_class(const cpp_file& file, const std::string& name) {
+  for (const auto& ns : file.namespaces) {
+    for (const auto& decl : ns.declarations) {
+      if (auto* c = std::get_if<cpp_class>(&decl)) {
+        if (c->name == name) return c;
+      }
+    }
+  }
+  return nullptr;
+}
+
+TEST_CASE("encapsulation_mode::wrapped generates cpp_class", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct(content_kind::element_only,
+                  complex_content(qname(), derivation_method::restriction,
+                                  model_group(compositor_kind::sequence)));
+  auto& mg = std::get<complex_content>(ct.detail).content_model.value();
+  mg.add_particle(
+      particle(element_decl(qname("http://example.com/test", "name"),
+                            qname(xs_ns, "string")),
+               {}));
+  mg.add_particle(particle(element_decl(qname("http://example.com/test", "age"),
+                                        qname(xs_ns, "int")),
+                           {}));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Person"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.encapsulation = encapsulation_mode::wrapped;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  // Should produce a cpp_class, not a raw cpp_struct
+  auto* cls = find_class(files[0], "person");
+  REQUIRE(cls != nullptr);
+  CHECK(cls->detail_struct_name == "person_data");
+  REQUIRE(cls->fields.size() == 2);
+  CHECK(cls->fields[0].name == "name");
+  CHECK(cls->fields[1].name == "age");
+}
+
+TEST_CASE("encapsulation_mode defaults to raw_struct", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct(content_kind::element_only,
+                  complex_content(qname(), derivation_method::restriction,
+                                  model_group(compositor_kind::sequence)));
+  auto& mg = std::get<complex_content>(ct.detail).content_model.value();
+  mg.add_particle(
+      particle(element_decl(qname("http://example.com/test", "name"),
+                            qname(xs_ns, "string")),
+               {}));
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "Person"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types); // default options
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  // Should produce raw struct, not class
+  auto* st = find_struct(files[0], "person");
+  CHECK(st != nullptr);
+  auto* cls = find_class(files[0], "person");
+  CHECK(cls == nullptr);
+}
+
+TEST_CASE("wrapped class has doc_comment from annotation", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct(content_kind::element_only,
+                  complex_content(qname(), derivation_method::restriction,
+                                  model_group(compositor_kind::sequence)));
+  auto& mg = std::get<complex_content>(ct.detail).content_model.value();
+  mg.add_particle(
+      particle(element_decl(qname("http://example.com/test", "value"),
+                            qname(xs_ns, "string")),
+               {}));
+
+  auto ctype = complex_type(qname{"http://example.com/test", "Item"}, false,
+                            false, std::move(ct));
+  ctype.set_doc_annotation({"An item record."});
+  s.add_complex_type(std::move(ctype));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.encapsulation = encapsulation_mode::wrapped;
+  opts.generate_docs = true;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* cls = find_class(files[0], "item");
+  REQUIRE(cls != nullptr);
+  CHECK(cls->doc_comment == "An item record.");
+}
