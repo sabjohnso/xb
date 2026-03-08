@@ -272,4 +272,101 @@ namespace xb {
     return fn;
   }
 
+  // --- Wrapped class JSON functions ---
+
+  // Emit to_json field using getter syntax: value.field()
+  static void
+  emit_to_json_getter_field(std::string& body, const cpp_field& field) {
+    std::string getter = "value." + field.name + "()";
+    std::string inner;
+
+    if ((inner = extract_inner_type(field.type, "std::optional")) != "") {
+      body += "  if (" + getter + ") j[\"" + field.name + "\"] = *" + getter +
+              ";\n";
+    } else if ((inner = extract_inner_type(field.type, "std::unique_ptr")) !=
+               "") {
+      body += "  if (" + getter + ") j[\"" + field.name + "\"] = *" + getter +
+              ";\n";
+    } else if (starts_with(field.type, "std::variant<")) {
+      auto alts = parse_variant_alternatives(field.type);
+      body += "  std::visit([&j](const auto& v) {\n";
+      body += "    using T = std::decay_t<decltype(v)>;\n";
+      bool first = true;
+      for (const auto& alt : alts) {
+        std::string kw = first ? "if" : "else if";
+        body += "    " + kw + " constexpr (std::is_same_v<T, " + alt + ">) {\n";
+        body += "      j[\"" + field.name + "_type\"] = \"" +
+                short_type_name(alt) + "\";\n";
+        body += "      j[\"" + field.name + "\"] = v;\n";
+        body += "    }\n";
+        first = false;
+      }
+      body += "  }, " + getter + ");\n";
+    } else {
+      body += "  j[\"" + field.name + "\"] = " + getter + ";\n";
+    }
+  }
+
+  cpp_function
+  generate_to_json_function(const cpp_class& cls) {
+    cpp_function fn;
+    fn.return_type = "void";
+    fn.name = "to_json";
+    fn.parameters = "nlohmann::json& j, const " + cls.name + "& value";
+
+    std::string body;
+    for (const auto& field : cls.fields)
+      emit_to_json_getter_field(body, field);
+
+    fn.body = body;
+    return fn;
+  }
+
+  cpp_function
+  generate_from_json_function(const cpp_class& cls) {
+    cpp_function fn;
+    fn.return_type = "void";
+    fn.name = "from_json";
+    fn.parameters = "const nlohmann::json& j, " + cls.name + "& value";
+
+    // Build a raw struct and then construct the wrapper from it
+    std::string body;
+    body += "  " + cls.raw_struct_name + " d;\n";
+    // Reuse struct field emission with "d" as the variable
+    for (const auto& field : cls.fields) {
+      std::string inner;
+
+      if ((inner = extract_inner_type(field.type, "std::optional")) != "") {
+        body += "  if (j.contains(\"" + field.name + "\")) d." + field.name +
+                " = j[\"" + field.name + "\"].get<" + inner + ">();\n";
+      } else if ((inner = extract_inner_type(field.type, "std::unique_ptr")) !=
+                 "") {
+        body += "  if (j.contains(\"" + field.name + "\")) d." + field.name +
+                " = std::make_unique<" + inner + ">(j[\"" + field.name +
+                "\"].get<" + inner + ">());\n";
+      } else if (starts_with(field.type, "std::variant<")) {
+        auto alts = parse_variant_alternatives(field.type);
+        body += "  if (j.contains(\"" + field.name + "_type\")) {\n";
+        body += "    auto type_tag = j[\"" + field.name +
+                "_type\"].get<std::string>();\n";
+        bool first = true;
+        for (const auto& alt : alts) {
+          std::string kw = first ? "if" : "else if";
+          body += "    " + kw + " (type_tag == \"" + short_type_name(alt) +
+                  "\") d." + field.name + " = j[\"" + field.name + "\"].get<" +
+                  alt + ">();\n";
+          first = false;
+        }
+        body += "  }\n";
+      } else {
+        body +=
+            "  j.at(\"" + field.name + "\").get_to(d." + field.name + ");\n";
+      }
+    }
+    body += "  value = " + cls.name + "(std::move(d));\n";
+
+    fn.body = body;
+    return fn;
+  }
+
 } // namespace xb

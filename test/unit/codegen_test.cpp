@@ -4858,7 +4858,7 @@ TEST_CASE("encapsulation_mode::wrapped generates cpp_class", "[codegen]") {
   // Should produce a cpp_class, not a raw cpp_struct
   auto* cls = find_class(files[0], "person");
   REQUIRE(cls != nullptr);
-  CHECK(cls->detail_struct_name == "person_data");
+  CHECK(cls->raw_struct_name == "person_data");
   REQUIRE(cls->fields.size() == 2);
   CHECK(cls->fields[0].name == "name");
   CHECK(cls->fields[1].name == "age");

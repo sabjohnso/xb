@@ -77,7 +77,7 @@ namespace xb {
 
   struct cpp_class {
     std::string name;
-    std::string detail_struct_name;
+    std::string raw_struct_name;
     std::vector<cpp_field> fields;
     bool generate_equality = true;
     bool inline_methods = true;

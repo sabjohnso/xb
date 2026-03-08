@@ -248,7 +248,10 @@ namespace xb {
             failed_ = true;
             return {};
           }
-          return std::string(ctx_.value_prefix) + std::string(ident);
+          std::string result =
+              std::string(ctx_.value_prefix) + std::string(ident);
+          if (ctx_.use_getters) result += "()";
+          return result;
         }
 
         // String literal
@@ -279,6 +282,7 @@ namespace xb {
           // Path expression (ident '/' ident ...)
           std::string path =
               std::string(ctx_.value_prefix) + std::string(ident);
+          if (ctx_.use_getters) path += "()";
           while (peek() == '/') {
             ++pos_; // consume '/'
             auto step = read_ident();
@@ -377,6 +381,7 @@ namespace xb {
           // Path expression inside function arg
           std::string path =
               std::string(ctx_.value_prefix) + std::string(ident);
+          if (ctx_.use_getters) path += "()";
           while (peek() == '/') {
             ++pos_;
             auto step = read_ident();

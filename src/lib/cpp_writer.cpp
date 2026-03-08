@@ -154,12 +154,11 @@ namespace xb {
     write_class_header(std::ostream& os, const cpp_class& cls) {
       write_doc_comment(os, cls.doc_comment);
       os << "class " << cls.name << " {\n";
-      os << "  detail::" << cls.detail_struct_name << " data_;\n";
+      os << "  " << cls.raw_struct_name << " data_;\n";
       os << "public:\n";
 
       os << "  " << cls.name << "() = default;\n";
-      os << "  explicit " << cls.name << "(detail::" << cls.detail_struct_name
-         << " d)";
+      os << "  explicit " << cls.name << "(" << cls.raw_struct_name << " d)";
 
       if (cls.inline_methods) {
         os << " : data_(std::move(d)) {}\n";
@@ -174,18 +173,6 @@ namespace xb {
         os << "  bool operator==(const " << cls.name << "&) const = default;\n";
       }
 
-      os << '\n';
-      if (cls.inline_methods) {
-        os << "  const detail::" << cls.detail_struct_name
-           << "& data() const { return data_; }\n";
-        os << "  detail::" << cls.detail_struct_name
-           << "& data() { return data_; }\n";
-      } else {
-        os << "  const detail::" << cls.detail_struct_name
-           << "& data() const;\n";
-        os << "  detail::" << cls.detail_struct_name << "& data();\n";
-      }
-
       os << "};\n";
     }
 
@@ -193,11 +180,10 @@ namespace xb {
     void
     write_class_source(std::ostream& os, const cpp_class& cls) {
       const auto& c = cls.name;
-      const auto& d = cls.detail_struct_name;
+      const auto& d = cls.raw_struct_name;
 
       // Constructor
-      os << c << "::" << c << "(detail::" << d
-         << " d) : data_(std::move(d)) {}\n";
+      os << c << "::" << c << "(" << d << " d) : data_(std::move(d)) {}\n";
 
       for (const auto& f : cls.fields) {
         std::string inner;
@@ -229,12 +215,6 @@ namespace xb {
              << " value) { data_." << f.name << " = std::move(value); }\n";
         }
       }
-
-      // data() accessors
-      os << '\n';
-      os << "const detail::" << d << "& " << c
-         << "::data() const { return data_; }\n";
-      os << "detail::" << d << "& " << c << "::data() { return data_; }\n";
     }
 
     void

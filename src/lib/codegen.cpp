@@ -650,7 +650,7 @@ namespace xb {
       if (resolver.options.encapsulation == encapsulation_mode::wrapped) {
         cpp_class cls;
         cls.name = s.name;
-        cls.detail_struct_name = s.name + "_data";
+        cls.raw_struct_name = s.name + "_data";
         cls.fields = std::move(s.fields);
         cls.generate_equality = s.generate_equality;
         cls.doc_comment = std::move(s.doc_comment);
@@ -1578,7 +1578,7 @@ namespace xb {
                        const type_resolver& resolver) {
       std::string qn = "xb::qname{\"" + info.element_name.namespace_uri() +
                        "\", \"" + info.element_name.local_name() + "\"}";
-      std::string field = "value." + info.field_name;
+      std::string field = resolver.field_access("value", info.field_name);
 
       bool is_complex = is_complex_type(schemas, info.type_name);
 
@@ -1660,9 +1660,9 @@ namespace xb {
                   deduplicate_alternatives(term.type_alternatives(), resolver);
               if (deduped.size() > 1) {
                 // CTA: std::visit dispatch over variant alternatives
-                std::string field =
-                    "value." +
+                std::string fname =
                     resolver.field_name(term.name().local_name(), enc_type);
+                std::string field = resolver.field_access("value", fname);
                 std::string qn = "xb::qname{\"" + term.name().namespace_uri() +
                                  "\", \"" + term.name().local_name() + "\"}";
 
@@ -1731,9 +1731,9 @@ namespace xb {
                 auto members =
                     find_substitution_members(resolver.schemas, term.ref);
                 if (!members.empty()) {
-                  std::string field =
-                      "value." +
+                  std::string fname =
                       resolver.field_name(elem->name().local_name(), enc_type);
+                  std::string field = resolver.field_access("value", fname);
                   auto emit_visit = [&](const std::string& val_expr) {
                     body += "  std::visit([&](const auto& v) {\n";
                     body += "    using V = std::decay_t<decltype(v)>;\n";
@@ -1791,7 +1791,8 @@ namespace xb {
                                      term->compositor(), resolver,
                                      containing_type_name);
             } else if constexpr (std::is_same_v<T, wildcard>) {
-              body += "  for (const auto& e : value.any) {\n";
+              body += "  for (const auto& e : " +
+                      resolver.field_access("value", "any") + ") {\n";
               body += "    e.write(writer);\n";
               body += "  }\n";
             }
@@ -1906,7 +1907,7 @@ namespace xb {
               p.term);
         }
 
-        body += "  }, value.choice);\n";
+        body += "  }, " + resolver.field_access("value", "choice") + ");\n";
         return;
       }
 
@@ -1970,15 +1971,16 @@ namespace xb {
         occupied.insert(name);
         std::string qn = "xb::qname{\"" + attr.name.namespace_uri() + "\", \"" +
                          attr.name.local_name() + "\"}";
+        std::string field = resolver.field_access("value", name);
         std::string fmt_expr =
-            format_expr("value." + name, attr.type_name, schemas, resolver);
+            format_expr(field, attr.type_name, schemas, resolver);
 
         if (attr.required) {
           body += "  writer.attribute(" + qn + ", " + fmt_expr + ");\n";
         } else {
-          body += "  if (value." + name + ") {\n";
+          body += "  if (" + field + ") {\n";
           std::string opt_fmt =
-              format_expr("*value." + name, attr.type_name, schemas, resolver);
+              format_expr("*" + field, attr.type_name, schemas, resolver);
           body += "    writer.attribute(" + qn + ", " + opt_fmt + ");\n";
           body += "  }\n";
         }
@@ -2081,8 +2083,9 @@ namespace xb {
           // Resolve through the chain to get the ultimate simple type
           qname value_qname = resolve_simple_content_value_type(
               resolver.schemas, sc->base_type_name);
-          std::string fmt = format_expr("value.value", value_qname,
-                                        resolver.schemas, resolver);
+          std::string fmt =
+              format_expr(resolver.field_access("value", "value"), value_qname,
+                          resolver.schemas, resolver);
           body += "  writer.characters(" + fmt + ");\n";
         }
 
@@ -2098,7 +2101,8 @@ namespace xb {
                                       resolver.schemas, resolver);
 
       if (ct.attribute_wildcard().has_value()) {
-        body += "  for (const auto& a : value.any_attribute) {\n";
+        body += "  for (const auto& a : " +
+                resolver.field_access("value", "any_attribute") + ") {\n";
         body += "    writer.attribute(a.name(), a.value());\n";
         body += "  }\n";
       }
@@ -2108,7 +2112,8 @@ namespace xb {
                          ct.content().kind == content_kind::element_only)) {
         if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
           if (cc->content_model.has_value()) {
-            body += "  for (const auto& item : value.content) {\n";
+            body += "  for (const auto& item : " +
+                    resolver.field_access("value", "content") + ") {\n";
             body += "    std::visit([&](const auto& v) {\n";
             body += "      using T = std::decay_t<decltype(v)>;\n";
             body += "      if constexpr (std::is_same_v<T, std::string>) {\n";
@@ -2174,7 +2179,8 @@ namespace xb {
         if (auto* cc = std::get_if<complex_content>(&ct.content().detail))
           wc = has_wildcard_particle(*cc);
         if (eff_oc.has_value() && !wc) {
-          body += "  for (const auto& e : value.open_content) {\n";
+          body += "  for (const auto& e : " +
+                  resolver.field_access("value", "open_content") + ") {\n";
           body += "    e.write(writer);\n";
           body += "  }\n";
         }
@@ -2956,16 +2962,19 @@ namespace xb {
       // cardinality is embedded in the variant alternative types.
       if (mg.compositor() == compositor_kind::choice) return checks;
 
+      bool wrapped = resolver && resolver->is_wrapped();
+
       for (const auto& p : mg.particles()) {
         std::visit(
             [&](const auto& term) {
               using T = std::decay_t<decltype(term)>;
               if constexpr (std::is_same_v<T, element_decl>) {
+                std::string fname =
+                    resolver ? resolver->field_name(term.name().local_name(),
+                                                    enclosing_type)
+                             : to_cpp_identifier(term.name().local_name());
                 std::string field =
-                    struct_prefix +
-                    (resolver ? resolver->field_name(term.name().local_name(),
-                                                     enclosing_type)
-                              : to_cpp_identifier(term.name().local_name()));
+                    struct_prefix + fname + (wrapped ? "()" : "");
                 bool is_collection =
                     p.occurs.is_unbounded() || p.occurs.max_occurs > 1;
                 bool is_optional =
@@ -3033,7 +3042,7 @@ namespace xb {
         return std::nullopt;
 
       std::string struct_name = resolver.type_name(ct.name().local_name());
-      xpath_context ctx{"value."};
+      xpath_context ctx{"value.", resolver.is_wrapped()};
 
       cpp_function fn;
       fn.return_type = "bool";
@@ -3059,8 +3068,9 @@ namespace xb {
       // Add facet checks for simple content
       if (sc && has_sc_facets) {
         std::string cpp_type = resolver.resolve(sc->base_type_name);
-        for (const auto& check :
-             generate_facet_checks(sc->facets, "value.value", cpp_type)) {
+        for (const auto& check : generate_facet_checks(
+                 sc->facets, resolver.field_access("value", "value"),
+                 cpp_type)) {
           if (!first) body += "\n      && ";
           body += check;
           first = false;
@@ -3273,6 +3283,24 @@ namespace xb {
         ct_by_name[apply_naming(ct.name().local_name(), naming_category::type_,
                                 options_.naming)] = &ct;
 
+      // In wrapped mode, insert raw structs before their corresponding
+      // classes (in the same namespace, no detail:: wrapper).
+      bool is_wrapped = options_.encapsulation == encapsulation_mode::wrapped;
+      if (is_wrapped) {
+        std::vector<cpp_decl> expanded;
+        for (auto& decl : ordered_types) {
+          if (auto* cls = std::get_if<cpp_class>(&decl)) {
+            cpp_struct raw;
+            raw.name = cls->raw_struct_name;
+            raw.fields = cls->fields;
+            raw.generate_equality = true;
+            expanded.push_back(std::move(raw));
+          }
+          expanded.push_back(std::move(decl));
+        }
+        ordered_types = std::move(expanded);
+      }
+
       // Generate read_/write_ functions in dependency order
       std::vector<const complex_type*> ordered_cts;
       for (const auto& decl : ordered_types) {
@@ -3282,8 +3310,26 @@ namespace xb {
         if (it != ct_by_name.end()) ordered_cts.push_back(it->second);
       }
       for (const auto* ct_ptr : ordered_cts) {
-        ordered_types.push_back(generate_read_function(*ct_ptr, resolver, s));
-        ordered_types.push_back(generate_write_function(*ct_ptr, resolver, s));
+        auto read_fn = generate_read_function(*ct_ptr, resolver, s);
+        auto write_fn = generate_write_function(*ct_ptr, resolver, s);
+
+        if (is_wrapped) {
+          auto type_name = resolver.type_name(ct_ptr->name().local_name());
+          auto raw_name = type_name + "_data";
+
+          // Read: use raw struct, then construct class from it
+          auto& rb = read_fn.body;
+          rb.replace(0, rb.find('\n'), "  " + raw_name + " result;");
+          auto ret_pos = rb.rfind("return result;");
+          if (ret_pos != std::string::npos) {
+            rb.replace(ret_pos, 14,
+                       "return " + type_name + "(std::move(result));");
+          }
+          // Write: field access already uses getter syntax via resolver
+        }
+
+        ordered_types.push_back(std::move(read_fn));
+        ordered_types.push_back(std::move(write_fn));
       }
 
       // Generate validate_ functions (unless validation is disabled)
@@ -3327,12 +3373,8 @@ namespace xb {
             json_decls.push_back(generate_to_json_function(*st_decl));
             json_decls.push_back(generate_from_json_function(*st_decl));
           } else if (auto* cls_decl = std::get_if<cpp_class>(&decl)) {
-            // Generate JSON for the underlying fields using a temporary struct
-            cpp_struct tmp;
-            tmp.name = cls_decl->name;
-            tmp.fields = cls_decl->fields;
-            json_decls.push_back(generate_to_json_function(tmp));
-            json_decls.push_back(generate_from_json_function(tmp));
+            json_decls.push_back(generate_to_json_function(*cls_decl));
+            json_decls.push_back(generate_from_json_function(*cls_decl));
           }
         }
 
@@ -3447,15 +3489,34 @@ namespace xb {
         std::vector<type_group> groups;
         std::vector<cpp_decl> function_decls;
 
+        // In wrapped mode, raw structs (X_data) immediately precede
+        // their cpp_class. Buffer them to group together.
+        std::vector<cpp_decl> raw_buffer;
+
         for (auto& decl : ordered_types) {
           if (auto* st = std::get_if<cpp_struct>(&decl)) {
-            groups.push_back({st->name, {std::move(decl)}});
+            // In wrapped mode, check if this struct is the raw companion
+            // for an upcoming class (name ends with _data).
+            if (is_wrapped) {
+              raw_buffer.push_back(std::move(decl));
+            } else {
+              groups.push_back({st->name, {std::move(decl)}});
+            }
           } else if (auto* cls = std::get_if<cpp_class>(&decl)) {
-            groups.push_back({cls->name, {std::move(decl)}});
+            // Flush buffered raw struct into this class's group
+            auto class_name = cls->name; // capture before move
+            std::vector<cpp_decl> group_decls;
+            for (auto& d : raw_buffer)
+              group_decls.push_back(std::move(d));
+            raw_buffer.clear();
+            group_decls.push_back(std::move(decl));
+            groups.push_back({class_name, std::move(group_decls)});
+            // Class method definitions go in the source file
+            function_decls.push_back(
+                cpp_class(std::get<cpp_class>(groups.back().decls.back())));
           } else if (auto* en = std::get_if<cpp_enum>(&decl)) {
             groups.push_back({en->name, {std::move(decl)}});
           } else if (auto* alias = std::get_if<cpp_type_alias>(&decl)) {
-            // Aliases go with their name as standalone type files
             groups.push_back({alias->name, {std::move(decl)}});
           } else if (auto* fwd = std::get_if<cpp_forward_decl>(&decl)) {
             // Forward decls go with their associated type — find the group
@@ -3467,10 +3528,7 @@ namespace xb {
                 break;
               }
             }
-            if (!found) {
-              // Forward decl for a type not yet seen — create group
-              groups.push_back({fwd->name, {std::move(decl)}});
-            }
+            if (!found) { groups.push_back({fwd->name, {std::move(decl)}}); }
           } else if (std::holds_alternative<cpp_function>(decl)) {
             function_decls.push_back(std::move(decl));
           }
@@ -3538,22 +3596,106 @@ namespace xb {
           umbrella.includes.push_back({"\"" + pf + "\""});
         files.push_back(std::move(umbrella));
 
-        // Emit source file with all function definitions
-        cpp_namespace fn_ns;
-        fn_ns.name = ns_name;
-        fn_ns.declarations = std::move(function_decls);
+        if (is_wrapped) {
+          // Wrapped mode: per-type source files. Associate functions
+          // with their type groups by name prefix.
+          std::map<std::string, std::size_t> type_to_group;
+          for (std::size_t i = 0; i < groups.size(); ++i)
+            type_to_group[groups[i].type_name] = i;
 
-        auto source_includes = compute_includes(
-            referenced_namespaces, schemas_.schemas(), fn_ns.declarations,
-            file_kind::source, header_filename, options_.header_suffix);
+          std::vector<std::vector<cpp_decl>> per_type_src(groups.size());
+          std::vector<cpp_decl> unassigned_fns;
 
-        cpp_file source;
-        source.filename = stem + options_.source_suffix;
-        source.kind = file_kind::source;
-        source.includes = std::move(source_includes);
-        source.namespaces.push_back(std::move(fn_ns));
+          for (auto& fd : function_decls) {
+            bool assigned = false;
+            if (auto* cls = std::get_if<cpp_class>(&fd)) {
+              auto it = type_to_group.find(cls->name);
+              if (it != type_to_group.end()) {
+                per_type_src[it->second].push_back(std::move(fd));
+                assigned = true;
+              }
+            } else if (auto* fn = std::get_if<cpp_function>(&fd)) {
+              for (const auto& [tname, idx] : type_to_group) {
+                if (fn->name == "read_" + tname ||
+                    fn->name == "write_" + tname ||
+                    fn->name == "validate_" + tname) {
+                  per_type_src[idx].push_back(std::move(fd));
+                  assigned = true;
+                  break;
+                }
+                if (fn->name == "to_json" || fn->name == "from_json") {
+                  if (fn->parameters.find(tname) != std::string::npos) {
+                    per_type_src[idx].push_back(std::move(fd));
+                    assigned = true;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!assigned) unassigned_fns.push_back(std::move(fd));
+          }
 
-        files.push_back(std::move(source));
+          // Emit per-type source files
+          for (std::size_t i = 0; i < groups.size(); ++i) {
+            if (per_type_src[i].empty()) continue;
+
+            std::string type_src_filename =
+                stem + "_" + groups[i].type_name + options_.source_suffix;
+            std::string type_hdr_filename = per_type_filenames[i];
+
+            cpp_namespace src_ns;
+            src_ns.name = ns_name;
+            src_ns.declarations = std::move(per_type_src[i]);
+
+            auto src_includes = compute_includes(
+                referenced_namespaces, schemas_.schemas(), src_ns.declarations,
+                file_kind::source, type_hdr_filename, options_.header_suffix);
+
+            cpp_file src_file;
+            src_file.filename = type_src_filename;
+            src_file.kind = file_kind::source;
+            src_file.includes = std::move(src_includes);
+            src_file.namespaces.push_back(std::move(src_ns));
+
+            files.push_back(std::move(src_file));
+          }
+
+          // Any unassigned functions go in the main source file
+          if (!unassigned_fns.empty()) {
+            cpp_namespace fn_ns;
+            fn_ns.name = ns_name;
+            fn_ns.declarations = std::move(unassigned_fns);
+
+            auto source_includes = compute_includes(
+                referenced_namespaces, schemas_.schemas(), fn_ns.declarations,
+                file_kind::source, header_filename, options_.header_suffix);
+
+            cpp_file source;
+            source.filename = stem + options_.source_suffix;
+            source.kind = file_kind::source;
+            source.includes = std::move(source_includes);
+            source.namespaces.push_back(std::move(fn_ns));
+
+            files.push_back(std::move(source));
+          }
+        } else {
+          // Raw struct mode: single source file with all functions
+          cpp_namespace fn_ns;
+          fn_ns.name = ns_name;
+          fn_ns.declarations = std::move(function_decls);
+
+          auto source_includes = compute_includes(
+              referenced_namespaces, schemas_.schemas(), fn_ns.declarations,
+              file_kind::source, header_filename, options_.header_suffix);
+
+          cpp_file source;
+          source.filename = stem + options_.source_suffix;
+          source.kind = file_kind::source;
+          source.includes = std::move(source_includes);
+          source.namespaces.push_back(std::move(fn_ns));
+
+          files.push_back(std::move(source));
+        }
       }
     }
 

@@ -48,6 +48,19 @@ namespace xb {
                           options.naming);
     }
 
+    bool
+    is_wrapped() const {
+      return options.encapsulation == encapsulation_mode::wrapped;
+    }
+
+    // Build a field access expression: "value.field" for raw structs,
+    // "value.field()" for wrapped classes.
+    std::string
+    field_access(const std::string& var, const std::string& field) const {
+      if (is_wrapped()) return var + "." + field + "()";
+      return var + "." + field;
+    }
+
     std::string
     qualify_fn(const std::string& prefix, const qname& qn) const {
       std::string fn = prefix + to_cpp_identifier(qn.local_name());

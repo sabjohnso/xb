@@ -521,7 +521,7 @@ TEST_CASE("cpp_class renders wrapper with accessors", "[cpp_writer]") {
 
   cpp_class cls;
   cls.name = "order";
-  cls.detail_struct_name = "order_data";
+  cls.raw_struct_name = "order_data";
   cls.fields = {
       {"std::string", "cl_ord_id", ""},
       {"std::optional<std::string>", "side", ""},
@@ -537,8 +537,9 @@ TEST_CASE("cpp_class renders wrapper with accessors", "[cpp_writer]") {
   CHECK(result.find("/// An order.") != std::string::npos);
   // Class declaration
   CHECK(result.find("class order") != std::string::npos);
-  // Detail struct member
-  CHECK(result.find("detail::order_data data_") != std::string::npos);
+  // Raw struct member (no detail:: prefix)
+  CHECK(result.find("order_data data_") != std::string::npos);
+  CHECK(result.find("detail::") == std::string::npos);
   // Const ref getter for scalar
   CHECK(result.find("const std::string& cl_ord_id() const") !=
         std::string::npos);
@@ -555,10 +556,10 @@ TEST_CASE("cpp_class renders wrapper with accessors", "[cpp_writer]") {
   CHECK(result.find("fills_size()") != std::string::npos);
   // Equality
   CHECK(result.find("operator==") != std::string::npos);
-  // Constructor from detail struct
-  CHECK(result.find("explicit order(detail::order_data") != std::string::npos);
-  // data() accessor
-  CHECK(result.find("data()") != std::string::npos);
+  // Constructor from raw struct (no detail:: prefix)
+  CHECK(result.find("explicit order(order_data") != std::string::npos);
+  // No data() accessor — encapsulation must not be broken
+  CHECK(result.find("data()") == std::string::npos);
 }
 
 TEST_CASE("cpp_class split mode: header has declarations, source has "
@@ -569,7 +570,7 @@ TEST_CASE("cpp_class split mode: header has declarations, source has "
 
   cpp_class cls;
   cls.name = "order";
-  cls.detail_struct_name = "order_data";
+  cls.raw_struct_name = "order_data";
   cls.inline_methods = false;
   cls.fields = {
       {"std::string", "cl_ord_id", ""},
@@ -584,9 +585,13 @@ TEST_CASE("cpp_class split mode: header has declarations, source has "
   CHECK(header.find("class order") != std::string::npos);
   CHECK(header.find("cl_ord_id() const;") != std::string::npos);
   CHECK(header.find("set_cl_ord_id(") != std::string::npos);
+  // No detail:: prefix
+  CHECK(header.find("detail::") == std::string::npos);
   // Should NOT contain function bodies (return data_.)
   CHECK(header.find("return data_.") == std::string::npos);
   CHECK(header.find("std::move(value)") == std::string::npos);
+  // No data() accessor
+  CHECK(header.find("data()") == std::string::npos);
 
   // Source: out-of-line definitions with class:: prefix
   auto source = writer.write(file, {file_kind::source});
@@ -598,4 +603,6 @@ TEST_CASE("cpp_class split mode: header has declarations, source has "
   CHECK(source.find("order::add_fill(") != std::string::npos);
   CHECK(source.find("order::fills_size()") != std::string::npos);
   CHECK(source.find("return data_.") != std::string::npos);
+  // No data() accessor in source either
+  CHECK(source.find("data()") == std::string::npos);
 }

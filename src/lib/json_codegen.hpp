@@ -34,4 +34,12 @@ namespace xb {
   cpp_function
   generate_from_json_function(const cpp_struct& s);
 
+  // Generate to_json/from_json for a wrapped class
+  // to_json uses const getter syntax; from_json constructs the raw struct
+  cpp_function
+  generate_to_json_function(const cpp_class& cls);
+
+  cpp_function
+  generate_from_json_function(const cpp_class& cls);
+
 } // namespace xb

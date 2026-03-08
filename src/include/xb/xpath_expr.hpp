@@ -8,6 +8,7 @@ namespace xb {
 
   struct xpath_context {
     std::string value_prefix; // "value." for complex, "value" for simple
+    bool use_getters = false; // true for wrapped classes: field -> field()
   };
 
   std::optional<std::string>
