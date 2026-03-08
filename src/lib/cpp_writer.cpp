@@ -3,6 +3,18 @@
 #include <sstream>
 #include <string>
 
+namespace {
+  bool
+  is_variant(const std::string& type) {
+    return type.substr(0, 13) == "std::variant<";
+  }
+
+  std::string
+  alias_name(const std::string& field_name) {
+    return field_name + "_type";
+  }
+} // namespace
+
 namespace xb {
 
   namespace {
@@ -34,9 +46,16 @@ namespace xb {
     }
 
     void
-    write_field(std::ostream& os, const cpp_field& field) {
-      os << "  " << field.type << ' ' << field.name;
-      if (!field.default_value.empty()) os << " = " << field.default_value;
+    write_field(std::ostream& os, const cpp_field& field,
+                bool use_alias = false) {
+      std::string type = use_alias && is_variant(field.type)
+                             ? alias_name(field.name)
+                             : field.type;
+      os << "  " << type << ' ' << field.name;
+      if (!field.default_value.empty())
+        os << " = " << field.default_value;
+      else
+        os << "{}";
       os << ";\n";
     }
 
@@ -58,8 +77,15 @@ namespace xb {
       }
 
       os << "struct " << s.name << " {\n";
+
+      // Emit type aliases for variant fields
+      for (const auto& f : s.fields) {
+        if (is_variant(f.type))
+          os << "  using " << alias_name(f.name) << " = " << f.type << ";\n";
+      }
+
       for (const auto& f : s.fields)
-        write_field(os, f);
+        write_field(os, f, true);
 
       if (s.generate_equality) {
         if (!s.fields.empty()) os << '\n';
@@ -91,26 +117,35 @@ namespace xb {
       return name;
     }
 
+    // Resolve the display type for a class field: for variant fields,
+    // use the alias defined in the raw struct.
+    std::string
+    class_field_type(const cpp_class& cls, const cpp_field& f) {
+      if (is_variant(f.type))
+        return cls.raw_struct_name + "::" + alias_name(f.name);
+      return f.type;
+    }
+
     // Emit field accessor declarations (no bodies) for split-mode header
     void
     write_class_field_decls(std::ostream& os, const cpp_class& cls) {
       for (const auto& f : cls.fields) {
         std::string inner;
-        os << '\n';
+        std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
-          os << "  const " << f.type << "& " << f.name << "() const;\n";
-          os << "  void set_" << f.name << "(" << inner << " value);\n";
-          os << "  void clear_" << f.name << "();\n";
+          os << "\n  const " << f.type << "& " << f.name << "() const;\n";
+          os << "\n  void set_" << f.name << "(" << inner << " value);\n";
+          os << "\n  void clear_" << f.name << "();\n";
         } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
           auto singular = singularize(f.name);
-          os << "  auto " << f.name << "() const;\n";
-          os << "  void add_" << singular << "(" << inner << " value);\n";
-          os << "  std::size_t " << f.name << "_size() const;\n";
-          os << "  void clear_" << f.name << "();\n";
+          os << "\n  auto " << f.name << "() const;\n";
+          os << "\n  void add_" << singular << "(" << inner << " value);\n";
+          os << "\n  std::size_t " << f.name << "_size() const;\n";
+          os << "\n  void clear_" << f.name << "();\n";
         } else {
-          os << "  const " << f.type << "& " << f.name << "() const;\n";
-          os << "  void set_" << f.name << "(" << f.type << " value);\n";
+          os << "\n  const " << ftype << "& " << f.name << "() const;\n";
+          os << "\n  void set_" << f.name << "(" << ftype << " value);\n";
         }
       }
     }
@@ -120,30 +155,31 @@ namespace xb {
     write_class_field_inline(std::ostream& os, const cpp_class& cls) {
       for (const auto& f : cls.fields) {
         std::string inner;
-        os << '\n';
+        std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
-          os << "  const " << f.type << "& " << f.name
+          os << "\n  const " << f.type << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
-          os << "  void set_" << f.name << "(" << inner << " value) { data_."
+          os << "\n  void set_" << f.name << "(" << inner << " value) { data_."
              << f.name << " = std::move(value); }\n";
-          os << "  void clear_" << f.name << "() { data_." << f.name
+          os << "\n  void clear_" << f.name << "() { data_." << f.name
              << ".reset(); }\n";
         } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
           auto singular = singularize(f.name);
-          os << "  auto " << f.name
+          os << "\n  auto " << f.name
              << "() const { return std::views::all(data_." << f.name
              << "); }\n";
-          os << "  void add_" << singular << "(" << inner << " value) { data_."
-             << f.name << ".push_back(std::move(value)); }\n";
-          os << "  std::size_t " << f.name << "_size() const { return data_."
+          os << "\n  void add_" << singular << "(" << inner
+             << " value) { data_." << f.name
+             << ".push_back(std::move(value)); }\n";
+          os << "\n  std::size_t " << f.name << "_size() const { return data_."
              << f.name << ".size(); }\n";
-          os << "  void clear_" << f.name << "() { data_." << f.name
+          os << "\n  void clear_" << f.name << "() { data_." << f.name
              << ".clear(); }\n";
         } else {
-          os << "  const " << f.type << "& " << f.name
+          os << "\n  const " << ftype << "& " << f.name
              << "() const { return data_." << f.name << "; }\n";
-          os << "  void set_" << f.name << "(" << f.type << " value) { data_."
+          os << "\n  void set_" << f.name << "(" << ftype << " value) { data_."
              << f.name << " = std::move(value); }\n";
         }
       }
@@ -183,36 +219,36 @@ namespace xb {
       const auto& d = cls.raw_struct_name;
 
       // Constructor
-      os << c << "::" << c << "(" << d << " d) : data_(std::move(d)) {}\n";
+      os << c << "::" << c << "(" << d << " d) : data_(std::move(d)) {}\n\n";
 
       for (const auto& f : cls.fields) {
         std::string inner;
-        os << '\n';
+        std::string ftype = class_field_type(cls, f);
 
         if ((inner = extract_inner(f.type, "std::optional")) != "") {
           os << "const " << f.type << "& " << c << "::" << f.name
-             << "() const { return data_." << f.name << "; }\n";
+             << "() const { return data_." << f.name << "; }\n\n";
           os << "void " << c << "::set_" << f.name << "(" << inner
-             << " value) { data_." << f.name << " = std::move(value); }\n";
+             << " value) { data_." << f.name << " = std::move(value); }\n\n";
           os << "void " << c << "::clear_" << f.name << "() { data_." << f.name
-             << ".reset(); }\n";
+             << ".reset(); }\n\n";
         } else if ((inner = extract_inner(f.type, "std::vector")) != "") {
           auto singular = singularize(f.name);
           os << "auto " << c << "::" << f.name
              << "() const { return std::views::all(data_." << f.name
-             << "); }\n";
+             << "); }\n\n";
           os << "void " << c << "::add_" << singular << "(" << inner
              << " value) { data_." << f.name
-             << ".push_back(std::move(value)); }\n";
+             << ".push_back(std::move(value)); }\n\n";
           os << "std::size_t " << c << "::" << f.name
-             << "_size() const { return data_." << f.name << ".size(); }\n";
+             << "_size() const { return data_." << f.name << ".size(); }\n\n";
           os << "void " << c << "::clear_" << f.name << "() { data_." << f.name
-             << ".clear(); }\n";
+             << ".clear(); }\n\n";
         } else {
-          os << "const " << f.type << "& " << c << "::" << f.name
-             << "() const { return data_." << f.name << "; }\n";
-          os << "void " << c << "::set_" << f.name << "(" << f.type
-             << " value) { data_." << f.name << " = std::move(value); }\n";
+          os << "const " << ftype << "& " << c << "::" << f.name
+             << "() const { return data_." << f.name << "; }\n\n";
+          os << "void " << c << "::set_" << f.name << "(" << ftype
+             << " value) { data_." << f.name << " = std::move(value); }\n\n";
         }
       }
     }
@@ -266,14 +302,14 @@ namespace xb {
       os << f.parameters;
       os << ") {\n";
       os << f.body;
-      os << "}\n";
+      os << "}\n\n";
     }
 
     void
     write_function_declaration(std::ostream& os, const cpp_function& f) {
       os << f.return_type << ' ' << f.name << '(';
       os << f.parameters;
-      os << ");\n";
+      os << ");\n\n";
     }
 
     void

@@ -71,8 +71,8 @@ TEST_CASE("struct with fields", "[cpp_writer]") {
 namespace ns {
 
 struct order {
-  std::string id;
-  int quantity;
+  std::string id{};
+  int quantity{};
 };
 
 } // namespace ns
@@ -97,8 +97,8 @@ TEST_CASE("struct with defaulted equality", "[cpp_writer]") {
 namespace ns {
 
 struct point {
-  int x;
-  int y;
+  int x{};
+  int y{};
 
   bool operator==(const struct point&) const = default;
 };
@@ -249,8 +249,8 @@ TEST_CASE("complete file", "[cpp_writer]") {
   CHECK(result.find("namespace trading {") != std::string::npos);
   CHECK(result.find("enum class order_status {") != std::string::npos);
   CHECK(result.find("struct order {") != std::string::npos);
-  CHECK(result.find("std::string id;") != std::string::npos);
-  CHECK(result.find("order_status status;") != std::string::npos);
+  CHECK(result.find("std::string id{};") != std::string::npos);
+  CHECK(result.find("order_status status{};") != std::string::npos);
   CHECK(result.find("bool operator==(const struct order&) const = default;") !=
         std::string::npos);
   CHECK(result.find("} // namespace trading") != std::string::npos);
@@ -269,10 +269,12 @@ TEST_CASE("fields with template types", "[cpp_writer]") {
   file.namespaces.push_back({"ns", {std::move(s)}});
 
   auto result = writer.write(file);
-  CHECK(result.find("std::optional<std::string> header;") != std::string::npos);
-  CHECK(result.find("std::vector<int> items;") != std::string::npos);
-  CHECK(result.find("std::variant<int, std::string> payload;") !=
+  CHECK(result.find("std::optional<std::string> header{};") !=
         std::string::npos);
+  CHECK(result.find("std::vector<int> items{};") != std::string::npos);
+  CHECK(result.find("using payload_type = std::variant<int, std::string>;") !=
+        std::string::npos);
+  CHECK(result.find("payload_type payload{};") != std::string::npos);
 }
 
 // Additional: Field with default value
@@ -605,4 +607,128 @@ TEST_CASE("cpp_class split mode: header has declarations, source has "
   CHECK(source.find("return data_.") != std::string::npos);
   // No data() accessor in source either
   CHECK(source.find("data()") == std::string::npos);
+}
+
+TEST_CASE("struct fields use default initialization", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_struct s;
+  s.name = "msg";
+  s.generate_equality = false;
+  s.fields = {
+      {"int32_t", "seq", ""},
+      {"std::string", "text", ""},
+  };
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("int32_t seq{};") != std::string::npos);
+  CHECK(result.find("std::string text{};") != std::string::npos);
+}
+
+TEST_CASE("struct field with explicit default keeps it", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_struct s;
+  s.name = "config";
+  s.generate_equality = false;
+  s.fields = {
+      {"int", "retries", "3"},
+  };
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("int retries = 3;") != std::string::npos);
+  // Should NOT also have {}
+  CHECK(result.find("retries{}") == std::string::npos);
+}
+
+TEST_CASE("variant field gets type alias in struct", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_struct s;
+  s.name = "message";
+  s.generate_equality = false;
+  s.fields = {
+      {"std::variant<int, std::string>", "payload", ""},
+      {"std::string", "tag", ""},
+  };
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  // Type alias declared inside the struct
+  CHECK(result.find("using payload_type = std::variant<int, std::string>;") !=
+        std::string::npos);
+  // Field uses the alias, not the raw variant type
+  CHECK(result.find("payload_type payload{};") != std::string::npos);
+  // Non-variant field is unchanged
+  CHECK(result.find("std::string tag{};") != std::string::npos);
+}
+
+TEST_CASE("class accessors use variant alias from raw struct", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "event";
+  cls.raw_struct_name = "event_data";
+  cls.fields = {
+      {"std::variant<int, std::string>", "payload", ""},
+      {"std::string", "tag", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+  // Getter return type references the alias through the raw struct
+  CHECK(result.find("const event_data::payload_type&") != std::string::npos);
+  // Setter parameter type references the alias
+  CHECK(result.find("event_data::payload_type value") != std::string::npos);
+}
+
+TEST_CASE("blank line after each function prototype and definition",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_function f1;
+  f1.return_type = "int";
+  f1.name = "foo";
+  f1.parameters = "";
+  f1.body = "  return 42;\n";
+  f1.is_inline = true;
+
+  cpp_function f2;
+  f2.return_type = "void";
+  f2.name = "bar";
+  f2.parameters = "int x";
+  f2.body = "  (void)x;\n";
+  f2.is_inline = true;
+
+  file.namespaces.push_back({"ns", {f1, f2}});
+
+  auto result = writer.write(file);
+  // Each function definition should be followed by a blank line
+  CHECK(result.find("return 42;\n}\n\n") != std::string::npos);
+  CHECK(result.find("(void)x;\n}\n\n") != std::string::npos);
+}
+
+TEST_CASE("blank line after each class method in source mode", "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  cpp_class cls;
+  cls.name = "item";
+  cls.raw_struct_name = "item_data";
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::string", "name", ""},
+      {"int32_t", "count", ""},
+  };
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto source = writer.write(file, {file_kind::source});
+  // Each method definition ends with }\n\n (blank line after)
+  // Constructor
+  CHECK(source.find("data_(std::move(d)) {}\n\n") != std::string::npos);
+  // Getter and setter should each be followed by blank line
+  CHECK(source.find("return data_.name; }\n\n") != std::string::npos);
+  CHECK(source.find("std::move(value); }\n\n") != std::string::npos);
 }
