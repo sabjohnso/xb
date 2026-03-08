@@ -1175,3 +1175,75 @@ TEST_CASE("blank line after each class method in source mode", "[cpp_writer]") {
   CHECK(source.find("return data_.name; }\n\n") != std::string::npos);
   CHECK(source.find("std::move(value); }\n\n") != std::string::npos);
 }
+
+TEST_CASE("forward declaration with is_class emits class keyword",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  file.namespaces.push_back({"ns", {cpp_forward_decl{"order", true}}});
+
+  auto result = writer.write(file);
+  auto expected = R"(#pragma once
+
+namespace ns {
+
+class order;
+
+} // namespace ns
+)";
+  CHECK(result == expected);
+}
+
+TEST_CASE("forward declaration without is_class emits struct keyword",
+          "[cpp_writer]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+  file.namespaces.push_back({"ns", {cpp_forward_decl{"order", false}}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("struct order;") != std::string::npos);
+}
+
+TEST_CASE("sequence insert takes by value for move-only types",
+          "[cpp_writer]") {
+  // Inline class with a vector of strings — insert should take by value
+  // (not const ref) so move-only element types work.
+  cpp_class cls;
+  cls.name = "container";
+  cls.raw_struct_name = "container_data";
+  cls.inline_methods = true;
+  cls.fields = {
+      {"std::vector<std::string>", "items", ""},
+  };
+
+  cpp_file file;
+  file.filename = "test.hpp";
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+  // insert should take by value, not const ref
+  CHECK(result.find("std::string value)") != std::string::npos);
+  CHECK(result.find("const std::string& value)") == std::string::npos);
+  // Should use std::move
+  CHECK(result.find("std::move(value)") != std::string::npos);
+}
+
+TEST_CASE("sequence insert source takes by value", "[cpp_writer]") {
+  cpp_class cls;
+  cls.name = "container";
+  cls.raw_struct_name = "container_data";
+  cls.inline_methods = false;
+  cls.fields = {
+      {"std::vector<std::string>", "items", ""},
+  };
+
+  cpp_file file;
+  file.filename = "test.hpp";
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto source = writer.write(file, {file_kind::source});
+  // Out-of-line insert should also take by value
+  CHECK(source.find("std::string value)") != std::string::npos);
+  CHECK(source.find("const std::string& value)") == std::string::npos);
+  CHECK(source.find("std::move(value)") != std::string::npos);
+}

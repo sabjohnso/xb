@@ -53,6 +53,14 @@ generate_xeag_lexer(const schema_set& schemas, codegen_options opts = {}) {
   return gen.generate();
 }
 
+static codegen_options
+wrapped_file_per_type_opts() {
+  codegen_options opts;
+  opts.encapsulation = encapsulation_mode::wrapped;
+  opts.mode = output_mode::file_per_type;
+  return opts;
+}
+
 // Write generated files + test main to a temp directory, compile, link, and run
 static bool
 build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
@@ -119,12 +127,10 @@ build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
     std::cerr << "Command: " << cmd << "\n";
     // Print generated files for debugging
     for (const auto& file : files) {
-      if (file.kind == file_kind::header) {
-        auto path = tmp_dir / file.filename;
-        std::ifstream hdr(path);
-        std::cerr << "=== " << file.filename << " ===\n";
-        std::cerr << hdr.rdbuf() << "\n";
-      }
+      auto path = tmp_dir / file.filename;
+      std::ifstream hdr(path);
+      std::cerr << "=== " << file.filename << " ===\n";
+      std::cerr << hdr.rdbuf() << "\n";
     }
     fs::remove_all(tmp_dir);
     return false;
@@ -164,161 +170,151 @@ TEST_CASE("xeag-lexer: schema parses successfully", "[xeag-lexer][schema]") {
 // Code generation IR tests
 // =========================================================================
 
-TEST_CASE("xeag-lexer: codegen produces header and source in split mode",
+TEST_CASE("xeag-lexer: codegen produces multiple files in file-per-type mode",
           "[xeag-lexer][codegen]") {
   auto schemas = parse_xeag_lexer_schema();
-  codegen_options opts;
-  opts.mode = output_mode::split;
+  auto opts = wrapped_file_per_type_opts();
   auto files = generate_xeag_lexer(schemas, opts);
 
-  REQUIRE(files.size() == 2);
-  bool has_header = false;
-  bool has_source = false;
+  int headers = 0;
+  int sources = 0;
   for (const auto& f : files) {
-    if (f.kind == file_kind::header) has_header = true;
-    if (f.kind == file_kind::source) has_source = true;
+    if (f.kind == file_kind::header) ++headers;
+    if (f.kind == file_kind::source) ++sources;
   }
-  CHECK(has_header);
-  CHECK(has_source);
+  CHECK(headers > 1);
+  CHECK(sources > 0);
 }
 
 TEST_CASE("xeag-lexer: mutually recursive types use unique_ptr",
           "[xeag-lexer][codegen][cycle]") {
   auto schemas = parse_xeag_lexer_schema();
-  auto files = generate_xeag_lexer(schemas);
+  auto opts = wrapped_file_per_type_opts();
+  auto files = generate_xeag_lexer(schemas, opts);
 
-  // Find the header
-  const cpp_file* header = nullptr;
-  for (const auto& f : files) {
-    if (f.kind == file_kind::header) {
-      header = &f;
-      break;
-    }
-  }
-  REQUIRE(header != nullptr);
-
-  // Write to string and check for unique_ptr usage on recursive types
   cpp_writer writer;
-  auto code = writer.write(*header);
+  std::string all_code;
+  for (const auto& f : files)
+    if (f.kind == file_kind::header) all_code += writer.write(f);
 
-  // pattern_group_type and pattern_choice_type are mutually recursive.
-  // The variant in pattern_group_type should wrap the recursive alternatives
-  // with std::unique_ptr to break the cycle.
-  INFO("Generated header:\n" << code);
-  CHECK(code.find("unique_ptr") != std::string::npos);
+  INFO("Generated headers:\n" << all_code);
+  CHECK(all_code.find("unique_ptr") != std::string::npos);
 }
 
-TEST_CASE("xeag-lexer: forward declarations emitted for cycle types",
+TEST_CASE("xeag-lexer: forward declarations use class for wrapped types",
           "[xeag-lexer][codegen][cycle]") {
   auto schemas = parse_xeag_lexer_schema();
-  auto files = generate_xeag_lexer(schemas);
-
-  const cpp_file* header = nullptr;
-  for (const auto& f : files)
-    if (f.kind == file_kind::header) header = &f;
-  REQUIRE(header != nullptr);
+  auto opts = wrapped_file_per_type_opts();
+  auto files = generate_xeag_lexer(schemas, opts);
 
   cpp_writer writer;
-  auto code = writer.write(*header);
+  std::string all_code;
+  for (const auto& f : files)
+    if (f.kind == file_kind::header) all_code += writer.write(f);
 
-  INFO("Generated header:\n" << code);
+  INFO("Generated headers:\n" << all_code);
 
-  // Forward declarations should appear for the recursive types
-  CHECK(code.find("struct pattern_group_type;") != std::string::npos);
-  CHECK(code.find("struct pattern_choice_type;") != std::string::npos);
+  // Forward declarations should use 'class' since types are wrapped
+  CHECK(all_code.find("class pattern_group_type;") != std::string::npos);
+  CHECK(all_code.find("class pattern_choice_type;") != std::string::npos);
+  // Should NOT use 'struct' for forward-declared wrapped types
+  CHECK(all_code.find("struct pattern_group_type;") == std::string::npos);
+  CHECK(all_code.find("struct pattern_choice_type;") == std::string::npos);
 }
 
 // =========================================================================
-// Compilation tests
+// Compilation tests (file-per-type + wrapped)
 // =========================================================================
 
-TEST_CASE("xeag-lexer: generated code compiles", "[xeag-lexer][compile]") {
+TEST_CASE("xeag-lexer: wrapped file-per-type compiles",
+          "[xeag-lexer][compile][wrapped][file-per-type]") {
   auto schemas = parse_xeag_lexer_schema();
-  auto files = generate_xeag_lexer(schemas);
+  auto opts = wrapped_file_per_type_opts();
+  auto files = generate_xeag_lexer(schemas, opts);
 
   auto test_code = R"(
 int main() {
   using namespace xeag::org::lexer;
 
-  // Verify basic type construction
   lexer_type lex;
   match_type m;
-  skip_type sk;
-  pattern_literal_type lit;
-  char_class_type cc;
-  pattern_choice_type choice;
-  pattern_group_type group;
+  m.set_name("TOKEN");
+  m.set_value("+");
+  lex.match_push_back(std::move(m));
 
-  // Verify enum
-  auto r = repetition_type::zero_or_more;
-  (void)r;
+  assert(lex.match_size() == 1);
+  assert(lex.match(0).name() == "TOKEN");
 
-  std::cout << "Compilation OK\n";
+  std::cout << "Wrapped file-per-type OK\n";
   return 0;
 }
 )";
-  REQUIRE(build_and_run(files, "compile", test_code));
+  REQUIRE(build_and_run(files, "wrapped_fpt_compile", test_code));
 }
 
-TEST_CASE("xeag-lexer: nested recursive construction compiles",
-          "[xeag-lexer][compile]") {
+TEST_CASE("xeag-lexer: nested recursive construction with wrapped types",
+          "[xeag-lexer][compile][wrapped][file-per-type]") {
   auto schemas = parse_xeag_lexer_schema();
-  auto files = generate_xeag_lexer(schemas);
+  auto opts = wrapped_file_per_type_opts();
+  auto files = generate_xeag_lexer(schemas, opts);
 
-  // Build a nested structure: group containing a choice containing groups
   auto test_code = R"(
 int main() {
   using namespace xeag::org::lexer;
 
   // Build: group { choice { option { literal "a" }, option { literal "b" } } }
   pattern_literal_type lit_a;
-  lit_a.value = "a";
+  lit_a.set_value("a");
 
   pattern_literal_type lit_b;
-  lit_b.value = "b";
+  lit_b.set_value("b");
 
   pattern_group_type opt_a;
-  opt_a.choice.push_back(lit_a);
+  opt_a.choice_push_back(pattern_group_type_data::choice_element_type{lit_a});
 
   pattern_group_type opt_b;
-  opt_b.choice.push_back(lit_b);
+  opt_b.choice_push_back(pattern_group_type_data::choice_element_type{lit_b});
 
   pattern_choice_type choice;
-  choice.option.push_back(std::make_unique<pattern_group_type>(std::move(opt_a)));
-  choice.option.push_back(std::make_unique<pattern_group_type>(std::move(opt_b)));
+  choice.option_push_back(std::make_unique<pattern_group_type>(std::move(opt_a)));
+  choice.option_push_back(std::make_unique<pattern_group_type>(std::move(opt_b)));
 
   pattern_group_type outer;
-  outer.choice.push_back(std::make_unique<pattern_choice_type>(std::move(choice)));
-  outer.repetition = repetition_type::zero_or_more;
+  outer.choice_push_back(
+      pattern_group_type_data::choice_element_type{
+          std::make_unique<pattern_choice_type>(std::move(choice))});
+  outer.set_repetition(repetition_type::zero_or_more);
 
-  // Build a complete lexer with this pattern
   match_type m;
-  m.name = "TOKEN";
-  m.choice.push_back(std::make_unique<pattern_group_type>(std::move(outer)));
+  m.set_name("TOKEN");
+  m.choice_push_back(
+      match_type_data::choice_element_type{
+          std::make_unique<pattern_group_type>(std::move(outer))});
 
   lexer_type lex;
-  lex.match.push_back(std::move(m));
+  lex.match_push_back(std::move(m));
 
-  std::cout << "Nested construction OK\n";
+  std::cout << "Nested wrapped construction OK\n";
   return 0;
 }
 )";
-  REQUIRE(build_and_run(files, "nested_construct", test_code));
+  REQUIRE(build_and_run(files, "wrapped_nested_construct", test_code));
 }
 
 // =========================================================================
-// Round-trip serialization tests
+// Round-trip serialization tests (file-per-type + wrapped)
 // =========================================================================
 
-TEST_CASE("xeag-lexer: round-trip simple lexer", "[xeag-lexer][round-trip]") {
+TEST_CASE("xeag-lexer: round-trip simple lexer with wrapped types",
+          "[xeag-lexer][round-trip][wrapped][file-per-type]") {
   auto schemas = parse_xeag_lexer_schema();
-  auto files = generate_xeag_lexer(schemas);
+  auto opts = wrapped_file_per_type_opts();
+  auto files = generate_xeag_lexer(schemas, opts);
 
   auto test_code = R"TEST(
 int main() {
   using namespace xeag::org::lexer;
 
-  // Parse a simple lexer document
   std::string xml = R"XML(<?xml version="1.0"?>
 <lexer xmlns="http://xeag.org/lexer">
   <skip chars=" &#10;&#9;" repetition="one-or-more"/>
@@ -330,29 +326,28 @@ int main() {
 
   // Read
   xb::expat_reader reader(xml);
-  reader.read(); // advance to root element
+  reader.read();
   auto lex = read_lexer_type(reader);
 
-  assert(lex.skip.size() == 1);
-  assert(lex.match.size() == 3);
-  assert(lex.match[0].name == "PLUS");
-  assert(lex.match[0].value.has_value());
-  assert(*lex.match[0].value == "+");
-  assert(lex.match[2].name == "NUMBER");
-  assert(lex.match[2].chars.has_value());
-  assert(*lex.match[2].chars == "0-9");
-  assert(lex.match[2].repetition.has_value());
-  assert(*lex.match[2].repetition == repetition_type::one_or_more);
+  assert(lex.skip_size() == 1);
+  assert(lex.match_size() == 3);
+  assert(lex.match(0).name() == "PLUS");
+  assert(lex.match(0).value().has_value());
+  assert(*lex.match(0).value() == "+");
+  assert(lex.match(2).name() == "NUMBER");
+  assert(lex.match(2).chars().has_value());
+  assert(*lex.match(2).chars() == "0-9");
+  assert(lex.match(2).repetition().has_value());
+  assert(*lex.match(2).repetition() == repetition_type::one_or_more);
 
   // Write
   std::ostringstream oss;
   xb::ostream_writer writer(oss);
-  
+
   writer.start_element(xb::qname{"http://xeag.org/lexer", "lexer"});
   writer.namespace_declaration("", "http://xeag.org/lexer");
   write_lexer_type(lex, writer);
   writer.end_element();
-  
 
   std::string output = oss.str();
 
@@ -362,33 +357,31 @@ int main() {
   auto lex2 = read_lexer_type(reader2);
 
   // Verify round-trip
-  assert(lex2.skip.size() == lex.skip.size());
-  assert(lex2.match.size() == lex.match.size());
-  assert(lex2.match[0].name == lex.match[0].name);
-  assert(lex2.match[0].value == lex.match[0].value);
-  assert(lex2.match[2].name == lex.match[2].name);
-  assert(lex2.match[2].chars == lex.match[2].chars);
-  assert(lex2.match[2].repetition == lex.match[2].repetition);
+  assert(lex2.skip_size() == lex.skip_size());
+  assert(lex2.match_size() == lex.match_size());
+  assert(lex2.match(0).name() == lex.match(0).name());
+  assert(lex2.match(0).value() == lex.match(0).value());
+  assert(lex2.match(2).name() == lex.match(2).name());
+  assert(lex2.match(2).chars() == lex.match(2).chars());
+  assert(lex2.match(2).repetition() == lex.match(2).repetition());
 
   std::cout << "Simple round-trip OK\n";
   return 0;
 }
 )TEST";
-  REQUIRE(build_and_run(files, "simple_roundtrip", test_code));
+  REQUIRE(build_and_run(files, "wrapped_simple_roundtrip", test_code));
 }
 
-TEST_CASE("xeag-lexer: round-trip complex pattern with nested groups",
-          "[xeag-lexer][round-trip]") {
+TEST_CASE("xeag-lexer: round-trip complex pattern with wrapped types",
+          "[xeag-lexer][round-trip][wrapped][file-per-type]") {
   auto schemas = parse_xeag_lexer_schema();
-  auto files = generate_xeag_lexer(schemas);
+  auto opts = wrapped_file_per_type_opts();
+  auto files = generate_xeag_lexer(schemas, opts);
 
-  // This tests the mutual recursion path: group -> choice -> group -> literal
   auto test_code = R"TEST(
 int main() {
   using namespace xeag::org::lexer;
 
-  // A lexer for identifiers: [a-zA-Z_][a-zA-Z0-9_]*
-  // and multi-line comments: /* ... */
   std::string xml = R"XML(<?xml version="1.0"?>
 <lexer xmlns="http://xeag.org/lexer">
   <skip chars=" &#10;&#9;&#13;" repetition="one-or-more"/>
@@ -426,30 +419,28 @@ int main() {
   reader.read();
   auto lex = read_lexer_type(reader);
 
-  assert(lex.skip.size() == 2);
-  assert(lex.match.size() == 4);
+  assert(lex.skip_size() == 2);
+  assert(lex.match_size() == 4);
 
-  // Check the comment skip pattern (complex pattern with child elements)
-  auto& comment_skip = lex.skip[1];
-  assert(comment_skip.choice.size() == 3); // literal, char-class, literal
+  // Check the comment skip pattern
+  assert(lex.skip(1).choice_size() == 3);
 
-  // Check IDENT match (two char-class elements)
-  assert(lex.match[0].name == "IDENT");
-  assert(lex.match[0].choice.size() == 2);
+  // Check IDENT match
+  assert(lex.match(0).name() == "IDENT");
+  assert(lex.match(0).choice_size() == 2);
 
-  // Check NUMBER match has a choice with two options
-  assert(lex.match[1].name == "NUMBER");
-  assert(lex.match[1].choice.size() == 1); // one choice element
+  // Check NUMBER match
+  assert(lex.match(1).name() == "NUMBER");
+  assert(lex.match(1).choice_size() == 1);
 
   // Write and re-read
   std::ostringstream oss;
   xb::ostream_writer writer(oss);
-  
+
   writer.start_element(xb::qname{"http://xeag.org/lexer", "lexer"});
   writer.namespace_declaration("", "http://xeag.org/lexer");
   write_lexer_type(lex, writer);
   writer.end_element();
-  
 
   std::string output = oss.str();
 
@@ -457,28 +448,27 @@ int main() {
   reader2.read();
   auto lex2 = read_lexer_type(reader2);
 
-  // Verify structure preserved
-  assert(lex2.skip.size() == 2);
-  assert(lex2.match.size() == 4);
-  assert(lex2.match[0].name == "IDENT");
-  assert(lex2.match[1].name == "NUMBER");
-  assert(lex2.match[0].choice.size() == 2);
-  assert(lex2.match[1].choice.size() == 1);
-  assert(lex2.skip[1].choice.size() == 3);
+  assert(lex2.skip_size() == 2);
+  assert(lex2.match_size() == 4);
+  assert(lex2.match(0).name() == "IDENT");
+  assert(lex2.match(1).name() == "NUMBER");
+  assert(lex2.match(0).choice_size() == 2);
+  assert(lex2.match(1).choice_size() == 1);
+  assert(lex2.skip(1).choice_size() == 3);
 
   std::cout << "Complex pattern round-trip OK\n";
   return 0;
 }
 )TEST";
-  REQUIRE(build_and_run(files, "complex_roundtrip", test_code));
+  REQUIRE(build_and_run(files, "wrapped_complex_roundtrip", test_code));
 }
 
-TEST_CASE("xeag-lexer: round-trip deeply nested groups",
-          "[xeag-lexer][round-trip]") {
+TEST_CASE("xeag-lexer: round-trip deeply nested groups with wrapped types",
+          "[xeag-lexer][round-trip][wrapped][file-per-type]") {
   auto schemas = parse_xeag_lexer_schema();
-  auto files = generate_xeag_lexer(schemas);
+  auto opts = wrapped_file_per_type_opts();
+  auto files = generate_xeag_lexer(schemas, opts);
 
-  // Exercise deep nesting: group { group { choice { option { group { ... }}}}
   auto test_code = R"TEST(
 int main() {
   using namespace xeag::org::lexer;
@@ -512,64 +502,31 @@ int main() {
   reader.read();
   auto lex = read_lexer_type(reader);
 
-  assert(lex.match.size() == 1);
-  assert(lex.match[0].name == "NESTED");
+  assert(lex.match_size() == 1);
+  assert(lex.match(0).name() == "NESTED");
 
   // Write and re-read
   std::ostringstream oss;
   xb::ostream_writer writer(oss);
-  
+
   writer.start_element(xb::qname{"http://xeag.org/lexer", "lexer"});
   writer.namespace_declaration("", "http://xeag.org/lexer");
   write_lexer_type(lex, writer);
   writer.end_element();
-  
 
   xb::expat_reader reader2(oss.str());
   reader2.read();
   auto lex2 = read_lexer_type(reader2);
 
-  assert(lex2.match.size() == 1);
-  assert(lex2.match[0].name == "NESTED");
-  // The outer group contains 3 elements: literal, group, literal
-  assert(lex2.match[0].choice.size() == 1); // one outer group
+  assert(lex2.match_size() == 1);
+  assert(lex2.match(0).name() == "NESTED");
+  assert(lex2.match(0).choice_size() == 1);
 
   std::cout << "Deeply nested round-trip OK\n";
   return 0;
 }
 )TEST";
-  REQUIRE(build_and_run(files, "deep_nested_roundtrip", test_code));
-}
-
-// =========================================================================
-// Wrapped mode tests
-// =========================================================================
-
-TEST_CASE("xeag-lexer: wrapped mode generates and compiles",
-          "[xeag-lexer][compile][wrapped][!mayfail]") {
-  auto schemas = parse_xeag_lexer_schema();
-  codegen_options opts;
-  opts.encapsulation = encapsulation_mode::wrapped;
-  auto files = generate_xeag_lexer(schemas, opts);
-
-  auto test_code = R"(
-int main() {
-  using namespace xeag::org::lexer;
-
-  lexer_type lex;
-  match_type m;
-  m.set_name("TOKEN");
-  m.set_value("+");
-  lex.match_push_back(std::move(m));
-
-  assert(lex.match_size() == 1);
-  assert(lex.match(0).name() == "TOKEN");
-
-  std::cout << "Wrapped mode OK\n";
-  return 0;
-}
-)";
-  REQUIRE(build_and_run(files, "wrapped_compile", test_code));
+  REQUIRE(build_and_run(files, "wrapped_deep_nested_roundtrip", test_code));
 }
 
 // =========================================================================

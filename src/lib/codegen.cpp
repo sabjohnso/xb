@@ -1202,6 +1202,7 @@ namespace xb {
           includes.insert("\"xb/xml_reader.hpp\"");
           includes.insert("\"xb/xml_writer.hpp\"");
         }
+        if (has_regex_usage(declarations)) includes.insert("<regex>");
         if (has_json_functions(declarations)) {
           includes.insert("<nlohmann/json.hpp>");
           includes.insert("\"xb/json_value.hpp\"");
@@ -1365,6 +1366,57 @@ namespace xb {
               }
             } else if constexpr (std::is_same_v<T, cpp_type_alias>) {
               extract_type_refs(d.target);
+            }
+          },
+          decl);
+
+      return deps;
+    }
+
+    // Collect type names referenced via unique_ptr in a declaration.
+    // These are the types that need forward declarations (not full includes)
+    // in file-per-type mode.
+    std::set<std::string>
+    unique_ptr_dependencies(const cpp_decl& decl) {
+      std::set<std::string> deps;
+
+      auto extract_uptr_refs = [&](const std::string& type_expr) {
+        auto str = type_expr;
+        for (;;) {
+          auto pos = str.find("unique_ptr<");
+          if (pos == std::string::npos) break;
+          auto start = pos + 11; // past "unique_ptr<"
+          int depth = 1;
+          auto i = start;
+          while (i < str.size() && depth > 0) {
+            if (str[i] == '<')
+              ++depth;
+            else if (str[i] == '>')
+              --depth;
+            ++i;
+          }
+          // The content between start and i-1 is the unique_ptr argument
+          std::string inner = str.substr(start, i - 1 - start);
+          // Extract the bare type name (strip whitespace, qualifiers)
+          std::string token;
+          for (char c : inner) {
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
+              token += c;
+            else if (!token.empty())
+              break;
+          }
+          if (!token.empty()) deps.insert(token);
+          str.erase(pos, i - pos);
+        }
+      };
+
+      std::visit(
+          [&](const auto& d) {
+            using T = std::decay_t<decltype(d)>;
+            if constexpr (std::is_same_v<T, cpp_struct> ||
+                          std::is_same_v<T, cpp_class>) {
+              for (const auto& f : d.fields)
+                extract_uptr_refs(f.type);
             }
           },
           decl);
@@ -1539,17 +1591,26 @@ namespace xb {
       result.reserve(decls.size() + cycle_indices.size() +
                      hard_cycle_members.size());
 
+      auto fwd_is_class = [&](std::size_t idx) {
+        if (std::holds_alternative<cpp_class>(decls[idx])) return true;
+        if (auto* fwd = std::get_if<cpp_forward_decl>(&decls[idx]))
+          return fwd->is_class;
+        return false;
+      };
+
       // Forward declare XSD-identified cycle types
       for (auto idx : cycle_indices) {
         auto n = decl_name(decls[idx]);
-        if (!n.empty()) result.push_back(cpp_forward_decl{n});
+        if (!n.empty())
+          result.push_back(cpp_forward_decl{n, fwd_is_class(idx)});
       }
 
       // Forward declare hard-dep cycle types (not already forward-declared)
       for (auto idx : hard_cycle_members) {
         if (!cycle_indices.count(idx)) {
           auto n = decl_name(decls[idx]);
-          if (!n.empty()) result.push_back(cpp_forward_decl{n});
+          if (!n.empty())
+            result.push_back(cpp_forward_decl{n, fwd_is_class(idx)});
         }
       }
 
@@ -3750,18 +3811,37 @@ namespace xb {
           } else if (auto* alias = std::get_if<cpp_type_alias>(&decl)) {
             groups.push_back({alias->name, {std::move(decl)}});
           } else if (auto* fwd = std::get_if<cpp_forward_decl>(&decl)) {
-            // Forward decls go with their associated type — find the group
-            bool found = false;
-            for (auto& g : groups) {
+            // In file-per-type mode, forward declarations for a type are
+            // not needed in the type's own file (the full definition is
+            // there).  They're added to referencing files via
+            // unique_ptr_dependencies below.  Keep unmatched forward decls
+            // as standalone groups for types not yet seen.
+            bool has_group = false;
+            for (const auto& g : groups) {
               if (g.type_name == fwd->name) {
-                g.decls.insert(g.decls.begin(), std::move(decl));
-                found = true;
+                has_group = true;
                 break;
               }
             }
-            if (!found) { groups.push_back({fwd->name, {std::move(decl)}}); }
+            if (!has_group) groups.push_back({fwd->name, {std::move(decl)}});
           } else if (std::holds_alternative<cpp_function>(decl)) {
+            // Keep the function for source file generation
             function_decls.push_back(std::move(decl));
+          }
+        }
+
+        // Add function declarations to per-type groups so they appear
+        // in the per-type header files.
+        for (const auto& fd : function_decls) {
+          if (auto* fn = std::get_if<cpp_function>(&fd)) {
+            for (auto& g : groups) {
+              if (fn->name == "read_" + g.type_name ||
+                  fn->name == "write_" + g.type_name ||
+                  fn->name == "validate_" + g.type_name) {
+                g.decls.push_back(*fn);
+                break;
+              }
+            }
           }
         }
 
@@ -3791,9 +3871,34 @@ namespace xb {
             }
           }
 
+          // Add forward declarations for cycle types referenced via
+          // unique_ptr (these types can't be #included due to circular
+          // deps, so they need forward declarations instead).
+          std::vector<cpp_decl> fwd_decls;
+          std::set<std::string> fwd_seen;
+          for (const auto& d : group.decls) {
+            for (const auto& uptr_dep : unique_ptr_dependencies(d)) {
+              if (uptr_dep != group.type_name &&
+                  fwd_seen.insert(uptr_dep).second) {
+                bool is_local = false;
+                for (const auto& other : groups) {
+                  if (other.type_name == uptr_dep) {
+                    is_local = true;
+                    break;
+                  }
+                }
+                if (is_local)
+                  fwd_decls.push_back(cpp_forward_decl{uptr_dep, is_wrapped});
+              }
+            }
+          }
+
           cpp_namespace type_ns;
           type_ns.name = ns_name;
-          type_ns.declarations = group.decls;
+          for (auto& fd : fwd_decls)
+            type_ns.declarations.push_back(std::move(fd));
+          for (auto& d : group.decls)
+            type_ns.declarations.push_back(d);
 
           cpp_file type_file;
           type_file.filename = type_filename;
@@ -3878,9 +3983,11 @@ namespace xb {
             src_ns.name = ns_name;
             src_ns.declarations = std::move(per_type_src[i]);
 
+            // Include the umbrella header so all type definitions and
+            // sibling read_/write_ declarations are visible.
             auto src_includes = compute_includes(
                 referenced_namespaces, schemas_.schemas(), src_ns.declarations,
-                file_kind::source, type_hdr_filename, options_.header_suffix);
+                file_kind::source, header_filename, options_.header_suffix);
 
             cpp_file src_file;
             src_file.filename = type_src_filename;

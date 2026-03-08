@@ -59,6 +59,7 @@ namespace xb {
 
   struct cpp_forward_decl {
     std::string name;
+    bool is_class = false;
 
     bool
     operator==(const cpp_forward_decl&) const = default;

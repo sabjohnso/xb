@@ -199,7 +199,9 @@ function(xb_generate_cpp)
         endif()
       endif()
       if(xb_exe_path AND EXISTS "${xb_exe_path}")
-        # Build the --list-outputs command
+        # Build the --list-outputs command.
+        # Options that affect which files are generated must be passed
+        # here so the output list matches the actual generate command.
         set(list_cmd "${xb_exe_path}" generate --list-outputs)
         if(mode_flag)
           list(APPEND list_cmd ${mode_flag})
@@ -210,11 +212,17 @@ function(xb_generate_cpp)
         foreach(ns_mapping IN LISTS XB_GEN_NAMESPACE_MAP)
           list(APPEND list_cmd -n "${ns_mapping}")
         endforeach()
+        if(XB_GEN_ENCAPSULATION)
+          list(APPEND list_cmd --encapsulation "${XB_GEN_ENCAPSULATION}")
+        endif()
         if(XB_GEN_HEADER_SUFFIX)
           list(APPEND list_cmd --header-suffix "${XB_GEN_HEADER_SUFFIX}")
         endif()
         if(XB_GEN_SOURCE_SUFFIX)
           list(APPEND list_cmd --source-suffix "${XB_GEN_SOURCE_SUFFIX}")
+        endif()
+        if(XB_GEN_SEPARATE_FWD_HEADER)
+          list(APPEND list_cmd --separate-fwd-header)
         endif()
         list(APPEND list_cmd ${XB_GEN_SCHEMAS})
 

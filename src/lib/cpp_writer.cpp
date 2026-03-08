@@ -327,8 +327,8 @@ namespace xb {
       // Mutators
       member_doc(os, docs, "Insert an element into " + n + ".");
       def(ftype + "::iterator " + n + "_insert(" + ftype +
-              "::const_iterator pos, const " + etype + "& value)",
-          "return " + d + ".insert(pos, value);");
+              "::const_iterator pos, " + etype + " value)",
+          "return " + d + ".insert(pos, std::move(value));");
       member_doc(os, docs, "Erase an element from " + n + ".");
       def(ftype + "::iterator " + n + "_erase(" + ftype +
               "::const_iterator pos)",
@@ -450,9 +450,8 @@ namespace xb {
 
       // Mutators
       def(ftype + "::iterator",
-          n + "_insert(" + ftype + "::const_iterator pos, const " + etype +
-              "& value)",
-          "return " + d + ".insert(pos, value);");
+          n + "_insert(" + ftype + "::const_iterator pos, " + etype + " value)",
+          "return " + d + ".insert(pos, std::move(value));");
       def(ftype + "::iterator", n + "_erase(" + ftype + "::const_iterator pos)",
           "return " + d + ".erase(pos);");
       def("void", n + "_push_back(" + etype + " value)",
@@ -634,7 +633,7 @@ namespace xb {
 
     void
     write_forward_decl(std::ostream& os, const cpp_forward_decl& d) {
-      os << "struct " << d.name << ";\n";
+      os << (d.is_class ? "class " : "struct ") << d.name << ";\n";
     }
 
     void
