@@ -276,6 +276,42 @@ namespace xb {
           d + ".push_back(std::move(value));");
       def("void " + n + "_pop_back()", d + ".pop_back();");
 
+      // emplace with forwarding
+      if (emit_body) {
+        os << "\n  template <typename... Args>\n";
+        os << "  " << ftype << "::iterator " << n << "_emplace(" << ftype
+           << "::const_iterator pos, Args&&... args) { return " << d
+           << ".emplace(pos, std::forward<Args>(args)...); }\n";
+      } else {
+        os << "\n  template <typename... Args>\n";
+        os << "  " << ftype << "::iterator " << n << "_emplace(" << ftype
+           << "::const_iterator pos, Args&&... args);\n";
+      }
+
+      // insert_range
+      if (emit_body) {
+        os << "\n  template <typename Range>\n";
+        os << "  void " << n << "_insert_range(" << ftype
+           << "::const_iterator pos, Range&& range)"
+           << " { " << d
+           << ".insert(pos, std::begin(range), std::end(range)); }\n";
+      } else {
+        os << "\n  template <typename Range>\n";
+        os << "  void " << n << "_insert_range(" << ftype
+           << "::const_iterator pos, Range&& range);\n";
+      }
+
+      // append_range
+      if (emit_body) {
+        os << "\n  template <typename Range>\n";
+        os << "  void " << n << "_append_range(Range&& range)"
+           << " { " << d << ".insert(" << d
+           << ".end(), std::begin(range), std::end(range)); }\n";
+      } else {
+        os << "\n  template <typename Range>\n";
+        os << "  void " << n << "_append_range(Range&& range);\n";
+      }
+
       // emplace_back with forwarding
       if (emit_body) {
         os << "\n  template <typename... Args>\n";

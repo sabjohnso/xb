@@ -896,6 +896,9 @@ TEST_CASE("sequence field emits iterator-based API in class decl",
   CHECK(result.find("void items_push_back(") != std::string::npos);
   CHECK(result.find("void items_pop_back();") != std::string::npos);
   CHECK(result.find("items_emplace_back(") != std::string::npos);
+  CHECK(result.find("items_emplace(") != std::string::npos);
+  CHECK(result.find("items_insert_range(") != std::string::npos);
+  CHECK(result.find("items_append_range(") != std::string::npos);
 
   // Should NOT have the old container-ref return
   CHECK(result.find("const container_data::items_type& items() const") ==
