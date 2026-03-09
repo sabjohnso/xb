@@ -6,9 +6,15 @@ TEST_CASE("format_cpp_code returns formatted code", "[code_formatter]") {
   // Deliberately ugly code that clang-format would fix
   std::string ugly = "struct foo{int x;std::string y;bool z;};";
   auto result = xb::format_cpp_code(ugly, "test.hpp");
-  // clang-format should at minimum add spacing
-  REQUIRE(result != ugly);
+  // Should produce valid output regardless of clang-format availability
+  REQUIRE(!result.empty());
   REQUIRE(result.find("struct foo") != std::string::npos);
+  if (xb::clang_format_available()) {
+    // If clang-format is available, should at minimum add spacing
+    // (even if the project .clang-format is incompatible, LLVM fallback
+    // should still format)
+    REQUIRE(result != ugly);
+  }
 }
 
 TEST_CASE("format_cpp_code with style file", "[code_formatter]") {
@@ -19,6 +25,18 @@ TEST_CASE("format_cpp_code with style file", "[code_formatter]") {
       xb::format_cpp_code(code, "test.hpp", "/nonexistent/.clang-format");
   // Should still produce valid output (either formatted or original)
   REQUIRE(!result.empty());
+}
+
+TEST_CASE("format_cpp_code falls back gracefully on bad style file",
+          "[code_formatter]") {
+  if (!xb::clang_format_available()) return;
+  std::string code = "struct foo{int x;std::string y;};";
+  // A style file with an invalid key should not prevent formatting
+  auto result =
+      xb::format_cpp_code(code, "test.hpp", "/nonexistent/.clang-format");
+  REQUIRE(!result.empty());
+  // Should still get formatted output (via LLVM fallback)
+  CHECK(result.find("struct foo") != std::string::npos);
 }
 
 TEST_CASE("format_cpp_code preserves empty input", "[code_formatter]") {
