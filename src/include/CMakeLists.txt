@@ -14,44 +14,9 @@ install(TARGETS xb_header
   LIBRARY DESTINATION ${xb_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${xb_INSTALL_LIBDIR})
 
-install(FILES
-  ${CMAKE_CURRENT_BINARY_DIR}/xb/config.hpp
-  xb/qname.hpp
-  xb/any_attribute.hpp
-  xb/any_element.hpp
-  xb/integer.hpp
-  xb/decimal.hpp
-  xb/year_month_duration.hpp
-  xb/day_time_duration.hpp
-  xb/duration.hpp
-  xb/date.hpp
-  xb/time.hpp
-  xb/date_time.hpp
-  xb/xml_reader.hpp
-  xb/xml_writer.hpp
-  xb/expat_reader.hpp
-  xb/ostream_writer.hpp
-  xb/type_map.hpp
-  xb/schema_fwd.hpp
-  xb/occurrence.hpp
-  xb/facet_set.hpp
-  xb/wildcard.hpp
-  xb/simple_type.hpp
-  xb/element_decl.hpp
-  xb/attribute_decl.hpp
-  xb/model_group.hpp
-  xb/content_type.hpp
-  xb/complex_type.hpp
-  xb/model_group_def.hpp
-  xb/attribute_group_def.hpp
-  xb/schema.hpp
-  xb/schema_parser.hpp
-  xb/schema_set.hpp
-  xb/cpp_code.hpp
-  xb/cpp_writer.hpp
-  xb/naming.hpp
-  xb/codegen.hpp
-  xb/xml_value.hpp
-  xb/xml_io.hpp
-  xb/json_value.hpp
+install(DIRECTORY xb/
+  DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb
+  FILES_MATCHING REGEX "\\.hpp$")
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/xb/config.hpp
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb)
