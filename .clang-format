@@ -111,7 +111,7 @@ BreakTemplateDeclarations: Yes
 AllowAllArgumentsOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
 BinPackArguments: true
-BinPackParameters: BinPack
+BinPackParameters: true
 
 # --- Includes ---
 SortIncludes: CaseInsensitive

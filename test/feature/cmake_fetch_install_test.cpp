@@ -12,6 +12,7 @@ namespace fs = std::filesystem;
 
 static const std::string build_dir = STRINGIFY(XB_BUILD_DIR);
 static const std::string schema_dir = STRINGIFY(XB_SCHEMA_DIR);
+static const std::string build_config = STRINGIFY(XB_BUILD_CONFIG);
 
 static int
 exit_code(int status) {
@@ -56,8 +57,8 @@ TEST_CASE("install and find_package with xb_fetch_schemas",
   int rc;
 
   // Step 1: Install xb to a local prefix
-  rc = run_cmd("cmake --install " + build_dir + " --config Release --prefix " +
-                   prefix.string(),
+  rc = run_cmd("cmake --install " + build_dir + " --config " + build_config +
+                   " --prefix " + prefix.string(),
                output);
   INFO("install output:\n" << output);
   REQUIRE(rc == 0);

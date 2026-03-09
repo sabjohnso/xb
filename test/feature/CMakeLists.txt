@@ -97,5 +97,6 @@ target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 target_compile_definitions(xb_cmake_fetch_install_test PRIVATE
   XB_BUILD_DIR=${CMAKE_BINARY_DIR}
-  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
+  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema
+  XB_BUILD_CONFIG=$<CONFIG>)
 add_test(NAME xb_cmake_fetch_install_test COMMAND xb_cmake_fetch_install_test)
