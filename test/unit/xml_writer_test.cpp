@@ -181,6 +181,28 @@ TEST_CASE("writer: xml_declaration", "[xml_writer]") {
 <root/>)");
 }
 
+TEST_CASE("writer: escape whitespace in attribute values", "[xml_writer]") {
+  std::ostringstream os;
+  ostream_writer writer(os);
+
+  writer.start_element({"", "e"});
+  writer.attribute({"", "v"}, "a\tb\nc\rd");
+  writer.end_element();
+
+  CHECK(os.str() == R"(<e v="a&#9;b&#10;c&#13;d"/>)");
+}
+
+TEST_CASE("writer: escape carriage return in text content", "[xml_writer]") {
+  std::ostringstream os;
+  ostream_writer writer(os);
+
+  writer.start_element({"", "e"});
+  writer.characters("a\rb");
+  writer.end_element();
+
+  CHECK(os.str() == "<e>a&#13;b</e>");
+}
+
 TEST_CASE("writer: namespace bindings are scoped to elements", "[xml_writer]") {
   std::ostringstream os;
   ostream_writer writer(os);

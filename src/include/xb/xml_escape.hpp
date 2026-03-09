@@ -18,6 +18,9 @@ namespace xb {
         case '&':
           os << "&amp;";
           break;
+        case '\r':
+          os << "&#13;";
+          break;
         default:
           os << c;
           break;
@@ -40,6 +43,15 @@ namespace xb {
           break;
         case '"':
           os << "&quot;";
+          break;
+        case '\t':
+          os << "&#9;";
+          break;
+        case '\n':
+          os << "&#10;";
+          break;
+        case '\r':
+          os << "&#13;";
           break;
         default:
           os << c;
