@@ -1,5 +1,6 @@
 #include <xb/wsdl2_resolver.hpp>
 
+#include <algorithm>
 #include <set>
 #include <stdexcept>
 #include <string>
