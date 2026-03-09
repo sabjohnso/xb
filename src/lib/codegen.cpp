@@ -6,6 +6,7 @@
 #include "codegen_internal.hpp"
 #include "json_codegen.hpp"
 
+#include <algorithm>
 #include <map>
 #include <set>
 
