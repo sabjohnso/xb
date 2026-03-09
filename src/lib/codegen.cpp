@@ -3328,6 +3328,7 @@ namespace xb {
         auto translated = translate_xpath_assertion(a.test, ctx);
         if (!translated.has_value()) {
           // Unsupported expression: emit warning, function returns true
+          fn.parameters = "[[maybe_unused]] " + fn.parameters;
           fn.body = "  // WARNING: unsupported assertion: '" + a.test + "'\n";
           fn.body += "  return true;\n";
           return fn;
@@ -3387,6 +3388,7 @@ namespace xb {
       for (const auto& a : st.assertions()) {
         auto translated = translate_xpath_assertion(a.test, ctx);
         if (!translated.has_value()) {
+          fn.parameters = "[[maybe_unused]] " + fn.parameters;
           fn.body = "  // WARNING: unsupported assertion: '" + a.test + "'\n";
           fn.body += "  return true;\n";
           return fn;

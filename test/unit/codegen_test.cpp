@@ -3373,6 +3373,7 @@ TEST_CASE("unsupported XPath in assertion: WARNING comment, returns true",
   REQUIRE(fn != nullptr);
   CHECK(fn->body.find("WARNING") != std::string::npos);
   CHECK(fn->body.find("return true") != std::string::npos);
+  CHECK(fn->parameters.find("[[maybe_unused]]") != std::string::npos);
 }
 
 // ===== Facet validation: range facets =====
