@@ -95,10 +95,6 @@ DerivePointerAlignment: false
 
 # --- Blank Lines ---
 MaxEmptyLinesToKeep: 1
-KeepEmptyLines:
-  AtEndOfFile: false
-  AtStartOfBlock: false
-  AtStartOfFile: false
 
 # --- Breaking ---
 BreakAfterReturnType: All
