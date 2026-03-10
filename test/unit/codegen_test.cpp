@@ -2486,6 +2486,53 @@ TEST_CASE("open content: appliesToEmpty=false, empty type: no open_content "
   CHECK(f == nullptr);
 }
 
+TEST_CASE("empty type: write function parameters are maybe_unused",
+          "[codegen][empty_type]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "EmptyType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* fn = find_function(files[0], "write_empty_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.empty());
+  CHECK(fn->parameters.find("[[maybe_unused]]") != std::string::npos);
+}
+
+TEST_CASE("empty type: read function reader parameter is maybe_unused",
+          "[codegen][empty_type]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "EmptyType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* fn = find_function(files[0], "read_empty_type");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->parameters.find("[[maybe_unused]]") != std::string::npos);
+}
+
 TEST_CASE("open content: appliesToEmpty=true, empty type: gets open_content "
           "field",
           "[codegen][open_content]") {

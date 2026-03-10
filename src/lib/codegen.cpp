@@ -2351,6 +2351,10 @@ namespace xb {
         }
       }
 
+      if (body.empty())
+        fn.parameters = "[[maybe_unused]] const " + struct_name +
+                        "& value, [[maybe_unused]] xb::xml_writer& writer";
+
       fn.body = body;
       return fn;
     }
@@ -3133,6 +3137,10 @@ namespace xb {
       }
 
       body += "  return result;\n";
+
+      if (body.find("reader") == std::string::npos)
+        fn.parameters = "[[maybe_unused]] xb::xml_reader& reader";
+
       fn.body = body;
       return fn;
     }
