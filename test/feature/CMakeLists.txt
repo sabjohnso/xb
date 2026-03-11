@@ -82,15 +82,43 @@ target_compile_definitions(xb_json_round_trip_test PRIVATE
   XB_SANITIZERS=$<IF:$<CONFIG:RelWithDebInfo>,1,0>)
 add_test(NAME xb_json_round_trip_test COMMAND xb_json_round_trip_test)
 
+# xeag-lexer IR tests (schema parsing, codegen IR inspection — no compilation)
 add_executable(xb_xeag_lexer_test xeag_lexer_test.cpp)
 target_link_libraries(xb_xeag_lexer_test PRIVATE Catch2::Catch2WithMain xb::xb)
 target_compile_features(xb_xeag_lexer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 target_compile_definitions(xb_xeag_lexer_test PRIVATE
-  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema
-  XB_INCLUDE_DIR=${PROJECT_SOURCE_DIR}/src/include
-  XB_LIB_FILE=$<TARGET_FILE:xb::xb>
-  XB_SANITIZERS=$<IF:$<CONFIG:RelWithDebInfo>,1,0>)
+  XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
 add_test(NAME xb_xeag_lexer_test COMMAND xb_xeag_lexer_test)
+
+# xeag-lexer: wrapped file-per-type generated types
+xb_add_library(
+  TARGET xb_xeag_wrapped_types
+  SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xeag-lexer.xsd
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_xeag_wrapped
+  MODE SPLIT
+  ENCAPSULATION wrapped)
+
+add_executable(xb_xeag_lexer_wrapped_test
+  xeag_lexer_wrapped_test.cpp
+  ${CMAKE_CURRENT_BINARY_DIR}/xb_xeag_wrapped/lexer.cpp)
+target_link_libraries(xb_xeag_lexer_wrapped_test
+  PRIVATE Catch2::Catch2WithMain xb_xeag_wrapped_types)
+target_compile_features(xb_xeag_lexer_wrapped_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xeag_lexer_wrapped_test COMMAND xb_xeag_lexer_wrapped_test)
+
+# xeag-lexer: header-only generated types
+xb_add_library(
+  TARGET xb_xeag_header_only_types
+  SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xeag-lexer.xsd
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_xeag_header_only
+  MODE HEADER_ONLY)
+
+add_executable(xb_xeag_lexer_header_only_test xeag_lexer_header_only_test.cpp)
+target_link_libraries(xb_xeag_lexer_header_only_test
+  PRIVATE Catch2::Catch2WithMain xb_xeag_header_only_types)
+target_compile_features(xb_xeag_lexer_header_only_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xeag_lexer_header_only_test COMMAND xb_xeag_lexer_header_only_test)
+
 
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
