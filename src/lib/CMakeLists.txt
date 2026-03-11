@@ -64,12 +64,14 @@ if(OPENSSL_FOUND)
 endif()
 
 target_link_libraries(xb
-  PUBLIC xb_header
+  PUBLIC xb::header
   PRIVATE EXPAT::EXPAT)
 
 target_compile_features(xb PRIVATE cxx_std_${xb_CXX_STANDARD})
 
 set_target_properties(xb PROPERTIES EXPORT_NAME xb)
+
+add_library(xb::xb ALIAS xb)
 
 install(TARGETS xb
   EXPORT xb_EXPORTS

@@ -14,6 +14,8 @@ install(TARGETS xb_header
   LIBRARY DESTINATION ${xb_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${xb_INSTALL_LIBDIR})
 
+add_library(xb::header ALIAS xb_header)
+
 install(DIRECTORY xb/
   DESTINATION ${xb_INSTALL_INCLUDEDIR}/xb
   FILES_MATCHING REGEX "\\.hpp$")
