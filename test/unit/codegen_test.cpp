@@ -2315,6 +2315,109 @@ TEST_CASE("file_per_type source includes umbrella + runtime",
   CHECK(has_runtime);
 }
 
+TEST_CASE("file_per_type per-type headers include their dependencies",
+          "[codegen][file_per_type]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  // Enum type: Color
+  facet_set facets;
+  facets.enumeration = {"Red", "Green", "Blue"};
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "Color"},
+                                simple_type_variety::atomic,
+                                qname{xs, "string"}, facets));
+
+  // Complex type with a field of type Color
+  std::vector<particle> p;
+  p.emplace_back(element_decl(qname{"http://example.com/test", "color"},
+                              qname{"http://example.com/test", "Color"}));
+  p.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                              qname{xs, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(p));
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ShapeType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::file_per_type;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Find the ShapeType per-type header
+  const cpp_file* shape_header = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header &&
+        f.filename.find("shape_type") != std::string::npos)
+      shape_header = &f;
+  }
+  REQUIRE(shape_header != nullptr);
+
+  // ShapeType references Color, so its header must include color's header
+  bool has_color_include = false;
+  for (const auto& inc : shape_header->includes) {
+    if (inc.path.find("color") != std::string::npos) has_color_include = true;
+  }
+  CHECK(has_color_include);
+}
+
+TEST_CASE("file_per_type wrapped per-type headers include enum dependencies",
+          "[codegen][file_per_type]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::string xs = "http://www.w3.org/2001/XMLSchema";
+
+  // Enum type: Color
+  facet_set facets;
+  facets.enumeration = {"Red", "Green", "Blue"};
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "Color"},
+                                simple_type_variety::atomic,
+                                qname{xs, "string"}, facets));
+
+  // Complex type with optional Color field
+  std::vector<particle> p;
+  p.emplace_back(element_decl(qname{"http://example.com/test", "color"},
+                              qname{"http://example.com/test", "Color"}, 0, 1));
+  model_group seq(compositor_kind::sequence, std::move(p));
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "ShapeType"},
+                                  false, false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.mode = output_mode::file_per_type;
+  opts.encapsulation = encapsulation_mode::wrapped;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Find the ShapeType per-type header
+  const cpp_file* shape_header = nullptr;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header &&
+        f.filename.find("shape_type") != std::string::npos)
+      shape_header = &f;
+  }
+  REQUIRE(shape_header != nullptr);
+
+  // ShapeType data struct references Color, so its header must include color
+  bool has_color_include = false;
+  for (const auto& inc : shape_header->includes) {
+    if (inc.path.find("color") != std::string::npos) has_color_include = true;
+  }
+  CHECK(has_color_include);
+}
+
 // ===== Group: Open Content =====
 
 TEST_CASE("open content: type with open content gets open_content field",

@@ -3870,7 +3870,11 @@ namespace xb {
                                file_kind::header, "", options_.header_suffix);
 
           // Add includes for cross-type dependencies within the namespace
-          auto deps = decl_dependencies(group.decls.back());
+          std::set<std::string> deps;
+          for (const auto& d : group.decls) {
+            auto d_deps = decl_dependencies(d);
+            deps.insert(d_deps.begin(), d_deps.end());
+          }
           for (const auto& dep_name : deps) {
             for (const auto& other : groups) {
               if (other.type_name == dep_name &&
