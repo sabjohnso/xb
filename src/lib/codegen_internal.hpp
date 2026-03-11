@@ -90,7 +90,7 @@ namespace xb {
 
     std::string
     qualify_fn(const std::string& prefix, const qname& qn) const {
-      std::string fn = prefix + to_cpp_identifier(qn.local_name());
+      std::string fn = prefix + type_name(qn.local_name());
       if (!qn.namespace_uri().empty() && qn.namespace_uri() != current_ns) {
         std::string ns = cpp_namespace_for(qn.namespace_uri(), options);
         if (!ns.empty()) return ns + "::" + fn;

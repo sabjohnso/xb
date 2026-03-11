@@ -119,6 +119,19 @@ target_link_libraries(xb_xeag_lexer_header_only_test
 target_compile_features(xb_xeag_lexer_header_only_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xeag_lexer_header_only_test COMMAND xb_xeag_lexer_header_only_test)
 
+# xeag-lexer: pascal naming style generated types
+xb_add_library(
+  TARGET xb_xeag_pascal_types
+  SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xeag-lexer.xsd
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_xeag_pascal
+  MODE HEADER_ONLY
+  TYPE_STYLE pascal)
+
+add_executable(xb_xeag_lexer_pascal_test xeag_lexer_pascal_test.cpp)
+target_link_libraries(xb_xeag_lexer_pascal_test
+  PRIVATE Catch2::Catch2WithMain xb_xeag_pascal_types)
+target_compile_features(xb_xeag_lexer_pascal_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xeag_lexer_pascal_test COMMAND xb_xeag_lexer_pascal_test)
 
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)

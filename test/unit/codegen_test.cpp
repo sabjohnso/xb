@@ -4709,6 +4709,94 @@ TEST_CASE("pascal_case type names in codegen", "[codegen]") {
   CHECK(st->fields[0].name == "name");
 }
 
+TEST_CASE("pascal_case read/write function names match type style",
+          "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  std::vector<particle> particles;
+  particles.emplace_back(element_decl(qname{"http://example.com/test", "name"},
+                                      qname{xs_ns, "string"}));
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "PersonType"}, false, false,
+                   std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.naming.type_style = naming_style::pascal_case;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  auto* read_fn = find_function(files[0], "read_PersonType");
+  auto* write_fn = find_function(files[0], "write_PersonType");
+  CHECK(read_fn != nullptr);
+  CHECK(write_fn != nullptr);
+
+  // Should NOT have snake_case versions
+  CHECK(find_function(files[0], "read_person_type") == nullptr);
+  CHECK(find_function(files[0], "write_person_type") == nullptr);
+}
+
+TEST_CASE("pascal_case read/write function bodies use pascal-cased calls",
+          "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  // Create two complex types where one references the other
+  std::vector<particle> inner_particles;
+  inner_particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "value"}, qname{xs_ns, "string"}));
+  model_group inner_seq(compositor_kind::sequence, std::move(inner_particles));
+  content_type inner_ct(content_kind::element_only,
+                        complex_content(qname{}, derivation_method::restriction,
+                                        std::move(inner_seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "InnerType"},
+                                  false, false, std::move(inner_ct)));
+
+  std::vector<particle> outer_particles;
+  outer_particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "inner"},
+                   qname{"http://example.com/test", "InnerType"}));
+  model_group outer_seq(compositor_kind::sequence, std::move(outer_particles));
+  content_type outer_ct(content_kind::element_only,
+                        complex_content(qname{}, derivation_method::restriction,
+                                        std::move(outer_seq)));
+  s.add_complex_type(complex_type(qname{"http://example.com/test", "OuterType"},
+                                  false, false, std::move(outer_ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.naming.type_style = naming_style::pascal_case;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(!files.empty());
+
+  // The read_OuterType function body should call read_InnerType, not
+  // read_inner_type
+  auto* fn = find_function(files[0], "read_OuterType");
+  REQUIRE(fn != nullptr);
+  CHECK(fn->body.find("read_InnerType") != std::string::npos);
+  CHECK(fn->body.find("read_inner_type") == std::string::npos);
+
+  auto* wfn = find_function(files[0], "write_OuterType");
+  REQUIRE(wfn != nullptr);
+  CHECK(wfn->body.find("write_InnerType") != std::string::npos);
+  CHECK(wfn->body.find("write_inner_type") == std::string::npos);
+}
+
 TEST_CASE("camel_case field names in codegen", "[codegen]") {
   schema s;
   s.set_target_namespace("http://example.com/test");
