@@ -1,10 +1,3 @@
-// GCC 12 emits a false -Wmaybe-uninitialized for std::variant containing
-// std::unique_ptr in particle::term_type at -O3. Suppress it here.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/codegen.hpp>
 #include <xb/cpp_writer.hpp>
 #include <xb/expat_reader.hpp>
@@ -218,10 +211,6 @@ compile_generated_files(const std::vector<cpp_file>& raw_files,
   auto main_path = tmp_dir / "main.cpp";
   {
     std::ofstream out(main_path);
-    out << "#if defined(__GNUC__) && !defined(__clang__)\n";
-    out << "#pragma GCC diagnostic push\n";
-    out << "#pragma GCC diagnostic ignored \"-Wmaybe-uninitialized\"\n";
-    out << "#endif\n\n";
     for (const auto& file : merged) {
       if (file.kind == file_kind::header)
         out << "#include \"" << file.filename << "\"\n";
@@ -282,10 +271,6 @@ build_and_run(const std::vector<cpp_file>& raw_files,
   auto main_path = tmp_dir / "main.cpp";
   {
     std::ofstream out(main_path);
-    out << "#if defined(__GNUC__) && !defined(__clang__)\n";
-    out << "#pragma GCC diagnostic push\n";
-    out << "#pragma GCC diagnostic ignored \"-Wmaybe-uninitialized\"\n";
-    out << "#endif\n\n";
     for (const auto& file : merged) {
       if (file.kind == file_kind::header)
         out << "#include \"" << file.filename << "\"\n";

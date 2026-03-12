@@ -1,10 +1,3 @@
-// GCC 12 emits a false -Wmaybe-uninitialized for std::variant containing
-// std::unique_ptr in particle::term_type at -O3. Suppress it here.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/codegen.hpp>
 #include <xb/cpp_writer.hpp>
 #include <xb/expat_reader.hpp>
@@ -46,11 +39,6 @@ build_and_run(const std::vector<cpp_file>& files, const std::string& test_name,
   auto main_path = tmp_dir / "main.cpp";
   {
     std::ofstream out(main_path);
-    // GCC warning suppression for generated variant code
-    out << "#if defined(__GNUC__) && !defined(__clang__)\n";
-    out << "#pragma GCC diagnostic push\n";
-    out << "#pragma GCC diagnostic ignored \"-Wmaybe-uninitialized\"\n";
-    out << "#endif\n\n";
     for (const auto& file : files) {
       if (file.kind == file_kind::header)
         out << "#include \"" << file.filename << "\"\n";
@@ -163,7 +151,7 @@ TEST_CASE("round-trip: sequence with attributes and enum",
 
   std::string test_code = R"(
 int main() {
-  using namespace example::com::order;
+  using namespace order;
 
   // Construct value
   order_type val;
@@ -253,7 +241,7 @@ TEST_CASE("round-trip: choice type", "[serialization][round-trip]") {
 
   std::string test_code = R"(
 int main() {
-  using namespace example::com::msg;
+  using namespace msg;
 
   // Test string alternative
   {
@@ -346,7 +334,7 @@ TEST_CASE("round-trip: cross-namespace schemas",
 
   std::string test_code = R"(
 int main() {
-  using namespace example::com::app;
+  using namespace app;
 
   entity_type val;
   val.id = "E001";
@@ -398,7 +386,7 @@ TEST_CASE("round-trip: xb-typemap.xsd", "[serialization][round-trip]") {
 
   std::string test_code = R"(
 int main() {
-  using namespace xb::dev::typemap;
+  using namespace typemap;
 
   // Construct a typemap with two mappings
   typemap_type val;
@@ -499,7 +487,7 @@ TEST_CASE("split mode round-trip: sequence with attributes",
 
   std::string test_code = R"(
 int main() {
-  using namespace example::com::order;
+  using namespace order;
 
   order_type val;
   val.id = "ABC123";
@@ -555,7 +543,7 @@ TEST_CASE("split mode round-trip: xb-typemap.xsd",
 
   std::string test_code = R"(
 int main() {
-  using namespace xb::dev::typemap;
+  using namespace typemap;
 
   typemap_type val;
 
@@ -632,7 +620,7 @@ TEST_CASE("round-trip: open content elements are preserved",
 
   std::string test_code = R"(
 int main() {
-  using namespace example::com::oc;
+  using namespace oc;
 
   // Build a FlexType with an open content element
   flex_type val;
@@ -747,7 +735,7 @@ TEST_CASE("round-trip: conditional type assignment",
 
   std::string test_code = R"(
 int main() {
-  using namespace example::com::cta;
+  using namespace cta;
 
   // Test car alternative
   {

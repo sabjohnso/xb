@@ -76,6 +76,14 @@
         },
         {
           "kind": "option",
+          "names": ["namespace-style"],
+          "doc": ["Namespace derivation: short (default, last URI segment) or full (mangled URI)."],
+          "type": "string",
+          "docv": "STYLE",
+          "default": "short"
+        },
+        {
+          "kind": "option",
           "names": ["header-suffix"],
           "doc": ["File suffix for generated headers (default: .hpp)."],
           "type": "string",

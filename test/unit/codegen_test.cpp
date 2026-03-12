@@ -1,10 +1,3 @@
-// GCC 12-13 emit a false -Wmaybe-uninitialized when constructing
-// particle objects (std::variant containing std::unique_ptr) at -O3.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/codegen.hpp>
 #include <xb/cpp_code.hpp>
 #include <xb/cpp_writer.hpp>
@@ -120,6 +113,91 @@ TEST_CASE("target namespace maps to C++ namespace", "[codegen]") {
   REQUIRE(files.size() == 1);
   REQUIRE(files[0].namespaces.size() == 1);
   CHECK(files[0].namespaces[0].name == "example::order");
+}
+
+TEST_CASE("default namespace uses short name from URI", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/order");
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  // No explicit namespace_map — should derive "order" from last URI segment
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  REQUIRE(files[0].namespaces.size() == 1);
+  CHECK(files[0].namespaces[0].name == "order");
+}
+
+TEST_CASE("full_uri namespace style restores old mangled names", "[codegen]") {
+  schema s;
+  s.set_target_namespace("http://example.com/order");
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+
+  codegen_options opts;
+  opts.ns_style = namespace_style::full_uri;
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+  REQUIRE(files[0].namespaces.size() == 1);
+  CHECK(files[0].namespaces[0].name == "example::com::order");
+}
+
+TEST_CASE("default namespace cross-reference uses short name", "[codegen]") {
+  // Schema with a type that references a type from another namespace
+  auto xs_ns = "http://www.w3.org/2001/XMLSchema";
+  auto ns_order = "http://example.com/order";
+  auto ns_types = "http://example.com/types";
+
+  std::vector<particle> p1;
+  p1.emplace_back(
+      element_decl(qname{ns_order, "item"}, qname{ns_types, "ItemType"}));
+  auto seq1 = model_group(compositor_kind::sequence, std::move(p1));
+  content_type ct1(content_kind::element_only,
+                   complex_content(qname{}, derivation_method::restriction,
+                                   std::move(seq1)));
+
+  schema s1;
+  s1.set_target_namespace(ns_order);
+  s1.add_complex_type(
+      complex_type(qname{ns_order, "OrderType"}, false, false, std::move(ct1)));
+
+  // Second schema defines ItemType
+  std::vector<particle> p2;
+  p2.emplace_back(
+      element_decl(qname{ns_types, "name"}, qname{xs_ns, "string"}));
+  auto seq2 = model_group(compositor_kind::sequence, std::move(p2));
+  content_type ct2(content_kind::element_only,
+                   complex_content(qname{}, derivation_method::restriction,
+                                   std::move(seq2)));
+
+  schema s2;
+  s2.set_target_namespace(ns_types);
+  s2.add_complex_type(
+      complex_type(qname{ns_types, "ItemType"}, false, false, std::move(ct2)));
+
+  schema_set ss;
+  ss.add(std::move(s1));
+  ss.add(std::move(s2));
+  ss.resolve();
+
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  REQUIRE(files.size() == 2);
+  // Both should use short namespace names
+  CHECK(files[0].namespaces[0].name == "order");
+  CHECK(files[1].namespaces[0].name == "types");
+
+  // The order schema's struct should reference types::item_type,
+  // not example::com::types::item_type
+  cpp_writer writer;
+  auto code = writer.write(files[0]);
+  INFO("Generated code:\n" << code);
+  CHECK(code.find("types::item_type") != std::string::npos);
+  CHECK(code.find("example::com::types") == std::string::npos);
 }
 
 // TDD step 3: Built-in type lookup

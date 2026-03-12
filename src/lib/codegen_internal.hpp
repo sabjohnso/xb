@@ -18,6 +18,7 @@ namespace xb {
     std::set<std::string>& referenced_namespaces;
     const std::map<std::string, std::string>* union_variant_map = nullptr;
     const std::set<qname>* cycle_types = nullptr;
+    const std::set<std::string>* all_namespaces = nullptr;
     const std::set<std::string>* schema_type_names = nullptr;
 
     bool
@@ -92,7 +93,7 @@ namespace xb {
     qualify_fn(const std::string& prefix, const qname& qn) const {
       std::string fn = prefix + type_name(qn.local_name());
       if (!qn.namespace_uri().empty() && qn.namespace_uri() != current_ns) {
-        std::string ns = cpp_namespace_for(qn.namespace_uri(), options);
+        std::string ns = resolve_namespace(qn.namespace_uri());
         if (!ns.empty()) return ns + "::" + fn;
       }
       return fn;
@@ -147,11 +148,19 @@ namespace xb {
 
       if (!qn.namespace_uri().empty() && qn.namespace_uri() != current_ns) {
         referenced_namespaces.insert(qn.namespace_uri());
-        std::string ns = cpp_namespace_for(qn.namespace_uri(), options);
+        std::string ns = resolve_namespace(qn.namespace_uri());
         if (!ns.empty()) return ns + "::" + name;
       }
 
       return name;
+    }
+
+  private:
+    std::string
+    resolve_namespace(const std::string& ns_uri) const {
+      if (options.ns_style == namespace_style::short_name && all_namespaces)
+        return default_namespace_for(ns_uri, *all_namespaces, options);
+      return cpp_namespace_for(ns_uri, options);
     }
   };
 

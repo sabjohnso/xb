@@ -1,10 +1,3 @@
-// GCC 12-13 emit a false -Wmaybe-uninitialized when constructing
-// particle objects (std::variant containing std::unique_ptr) at -O3.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/dtd_translator.hpp>
 
 #include <catch2/catch_test_macros.hpp>

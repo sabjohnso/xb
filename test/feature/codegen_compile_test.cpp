@@ -1,10 +1,3 @@
-// GCC 12 emits a false -Wmaybe-uninitialized for std::variant containing
-// std::unique_ptr in particle::term_type at -O3. Suppress it here.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/codegen.hpp>
 #include <xb/cpp_writer.hpp>
 #include <xb/expat_reader.hpp>

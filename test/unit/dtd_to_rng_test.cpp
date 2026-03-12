@@ -1,8 +1,3 @@
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/dtd_to_rng.hpp>
 
 #include <catch2/catch_test_macros.hpp>

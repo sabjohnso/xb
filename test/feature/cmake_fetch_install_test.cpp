@@ -84,7 +84,7 @@ TEST_CASE("install and find_package with xb_fetch_schemas",
 
   write_file(project / "main.cpp", "#include \"typemap.hpp\"\n"
                                    "int main() {\n"
-                                   "  xb::dev::typemap::typemap_type val;\n"
+                                   "  typemap::typemap_type val;\n"
                                    "  return val.mapping.empty() ? 0 : 1;\n"
                                    "}\n");
 

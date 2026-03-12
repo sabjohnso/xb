@@ -1,8 +1,3 @@
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/doc_generator.hpp>
 
 #include <xb/complex_type.hpp>

@@ -1,7 +1,3 @@
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/schema_to_dtd.hpp>
 
 #include <string>

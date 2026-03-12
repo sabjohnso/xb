@@ -1,10 +1,3 @@
-// GCC 12 emits a false -Wmaybe-uninitialized for std::variant containing
-// std::unique_ptr in particle::term_type at -O3. Suppress it here.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include "xb_main.hpp"
 
 #include <xb/code_formatter.hpp>
@@ -256,6 +249,10 @@ namespace {
     std::string encap_str = config.value("encapsulation", "raw-struct");
     if (encap_str == "wrapped")
       codegen_opts.encapsulation = xb::encapsulation_mode::wrapped;
+
+    std::string ns_style_str = config.value("namespace-style", "short");
+    if (ns_style_str == "full")
+      codegen_opts.ns_style = xb::namespace_style::full_uri;
 
     // Generate code
     std::vector<xb::cpp_file> files;

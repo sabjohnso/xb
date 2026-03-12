@@ -3537,6 +3537,12 @@ namespace xb {
       cycle_type_cpp_names.insert(apply_naming(
           ct.local_name(), naming_category::type_, options_.naming));
 
+    // Collect all namespace URIs for default_namespace_for() disambiguation
+    std::set<std::string> all_namespaces;
+    for (const auto& s : schemas_.schemas())
+      if (!s.target_namespace().empty())
+        all_namespaces.insert(s.target_namespace());
+
     for (const auto& s : schemas_.schemas()) {
       std::set<std::string> referenced_namespaces;
 
@@ -3557,6 +3563,7 @@ namespace xb {
                              referenced_namespaces,
                              &union_variant_map,
                              &cycle_types,
+                             &all_namespaces,
                              &schema_type_names};
 
       std::vector<cpp_decl> declarations;
@@ -3696,7 +3703,11 @@ namespace xb {
         }
       }
 
-      std::string ns_name = cpp_namespace_for(s.target_namespace(), options_);
+      std::string ns_name =
+          options_.ns_style == namespace_style::short_name
+              ? default_namespace_for(s.target_namespace(), all_namespaces,
+                                      options_)
+              : cpp_namespace_for(s.target_namespace(), options_);
       std::string stem = stem_for_namespace(s.target_namespace());
       std::string header_filename = stem + options_.header_suffix;
 

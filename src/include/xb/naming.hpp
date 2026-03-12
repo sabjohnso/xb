@@ -13,6 +13,7 @@ namespace xb {
   enum class validation_mode { none, on_demand };
   enum class json_mode { none, enabled };
   enum class encapsulation_mode { raw_struct, wrapped };
+  enum class namespace_style { short_name, full_uri };
 
   enum class naming_style {
     snake_case,
@@ -45,6 +46,7 @@ namespace xb {
     bool separate_fwd_header = false;
     bool generate_docs = false;
     encapsulation_mode encapsulation = encapsulation_mode::raw_struct;
+    namespace_style ns_style = namespace_style::short_name;
   };
 
   // -- Naming style conversions --

@@ -1,8 +1,3 @@
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/codegen.hpp>
 #include <xb/cpp_writer.hpp>
 
@@ -37,10 +32,6 @@ build_and_run_json(const std::vector<cpp_file>& files,
   auto main_path = tmp_dir / "main.cpp";
   {
     std::ofstream out(main_path);
-    out << "#if defined(__GNUC__) && !defined(__clang__)\n";
-    out << "#pragma GCC diagnostic push\n";
-    out << "#pragma GCC diagnostic ignored \"-Wmaybe-uninitialized\"\n";
-    out << "#endif\n\n";
     for (const auto& file : files) {
       if (file.kind == file_kind::header)
         out << "#include \"" << file.filename << "\"\n";
@@ -124,7 +115,7 @@ TEST_CASE("json round-trip: struct with string and int fields",
   auto files = codegen(ss, type_map::defaults(), opts).generate();
 
   std::string test_code = R"(
-using namespace example::com::test;
+using namespace test;
 
 int main() {
   person p;
@@ -182,7 +173,7 @@ TEST_CASE("json round-trip: enum type", "[json][round-trip]") {
   auto files = codegen(ss, type_map::defaults(), opts).generate();
 
   std::string test_code = R"(
-using namespace example::com::test;
+using namespace test;
 
 int main() {
   preference p;
@@ -235,7 +226,7 @@ TEST_CASE("json round-trip: optional field", "[json][round-trip]") {
   auto files = codegen(ss, type_map::defaults(), opts).generate();
 
   std::string test_code = R"(
-using namespace example::com::test;
+using namespace test;
 
 int main() {
   // Test with value present

@@ -1,9 +1,3 @@
-// GCC false-positive: unique_ptr inside std::variant triggers
-// -Wmaybe-uninitialized through deeply inlined variant internals.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
 #include <xb/dtd_translator.hpp>
 
 #include <unordered_map>
