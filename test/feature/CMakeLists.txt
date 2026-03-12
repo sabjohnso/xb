@@ -90,17 +90,15 @@ target_compile_definitions(xb_xeag_lexer_test PRIVATE
   XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
 add_test(NAME xb_xeag_lexer_test COMMAND xb_xeag_lexer_test)
 
-# xeag-lexer: wrapped file-per-type generated types
+# xeag-lexer: wrapped header-only generated types
 xb_add_library(
   TARGET xb_xeag_wrapped_types
   SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xeag-lexer.xsd
   OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_xeag_wrapped
-  MODE SPLIT
+  MODE HEADER_ONLY
   ENCAPSULATION wrapped)
 
-add_executable(xb_xeag_lexer_wrapped_test
-  xeag_lexer_wrapped_test.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/xb_xeag_wrapped/lexer.cpp)
+add_executable(xb_xeag_lexer_wrapped_test xeag_lexer_wrapped_test.cpp)
 target_link_libraries(xb_xeag_lexer_wrapped_test
   PRIVATE Catch2::Catch2WithMain xb_xeag_wrapped_types)
 target_compile_features(xb_xeag_lexer_wrapped_test PRIVATE cxx_std_${xb_CXX_STANDARD})
