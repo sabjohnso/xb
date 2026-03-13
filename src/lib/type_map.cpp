@@ -19,6 +19,8 @@ namespace xb {
     map.set("anyURI", {"std::string", "<string>"});
     map.set("ID", {"std::string", "<string>"});
     map.set("IDREF", {"std::string", "<string>"});
+    map.set("Name", {"std::string", "<string>"});
+    map.set("NCName", {"std::string", "<string>"});
     map.set("NMTOKEN", {"std::string", "<string>"});
     map.set("language", {"std::string", "<string>"});
     map.set("ENTITY", {"std::string", "<string>"});
@@ -103,6 +105,8 @@ namespace xb {
         "ID",
         "IDREF",
         "IDREFS",
+        "Name",
+        "NCName",
         "NMTOKEN",
         "NMTOKENS",
         "ENTITY",

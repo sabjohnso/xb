@@ -45,6 +45,8 @@
       <xs:enumeration value="QName"/>
       <xs:enumeration value="ID"/>
       <xs:enumeration value="IDREF"/>
+      <xs:enumeration value="Name"/>
+      <xs:enumeration value="NCName"/>
       <xs:enumeration value="NMTOKEN"/>
       <xs:enumeration value="language"/>
     </xs:restriction>

@@ -2704,9 +2704,92 @@ namespace xb {
             } else if constexpr (std::is_same_v<T,
                                                 std::unique_ptr<model_group>>) {
               if (term) {
-                for (const auto& sp : term->particles())
-                  emit_read_particle_match(body, sp, resolver,
-                                           containing_type_name, first_branch);
+                bool inline_is_choice =
+                    term->compositor() == compositor_kind::choice;
+                bool inline_repeating =
+                    p.occurs.is_unbounded() || p.occurs.max_occurs > 1;
+
+                if (inline_is_choice && inline_repeating) {
+                  // Inline choice with repeating cardinality: push_back
+                  // into the choice variant vector
+                  for (const auto& sp : term->particles()) {
+                    std::visit(
+                        [&](const auto& gt) {
+                          using GT = std::decay_t<decltype(gt)>;
+                          if constexpr (std::is_same_v<GT, element_decl>) {
+                            std::string qn =
+                                "xb::qname{\"" + gt.name().namespace_uri() +
+                                "\", \"" + gt.name().local_name() + "\"}";
+                            std::string kw = first_branch ? "if" : "else if";
+                            body += "    " + kw + " (name == " + qn + ") {\n";
+                            bool is_cycle =
+                                resolver.is_cycle_type(gt.type_name());
+                            if (is_complex_type(resolver.schemas,
+                                                gt.type_name())) {
+                              std::string read_fn =
+                                  resolver.qualify_fn("read_", gt.type_name());
+                              std::string cpp_type =
+                                  resolver.resolve(gt.type_name());
+                              if (is_cycle)
+                                body += "      result.choice.push_back("
+                                        "std::make_unique<" +
+                                        cpp_type + ">(" + read_fn +
+                                        "(reader)));\n";
+                              else
+                                body += "      result.choice.push_back(" +
+                                        read_fn + "(reader));\n";
+                            } else {
+                              std::string cpp_type =
+                                  resolver.resolve(gt.type_name());
+                              body += "      result.choice.push_back("
+                                      "xb::read_simple<" +
+                                      cpp_type + ">(reader));\n";
+                            }
+                            body += "    }\n";
+                            first_branch = false;
+                          } else if constexpr (std::is_same_v<GT,
+                                                              element_ref>) {
+                            auto* elem = resolver.schemas.find_element(gt.ref);
+                            if (!elem) return;
+                            std::string qn =
+                                "xb::qname{\"" + elem->name().namespace_uri() +
+                                "\", \"" + elem->name().local_name() + "\"}";
+                            std::string kw = first_branch ? "if" : "else if";
+                            body += "    " + kw + " (name == " + qn + ") {\n";
+                            bool is_cycle =
+                                resolver.is_cycle_type(elem->type_name());
+                            if (is_complex_type(resolver.schemas,
+                                                elem->type_name())) {
+                              std::string read_fn = resolver.qualify_fn(
+                                  "read_", elem->type_name());
+                              std::string cpp_type =
+                                  resolver.resolve(elem->type_name());
+                              if (is_cycle)
+                                body += "      result.choice.push_back("
+                                        "std::make_unique<" +
+                                        cpp_type + ">(" + read_fn +
+                                        "(reader)));\n";
+                              else
+                                body += "      result.choice.push_back(" +
+                                        read_fn + "(reader));\n";
+                            } else {
+                              std::string cpp_type =
+                                  resolver.resolve(elem->type_name());
+                              body += "      result.choice.push_back("
+                                      "xb::read_simple<" +
+                                      cpp_type + ">(reader));\n";
+                            }
+                            body += "    }\n";
+                            first_branch = false;
+                          }
+                        },
+                        sp.term);
+                  }
+                } else {
+                  for (const auto& sp : term->particles())
+                    emit_read_particle_match(
+                        body, sp, resolver, containing_type_name, first_branch);
+                }
               }
             } else if constexpr (std::is_same_v<T, wildcard>) {
               std::string kw = first_branch ? "if" : "else if";

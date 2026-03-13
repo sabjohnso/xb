@@ -1,0 +1,1121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  xb-encoding.xsd — Binary Encoding Specification (BES) schema
+
+  A BES document maps XSD data model types to wire-level binary layouts.
+  This schema defines the vocabulary for that mapping.
+
+  Namespace: http://xb.dev/encoding
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:xbe="http://xb.dev/encoding"
+           targetNamespace="http://xb.dev/encoding"
+           elementFormDefault="qualified">
+
+  <!-- ===================================================================
+       Root element
+       =================================================================== -->
+
+  <xs:element name="encoding" type="xbe:encodingType"/>
+
+  <!-- ===================================================================
+       Top-level document type
+       =================================================================== -->
+
+  <xs:complexType name="encodingType">
+    <xs:annotation>
+      <xs:documentation>
+        Root of a Binary Encoding Specification document.  Declares the
+        target XSD schema, encoding defaults, imports from other BES
+        documents, framing definitions, frame stacks, and message
+        encodings.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="defaults"    type="xbe:defaultsType"
+                  minOccurs="0"/>
+      <xs:element name="import"      type="xbe:importType"
+                  minOccurs="0" maxOccurs="unbounded"/>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="framing"     type="xbe:framingType"/>
+        <xs:element name="frame-stack" type="xbe:frameStackType"/>
+        <xs:element name="message"     type="xbe:messageType"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="target-namespace" type="xs:anyURI" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Namespace of the XSD schema this BES targets.  When omitted,
+          the BES applies to a schema identified by location only.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="target-schema" type="xs:anyURI" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Location (path or URL) of the XSD schema this BES targets.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Schema-level defaults
+       =================================================================== -->
+
+  <xs:complexType name="defaultsType">
+    <xs:annotation>
+      <xs:documentation>
+        Schema-wide default encoding parameters.  Any attribute here may
+        be overridden per-message or per-field.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="byte-order" type="xbe:byteOrderType"
+                  default="big-endian"/>
+    <xs:attribute name="bit-order"  type="xbe:bitOrderType"
+                  default="msb-first"/>
+    <xs:attribute name="alignment"  type="xs:positiveInteger"
+                  default="8">
+      <xs:annotation>
+        <xs:documentation>
+          Default field alignment in bits.  Common values: 1 (packed),
+          8 (byte-aligned), 32, 64.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="string-padding" type="xbe:paddingType"
+                  default="space"/>
+    <xs:attribute name="string-encoding" type="xbe:charsetType"
+                  default="ascii"/>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       BES import (composition/cascade)
+       =================================================================== -->
+
+  <xs:complexType name="importType">
+    <xs:annotation>
+      <xs:documentation>
+        Import another BES document as a base.  Rules in the importing
+        document override rules from the imported document when selectors
+        have equal or higher specificity.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="href" type="xs:anyURI" use="required"/>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Framing definitions
+       =================================================================== -->
+
+  <xs:complexType name="framingType">
+    <xs:annotation>
+      <xs:documentation>
+        A named, reusable frame definition.  Describes the header
+        structure of one protocol layer: fields, length determinant,
+        discriminant, and where the payload begins.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="xbe:framingBodyGroup"
+                minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name"       type="xs:NCName" use="required"/>
+    <xs:attribute name="byte-order" type="xbe:byteOrderType"
+                  use="optional"/>
+    <xs:attribute name="bit-order"  type="xbe:bitOrderType"
+                  use="optional"/>
+  </xs:complexType>
+
+  <xs:group name="framingBodyGroup">
+    <xs:annotation>
+      <xs:documentation>
+        Elements that may appear inside a framing definition.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:choice>
+      <xs:element name="field"         type="xbe:fieldType"/>
+      <xs:element name="padding"       type="xbe:paddingFieldType"/>
+      <xs:element name="length"        type="xbe:lengthType"/>
+      <xs:element name="discriminant"  type="xbe:discriminantType"/>
+      <xs:element name="delimiter"     type="xbe:delimiterType"/>
+      <xs:element name="save-position" type="xbe:savePositionType"/>
+      <xs:element name="computed-field" type="xbe:computedFieldType"/>
+      <xs:element name="repeat"        type="xbe:repeatType"/>
+      <xs:element name="payload"       type="xbe:payloadType"/>
+    </xs:choice>
+  </xs:group>
+
+  <!-- ===================================================================
+       Frame stack (nested framing composition)
+       =================================================================== -->
+
+  <xs:complexType name="frameStackType">
+    <xs:annotation>
+      <xs:documentation>
+        Composes framing layers into a stack.  Each layer peels its
+        header, validates its discriminant, and passes the payload to the
+        next layer.  The innermost layer's payload is the application
+        message.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="layer" type="xbe:layerType"
+                  maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:NCName" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="layerType">
+    <xs:annotation>
+      <xs:documentation>
+        One layer in a frame stack.  References a named framing
+        definition and optionally constrains the discriminant value
+        expected from the layer above.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="ref" type="xs:NCName" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the framing definition this layer uses.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="match" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Discriminant field name from the referenced framing whose
+          value must equal the 'value' attribute for this layer to
+          apply.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="value" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Expected discriminant value (decimal or 0x hex literal).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Message encoding
+       =================================================================== -->
+
+  <xs:complexType name="messageType">
+    <xs:annotation>
+      <xs:documentation>
+        Encoding for one message (XSD complex type).  Contains a
+        selector identifying the target XSD type, an optional
+        discriminant value, and field-level encoding instructions.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="selector"   type="xbe:selectorType"
+                  minOccurs="0"/>
+      <xs:group ref="xbe:messageBodyGroup"
+                minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="extensions" type="xbe:extensionsType"
+                  minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:NCName" use="required"/>
+    <xs:attribute name="type" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Shorthand for a qualified-name selector: the XSD type name
+          (optionally namespace-prefixed) this message encodes.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="discriminant-value" type="xs:string"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          The discriminant value that identifies this message type
+          within its framing context (decimal, 0x hex, or character
+          literal).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="framing" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the framing definition that wraps this message.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="frame-stack" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the frame stack within which this message appears.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="byte-order" type="xbe:byteOrderType"
+                  use="optional"/>
+    <xs:attribute name="bit-order"  type="xbe:bitOrderType"
+                  use="optional"/>
+  </xs:complexType>
+
+  <xs:group name="messageBodyGroup">
+    <xs:annotation>
+      <xs:documentation>
+        Elements that may appear inside a message encoding body.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:choice>
+      <xs:element name="field"          type="xbe:fieldType"/>
+      <xs:element name="padding"        type="xbe:paddingFieldType"/>
+      <xs:element name="constant"       type="xbe:constantType"/>
+      <xs:element name="wire-field"     type="xbe:wireFieldType"/>
+      <xs:element name="group"          type="xbe:groupType"/>
+      <xs:element name="choice"         type="xbe:choiceType"/>
+      <xs:element name="length"         type="xbe:lengthType"/>
+      <xs:element name="discriminant"   type="xbe:discriminantType"/>
+      <xs:element name="save-position"  type="xbe:savePositionType"/>
+      <xs:element name="computed-field" type="xbe:computedFieldType"/>
+      <xs:element name="repeat"         type="xbe:repeatType"/>
+    </xs:choice>
+  </xs:group>
+
+  <xs:complexType name="extensionsType">
+    <xs:annotation>
+      <xs:documentation>
+        Extension fields appended after the base message layout.  Used
+        for backward-compatible additions (as in MAVLink v2 extensions).
+        Older decoders may ignore these fields based on message length.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="xbe:messageBodyGroup"
+                minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       CSS-like selector
+       =================================================================== -->
+
+  <xs:complexType name="selectorType">
+    <xs:annotation>
+      <xs:documentation>
+        Identifies which XSD component(s) this encoding targets.
+        Attributes are combined conjunctively — all specified criteria
+        must match.  Specificity is determined by the most-specific
+        attribute present: qname > path > type > namespace > wildcard.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="qname" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Qualified name: {namespace}localName or prefix:localName.
+          Most specific selector.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="path" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Path selector: "Parent > Child > Field" or
+          "Parent Field" (descendant).  Uses '>' for direct child,
+          space for descendant.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="type" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Type selector: matches all XSD components of the given type
+          name (e.g., "xs:decimal", "MyComplexType").
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="namespace" type="xs:anyURI" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Namespace selector: matches all XSD components in the given
+          namespace.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="attribute" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Attribute selector: matches XSD elements with the specified
+          attribute criterion (e.g., name="price").
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Field encoding
+       =================================================================== -->
+
+  <xs:complexType name="fieldType">
+    <xs:annotation>
+      <xs:documentation>
+        Encoding for one field.  Maps an XSD element or attribute to a
+        wire-level representation.  Child elements provide additional
+        encoding instructions (presence conditions, string details,
+        etc.).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="present-when"   type="xbe:presentWhenType"
+                  minOccurs="0"/>
+      <xs:element name="string-encoding" type="xbe:stringEncodingType"
+                  minOccurs="0"/>
+      <xs:element name="transform"      type="xbe:transformType"
+                  minOccurs="0"/>
+      <xs:element name="enum-map"       type="xbe:enumMapType"
+                  minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:NCName" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the XSD element or attribute this field encodes.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="bits" type="xs:positiveInteger" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Width of the field on the wire, in bits.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="type" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          XSD type of the field (e.g., "xs:unsignedShort").  Used for
+          documentation and validation; the actual type is determined
+          by the target XSD schema.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="encoding" type="xbe:primitiveEncodingType"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          How the value is represented on the wire.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="byte-order" type="xbe:byteOrderType"
+                  use="optional"/>
+    <xs:attribute name="offset" type="xs:nonNegativeInteger"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Explicit bit offset from the start of the containing
+          structure.  When omitted, the field follows immediately after
+          the previous field (respecting alignment).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="null-value" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Sentinel value indicating "not present" for optional fields
+          (e.g., "0xFFFFFFFF" for SBE null).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="size" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Size qualifier.  Use "remaining" to consume all remaining
+          bytes in the container.  Use a field name reference for
+          length-determinant driven sizing.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Padding
+       =================================================================== -->
+
+  <xs:complexType name="paddingFieldType">
+    <xs:annotation>
+      <xs:documentation>
+        Explicit padding: either a fixed number of bits or alignment
+        to a boundary.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="bits" type="xs:positiveInteger" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Fixed padding width in bits.  Mutually exclusive with
+          'align-to'.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="align-to" type="xs:positiveInteger"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Pad to the next N-bit boundary.  Common values: 8 (byte),
+          32 (dword), 64 (qword).  Mutually exclusive with 'bits'.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="fill" type="xs:string" default="0x00">
+      <xs:annotation>
+        <xs:documentation>
+          Fill value for the padding bytes/bits.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Constant field
+       =================================================================== -->
+
+  <xs:complexType name="constantType">
+    <xs:annotation>
+      <xs:documentation>
+        A field with a value known at compile time.  The value is not
+        transmitted on the wire (for wire-only constants, use
+        wire-field with a fixed value).  Accessible via the generated
+        interface.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="name"  type="xs:NCName" use="required"/>
+    <xs:attribute name="type"  type="xs:string"  use="optional"/>
+    <xs:attribute name="value" type="xs:string"  use="required"/>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Wire-only field
+       =================================================================== -->
+
+  <xs:complexType name="wireFieldType">
+    <xs:annotation>
+      <xs:documentation>
+        A field that exists on the wire but has no corresponding XSD
+        element.  Examples: message length prefix, reserved bytes,
+        protocol-specific header fields.  Encoded/decoded automatically.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="name" type="xs:NCName" use="required"/>
+    <xs:attribute name="bits" type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="encoding" type="xbe:primitiveEncodingType"
+                  use="optional"/>
+    <xs:attribute name="byte-order" type="xbe:byteOrderType"
+                  use="optional"/>
+    <xs:attribute name="value" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Fixed value for this wire field.  When present, the encoder
+          writes this value; the decoder may verify it (at structural
+          validation level or above).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Repeating group
+       =================================================================== -->
+
+  <xs:complexType name="groupType">
+    <xs:annotation>
+      <xs:documentation>
+        Encoding for an XSD repeating element (maxOccurs > 1).
+        Specifies how the count and element layout are encoded.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="dimension" type="xbe:dimensionType"
+                  minOccurs="0"/>
+      <xs:group ref="xbe:messageBodyGroup"
+                minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:NCName" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the XSD element whose occurrences this group encodes.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="count-field" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of a preceding wire-field or field whose value gives the
+          element count.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="block-length-field" type="xs:NCName"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of a preceding field whose value gives the byte length
+          of each group entry (as in SBE dimension headers).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="dimensionType">
+    <xs:annotation>
+      <xs:documentation>
+        Inline dimension header for a repeating group.  Alternative to
+        referencing external count/block-length fields — the dimension
+        header is part of the group encoding itself (as in SBE).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="wire-field" type="xbe:wireFieldType"
+                  maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="count-field" type="xs:NCName" use="required"/>
+    <xs:attribute name="block-length-field" type="xs:NCName"
+                  use="optional"/>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Choice / discriminated union
+       =================================================================== -->
+
+  <xs:complexType name="choiceType">
+    <xs:annotation>
+      <xs:documentation>
+        Encoding for an XSD choice group (maps to std::variant in C++).
+        A discriminant field determines which alternative is active.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="alternative" type="xbe:alternativeType"
+                  maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:NCName" use="required"/>
+    <xs:attribute name="discriminant-field" type="xs:NCName"
+                  use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the field whose value selects the active alternative.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="alternativeType">
+    <xs:annotation>
+      <xs:documentation>
+        One alternative in a choice group.  Active when the
+        discriminant field matches the specified value.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="xbe:messageBodyGroup"
+                minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name" type="xs:NCName" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the XSD element this alternative encodes.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="discriminant-value" type="xs:string"
+                  use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Value of the discriminant field that activates this
+          alternative (decimal, 0x hex, or character literal).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Length determinant
+       =================================================================== -->
+
+  <xs:complexType name="lengthType">
+    <xs:annotation>
+      <xs:documentation>
+        Declares that a named field carries the length of a region.
+        Used both in framing (total packet length) and in messages
+        (variable-length field sizing).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="field" type="xs:NCName" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the field that carries the length value.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="includes" type="xbe:lengthIncludesType"
+                  default="payload">
+      <xs:annotation>
+        <xs:documentation>
+          Whether the length value includes the header or just the
+          payload.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="unit" type="xbe:lengthUnitType"
+                  default="bytes"/>
+    <xs:attribute name="adjust" type="xs:integer" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Additive adjustment applied to the length field value.
+          Example: CCSDS packet data length = actual - 1, so
+          adjust="+1".  The expression is: actual_size = field_value
+          + adjust.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Discriminant declaration
+       =================================================================== -->
+
+  <xs:complexType name="discriminantType">
+    <xs:annotation>
+      <xs:documentation>
+        Declares that a named field is the type discriminant for this
+        framing or message context.  The field must be defined
+        elsewhere in the same scope.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="field" type="xs:NCName" use="required"/>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Save-position marker
+       =================================================================== -->
+
+  <xs:complexType name="savePositionType">
+    <xs:annotation>
+      <xs:documentation>
+        Records the current bit/byte offset during encoding.  Used to
+        define byte ranges for computed fields (CRC, checksum, length).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="name" type="xs:NCName" use="required"/>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Computed field (CRC, checksum, etc.)
+       =================================================================== -->
+
+  <xs:complexType name="computedFieldType">
+    <xs:annotation>
+      <xs:documentation>
+        A field whose value is computed from other encoded bytes.
+        Written after all other fields during encoding; verified
+        during decoding (at structural validation level or above).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="name" type="xs:NCName" use="required"/>
+    <xs:attribute name="bits" type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="algorithm" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Algorithm name.  Built-in: crc8, crc16-ccitt, crc32,
+          checksum8, checksum16.  Custom: a named function provided
+          by the user.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="over" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Byte range over which the computation is performed, as
+          "start_marker..end_marker" referencing save-position names.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="byte-order" type="xbe:byteOrderType"
+                  use="optional"/>
+    <xs:attribute name="seed" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Initial seed value for the algorithm (decimal or 0x hex).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="seed-expr" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Expression that computes the seed from other fields (e.g.,
+          MAVLink CRC_EXTRA).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Repeat (framing-level repeating structure)
+       =================================================================== -->
+
+  <xs:complexType name="repeatType">
+    <xs:annotation>
+      <xs:documentation>
+        A repeating structure within a framing definition or message.
+        Supports five modes: explicit count, count with element size,
+        fill-remaining, delimiter-terminated, and fixed-size elements.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:group ref="xbe:framingBodyGroup"
+                minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="count-field" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of a preceding field whose value gives the repeat count.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="element-size-field" type="xs:NCName"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of a field whose value gives the byte size of each
+          element.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="fixed-size" type="xs:positiveInteger"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Fixed byte size of each repeated element.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="until" type="xbe:repeatUntilType"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Termination mode for count-less repeats.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="until-delimiter" type="xs:string"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Byte pattern (space-separated hex) that terminates the
+          repeat.  E.g., "0x00 0x00" for BER indefinite-length
+          end-of-contents.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Payload marker
+       =================================================================== -->
+
+  <xs:complexType name="payloadType">
+    <xs:annotation>
+      <xs:documentation>
+        Marks where the inner payload begins within a framing
+        definition.  Everything after this point is the content of the
+        next layer (or the application message).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="length-field" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          When inside a repeat, identifies the field that gives this
+          particular payload's length.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Presence condition
+       =================================================================== -->
+
+  <xs:complexType name="presentWhenType">
+    <xs:annotation>
+      <xs:documentation>
+        Conditional field presence.  The containing field exists on the
+        wire only when the expression evaluates to true.  Distinct from
+        null-value sentinels (which are always transmitted).
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="expr" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Boolean expression over other fields.  Supports field
+          references, comparisons (==, !=, &lt;, &gt;, &lt;=, &gt;=),
+          bitwise operators (&amp;, |), logical operators (and, or,
+          not), and integer literals (decimal, 0x hex).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="field" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Shorthand: field present when the named boolean field is
+          true.  Mutually exclusive with 'expr'.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="field-equals" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Used with 'field': field present when the named field equals
+          this value.  Enables discriminant-based presence.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       String encoding details
+       =================================================================== -->
+
+  <xs:complexType name="stringEncodingType">
+    <xs:annotation>
+      <xs:documentation>
+        Additional encoding parameters for string fields.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="charset" type="xbe:charsetType"
+                  use="optional"/>
+    <xs:attribute name="padding" type="xbe:paddingType"
+                  use="optional"/>
+    <xs:attribute name="terminator" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Termination byte (hex, e.g., "0x00").  For null-terminated
+          strings.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="length-field" type="xs:NCName" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of a preceding field that gives the string's length.
+          For length-prefixed strings.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Transform (custom mapping function)
+       =================================================================== -->
+
+  <xs:complexType name="transformType">
+    <xs:annotation>
+      <xs:documentation>
+        A named transformation applied between the XSD value domain and
+        the wire domain.  The BES declares the function name; the
+        implementation is user-provided C++.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="encode" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the C++ function: wire_value = encode(xsd_value).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="decode" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Name of the C++ function: xsd_value = decode(wire_value).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="header" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          C++ header to #include for the transform functions.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Enum value mapping
+       =================================================================== -->
+
+  <xs:complexType name="enumMapType">
+    <xs:annotation>
+      <xs:documentation>
+        Explicit mapping from XSD enumeration values to wire values.
+        When omitted, enum values are encoded by ordinal index.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="entry" type="xbe:enumEntryType"
+                  maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="encode-by" type="xbe:enumEncodeByType"
+                  default="value">
+      <xs:annotation>
+        <xs:documentation>
+          Default encoding strategy: "value" uses the explicit wire
+          values below, "ordinal" uses 0-based index.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="enumEntryType">
+    <xs:attribute name="xsd-value"  type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          The XSD enumeration facet value (string).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="wire-value" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          The wire-level value (decimal, 0x hex, or character literal).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Delimiter (sentinel-based framing)
+       =================================================================== -->
+
+  <xs:complexType name="delimiterType">
+    <xs:annotation>
+      <xs:documentation>
+        Sentinel byte pattern for delimiter-based framing.  Includes
+        optional escape specification.
+      </xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="value" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>
+          Delimiter byte pattern (space-separated hex, e.g.,
+          "0x7E" for HDLC flag).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="escape" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Escape byte (hex).  When the delimiter appears in data, it
+          is preceded by this escape byte.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="escape-xor" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          XOR mask applied to the byte following the escape (as in
+          PPP/HDLC: escaped byte XOR 0x20).
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ===================================================================
+       Simple types (enumerations)
+       =================================================================== -->
+
+  <xs:simpleType name="byteOrderType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="big-endian"/>
+      <xs:enumeration value="little-endian"/>
+      <xs:enumeration value="native"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="bitOrderType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="msb-first"/>
+      <xs:enumeration value="lsb-first"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="primitiveEncodingType">
+    <xs:restriction base="xs:string">
+      <!-- Integer encodings -->
+      <xs:enumeration value="unsigned"/>
+      <xs:enumeration value="twos-complement"/>
+      <xs:enumeration value="bcd"/>
+      <xs:enumeration value="ascii-decimal"/>
+      <!-- Floating-point encodings -->
+      <xs:enumeration value="ieee754"/>
+      <xs:enumeration value="fixed-point"/>
+      <!-- String encodings -->
+      <xs:enumeration value="ascii"/>
+      <xs:enumeration value="utf8"/>
+      <xs:enumeration value="utf16"/>
+      <!-- Binary encodings -->
+      <xs:enumeration value="raw"/>
+      <!-- Boolean encodings -->
+      <xs:enumeration value="boolean"/>
+      <!-- Enum encodings -->
+      <xs:enumeration value="enum-integer"/>
+      <xs:enumeration value="enum-char"/>
+      <!-- Bitset encoding -->
+      <xs:enumeration value="bitset"/>
+      <!-- Timestamp encodings -->
+      <xs:enumeration value="epoch"/>
+      <xs:enumeration value="epoch-millis"/>
+      <xs:enumeration value="epoch-micros"/>
+      <xs:enumeration value="epoch-nanos"/>
+      <xs:enumeration value="bcd-datetime"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="paddingType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="space"/>
+      <xs:enumeration value="null"/>
+      <xs:enumeration value="zero"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="charsetType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ascii"/>
+      <xs:enumeration value="utf8"/>
+      <xs:enumeration value="utf16-be"/>
+      <xs:enumeration value="utf16-le"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="lengthIncludesType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="header"/>
+      <xs:enumeration value="payload"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="lengthUnitType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="bits"/>
+      <xs:enumeration value="bytes"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="repeatUntilType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="end-of-payload"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="enumEncodeByType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="value"/>
+      <xs:enumeration value="ordinal"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

@@ -193,6 +193,8 @@ TEST_CASE("typemap schema: xsd-type restricted to known XSD built-in types",
       "QName",
       "ID",
       "IDREF",
+      "Name",
+      "NCName",
       "NMTOKEN",
       "language",
   };

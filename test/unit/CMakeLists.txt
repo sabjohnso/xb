@@ -405,3 +405,24 @@ add_executable(xb_wire_types_test wire_types_test.cpp)
 target_link_libraries(xb_wire_types_test PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_types_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_types_test COMMAND xb_wire_types_test)
+
+# --- BES encoding model: generated from xb-encoding.xsd ---
+xb_generate_cpp(
+  TARGET xb_bes_types
+  SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xb-encoding.xsd
+  TYPE_MAP ${PROJECT_SOURCE_DIR}/schema/xb-encoding-typemap.xml
+  NAMESPACE_MAP "http://xb.dev/encoding=xb::bes"
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_bes_gen
+  MODE HEADER_ONLY)
+
+add_executable(xb_wire_encoding_model_test wire_encoding_model_test.cpp)
+target_link_libraries(xb_wire_encoding_model_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+target_compile_features(xb_wire_encoding_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_encoding_model_test COMMAND xb_wire_encoding_model_test)
+
+add_executable(xb_wire_selector_test wire_selector_test.cpp)
+target_link_libraries(xb_wire_selector_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+target_compile_features(xb_wire_selector_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_selector_test COMMAND xb_wire_selector_test)

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Type map overrides for xb-encoding.xsd code generation.
+
+  The BES schema uses xs:positiveInteger (field widths, alignment) and
+  xs:integer (length adjust) where the actual values are always small.
+  Map these to native C++ types instead of xb::integer.
+-->
+<xb:typemap xmlns:xb="http://xb.dev/typemap">
+  <xb:mapping xsd-type="positiveInteger"    cpp-type="unsigned"  cpp-header=""/>
+  <xb:mapping xsd-type="nonNegativeInteger" cpp-type="unsigned"  cpp-header=""/>
+  <xb:mapping xsd-type="integer"            cpp-type="int"       cpp-header=""/>
+</xb:typemap>

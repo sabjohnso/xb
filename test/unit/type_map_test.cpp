@@ -13,7 +13,7 @@ using namespace xb;
 
 TEST_CASE("type_map defaults has 36 entries", "[type_map]") {
   auto map = type_map::defaults();
-  CHECK(map.size() == 36);
+  CHECK(map.size() == 38);
 }
 
 TEST_CASE("type_map defaults: decimal maps to xb::decimal", "[type_map]") {
@@ -299,7 +299,7 @@ TEST_CASE("type_map merge: single override replaces entry", "[type_map]") {
   CHECK(m->cpp_header == "<cmath>");
 
   // Other entries untouched
-  CHECK(map.size() == 36);
+  CHECK(map.size() == 38);
   CHECK(map.find("integer")->cpp_type == "xb::integer");
   CHECK(map.find("string")->cpp_type == "std::string");
 }
@@ -317,7 +317,7 @@ TEST_CASE("type_map merge: multiple overrides", "[type_map]") {
   CHECK(map.find("decimal")->cpp_type == "double");
   CHECK(map.find("integer")->cpp_type == "int64_t");
   CHECK(map.find("dateTime")->cpp_type == "my::ts");
-  CHECK(map.size() == 36);
+  CHECK(map.size() == 38);
 }
 
 TEST_CASE("type_map merge: empty overrides is no-op", "[type_map]") {
@@ -377,7 +377,7 @@ TEST_CASE("type_map end-to-end: defaults + load + merge", "[type_map]") {
   CHECK(map.find("dateTime")->cpp_type == "xb::date_time");
   CHECK(map.find("hexBinary")->cpp_type == "std::vector<std::byte>");
 
-  CHECK(map.size() == 36);
+  CHECK(map.size() == 38);
 }
 
 TEST_CASE("type_map defaults: list types map to vector<string>", "[type_map]") {
