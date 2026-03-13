@@ -390,3 +390,18 @@ add_executable(xb_code_formatter_test code_formatter_test.cpp)
 target_link_libraries(xb_code_formatter_test PRIVATE Catch2::Catch2WithMain xb::xb)
 target_compile_features(xb_code_formatter_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_code_formatter_test COMMAND xb_code_formatter_test)
+
+add_executable(xb_wire_byteswap_test wire_byteswap_test.cpp)
+target_link_libraries(xb_wire_byteswap_test PRIVATE Catch2::Catch2WithMain xb::header)
+target_compile_features(xb_wire_byteswap_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_byteswap_test COMMAND xb_wire_byteswap_test)
+
+add_executable(xb_wire_bits_test wire_bits_test.cpp)
+target_link_libraries(xb_wire_bits_test PRIVATE Catch2::Catch2WithMain xb::header)
+target_compile_features(xb_wire_bits_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_bits_test COMMAND xb_wire_bits_test)
+
+add_executable(xb_wire_types_test wire_types_test.cpp)
+target_link_libraries(xb_wire_types_test PRIVATE Catch2::Catch2WithMain xb::header)
+target_compile_features(xb_wire_types_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_types_test COMMAND xb_wire_types_test)

@@ -16,12 +16,12 @@ set(xb_INSTALL_CONFDIR ${xb_INSTALL_LIBDIR}/cmake/xb-${PROJECT_VERSION})
 list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake)
 include(xb_deps)
 
-# GCC 12 emits a false -Wmaybe-uninitialized for std::variant containing
-# std::unique_ptr at -O2/-O3 (particle::term_type). Fixed in GCC 13.
+# GCC 12–13 emit a false -Wmaybe-uninitialized for std::variant containing
+# std::unique_ptr at -O2/-O3 (particle::term_type).
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80635
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12
-   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
   add_compile_options(-Wno-maybe-uninitialized)
 endif()
 
