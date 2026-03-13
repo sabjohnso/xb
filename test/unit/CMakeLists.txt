@@ -426,3 +426,15 @@ target_link_libraries(xb_wire_selector_test
   PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
 target_compile_features(xb_wire_selector_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_selector_test COMMAND xb_wire_selector_test)
+
+add_executable(xb_wire_bes_resolver_test wire_bes_resolver_test.cpp)
+target_link_libraries(xb_wire_bes_resolver_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+target_compile_features(xb_wire_bes_resolver_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_bes_resolver_test COMMAND xb_wire_bes_resolver_test)
+
+add_executable(xb_wire_encoding_resolver_test wire_encoding_resolver_test.cpp)
+target_link_libraries(xb_wire_encoding_resolver_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+target_compile_features(xb_wire_encoding_resolver_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_encoding_resolver_test COMMAND xb_wire_encoding_resolver_test)
