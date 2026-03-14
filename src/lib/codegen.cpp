@@ -2695,7 +2695,53 @@ namespace xb {
                         },
                         gp.term);
                   }
+                } else if (grp_is_choice) {
+                  // Non-repeating choice group: assign to variant field
+                  for (const auto& gp : group_def->group().particles()) {
+                    std::visit(
+                        [&](const auto& gt) {
+                          using GT = std::decay_t<decltype(gt)>;
+                          auto emit_choice_assign = [&](const qname& ename,
+                                                        const qname& etype) {
+                            std::string qn = "xb::qname{\"" +
+                                             ename.namespace_uri() + "\", \"" +
+                                             ename.local_name() + "\"}";
+                            std::string kw = first_branch ? "if" : "else if";
+                            body += "    " + kw + " (name == " + qn + ") {\n";
+                            std::string cpp_type = resolver.resolve(etype);
+                            bool is_cycle = resolver.is_cycle_type(etype);
+                            if (is_complex_type(resolver.schemas, etype)) {
+                              std::string read_fn =
+                                  resolver.qualify_fn("read_", etype);
+                              if (is_cycle)
+                                body += "      result.choice = "
+                                        "std::make_unique<" +
+                                        cpp_type + ">(" + read_fn +
+                                        "(reader));\n";
+                              else
+                                body += "      result.choice = " + read_fn +
+                                        "(reader);\n";
+                            } else {
+                              body += "      result.choice = "
+                                      "xb::read_simple<" +
+                                      cpp_type + ">(reader);\n";
+                            }
+                            body += "    }\n";
+                            first_branch = false;
+                          };
+                          if constexpr (std::is_same_v<GT, element_decl>) {
+                            emit_choice_assign(gt.name(), gt.type_name());
+                          } else if constexpr (std::is_same_v<GT,
+                                                              element_ref>) {
+                            auto* elem = resolver.schemas.find_element(gt.ref);
+                            if (!elem) return;
+                            emit_choice_assign(elem->name(), elem->type_name());
+                          }
+                        },
+                        gp.term);
+                  }
                 } else {
+                  // Non-choice group: expand particles inline
                   for (const auto& gp : group_def->group().particles())
                     emit_read_particle_match(
                         body, gp, resolver, containing_type_name, first_branch);

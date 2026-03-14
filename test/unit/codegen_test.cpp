@@ -5401,3 +5401,96 @@ TEST_CASE("group ref choice with optional generates optional variant",
         std::string::npos);
   CHECK(st->fields[0].name == "choice");
 }
+
+TEST_CASE(
+    "group ref choice read function assigns to variant field (non-repeating)",
+    "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  // Define a choice group: (a: string | b: int)
+  std::vector<particle> group_particles;
+  group_particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "a"}, qname{xs_ns, "string"}));
+  group_particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "b"}, qname{xs_ns, "int"}));
+  s.add_model_group_def(model_group_def(
+      qname{"http://example.com/test", "ItemGroup"},
+      model_group(compositor_kind::choice, std::move(group_particles))));
+
+  // Complex type: sequence containing group ref with maxOccurs=1 (required)
+  std::vector<particle> particles;
+  particles.emplace_back(
+      group_ref{qname{"http://example.com/test", "ItemGroup"}},
+      occurrence{1, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "ContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* fn = find_function(files[0], "read_container_type");
+  REQUIRE(fn != nullptr);
+  // Read function must assign to the variant field, not to individual element
+  // fields (which don't exist as separate struct members)
+  CHECK(fn->body.find("result.choice =") != std::string::npos);
+  // Must NOT generate field-access like result.a or result.b
+  CHECK(fn->body.find("result.a") == std::string::npos);
+  CHECK(fn->body.find("result.b") == std::string::npos);
+}
+
+TEST_CASE(
+    "group ref choice read function assigns to optional variant (optional)",
+    "[codegen][serialization]") {
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  // Define a choice group: (x: string | y: int)
+  std::vector<particle> group_particles;
+  group_particles.emplace_back(element_decl(
+      qname{"http://example.com/test", "x"}, qname{xs_ns, "string"}));
+  group_particles.emplace_back(
+      element_decl(qname{"http://example.com/test", "y"}, qname{xs_ns, "int"}));
+  s.add_model_group_def(model_group_def(
+      qname{"http://example.com/test", "OptGroup"},
+      model_group(compositor_kind::choice, std::move(group_particles))));
+
+  // Complex type: sequence containing group ref with minOccurs=0, maxOccurs=1
+  std::vector<particle> particles;
+  particles.emplace_back(
+      group_ref{qname{"http://example.com/test", "OptGroup"}},
+      occurrence{0, 1});
+  model_group seq(compositor_kind::sequence, std::move(particles));
+
+  content_type ct(
+      content_kind::element_only,
+      complex_content(qname{}, derivation_method::restriction, std::move(seq)));
+
+  s.add_complex_type(
+      complex_type(qname{"http://example.com/test", "OptContainerType"}, false,
+                   false, std::move(ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+  REQUIRE(files.size() == 1);
+
+  auto* fn = find_function(files[0], "read_opt_container_type");
+  REQUIRE(fn != nullptr);
+  // Read function must assign to the variant field
+  CHECK(fn->body.find("result.choice =") != std::string::npos);
+  // Must NOT generate field-access like result.x or result.y
+  CHECK(fn->body.find("result.x") == std::string::npos);
+  CHECK(fn->body.find("result.y") == std::string::npos);
+}
