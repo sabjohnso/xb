@@ -213,10 +213,9 @@ namespace xb {
       bool is_enum = member_st && !member_st->facets().enumeration.empty();
 
       if (is_enum) {
-        std::string enum_name =
-            resolver.type_name(member_st->name().local_name());
+        std::string qualified = resolver.qualify_fn("", member_st->name());
         body += "  if (j.is_string()) {\n";
-        body += "    try { v = " + enum_name +
+        body += "    try { v = " + qualified +
                 "_from_string(j.get<std::string>()); return; }\n";
         body += "    catch (...) {}\n";
         body += "  }\n";

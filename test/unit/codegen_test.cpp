@@ -5494,3 +5494,60 @@ TEST_CASE(
   CHECK(fn->body.find("result.x") == std::string::npos);
   CHECK(fn->body.find("result.y") == std::string::npos);
 }
+
+// Cross-namespace from_string must be qualified
+// ADL cannot find from_string across namespaces because the argument is
+// std::string_view, which lives in std::, not the enum's namespace.
+TEST_CASE("cross-namespace enum attribute qualifies from_string",
+          "[codegen][deserialization]") {
+  // Schema 1: defines an enum type in namespace "types"
+  schema s1;
+  s1.set_target_namespace("http://example.com/types");
+
+  facet_set facets;
+  facets.enumeration = {"Buy", "Sell"};
+  s1.add_simple_type(simple_type(qname{"http://example.com/types", "SideType"},
+                                 simple_type_variety::atomic,
+                                 qname{xs_ns, "string"}, facets));
+
+  // Schema 2: defines a complex type in namespace "order" that uses the enum
+  schema s2;
+  s2.set_target_namespace("http://example.com/order");
+  s2.add_import(schema_import{"http://example.com/types", ""});
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "side"},
+                   qname{"http://example.com/types", "SideType"},
+                   true,
+                   {},
+                   {}});
+
+  s2.add_complex_type(
+      complex_type(qname{"http://example.com/order", "OrderType"}, false, false,
+                   std::move(ct), std::move(attrs)));
+
+  schema_set ss;
+  ss.add(std::move(s1));
+  ss.add(std::move(s2));
+  ss.resolve();
+
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  // Find the read function for the order type (in schema 2's file)
+  const cpp_function* fn = nullptr;
+  for (const auto& f : files) {
+    if (auto* found = find_function(f, "read_order_type")) {
+      fn = found;
+      break;
+    }
+  }
+  REQUIRE(fn != nullptr);
+  // The from_string call must be namespace-qualified since SideType is in
+  // a different namespace than OrderType
+  CHECK(fn->body.find("::side_type_from_string(") != std::string::npos);
+}

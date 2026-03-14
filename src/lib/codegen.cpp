@@ -1037,9 +1037,9 @@ namespace xb {
           if (is_last) {
             // Last member: no try/catch, just return
             if (member_st && !member_st->facets().enumeration.empty()) {
-              std::string enum_name =
-                  resolver.type_name(member_st->name().local_name());
-              body += "  return " + enum_name + "_from_string(text);\n";
+              std::string qualified =
+                  resolver.qualify_fn("", member_st->name());
+              body += "  return " + qualified + "_from_string(text);\n";
             } else {
               body += "  return xb::parse<" + cpp_type + ">(text);\n";
             }
@@ -1047,9 +1047,9 @@ namespace xb {
             // Try this member type; on failure, try next
             body += "  try {\n";
             if (member_st && !member_st->facets().enumeration.empty()) {
-              std::string enum_name =
-                  resolver.type_name(member_st->name().local_name());
-              body += "    return " + enum_name + "_from_string(text);\n";
+              std::string qualified =
+                  resolver.qualify_fn("", member_st->name());
+              body += "    return " + qualified + "_from_string(text);\n";
             } else {
               body += "    return xb::parse<" + cpp_type + ">(text);\n";
             }
@@ -2371,9 +2371,9 @@ namespace xb {
         auto* st = schemas.find_simple_type(type_name);
         while (st && st->facets().enumeration.empty())
           st = schemas.find_simple_type(st->base_type_name());
-        std::string enum_name = st ? resolver.type_name(st->name().local_name())
-                                   : resolver.type_name(type_name.local_name());
-        return enum_name + "_from_string(" + text_expr + ")";
+        qname actual_name = st ? st->name() : type_name;
+        return resolver.qualify_fn("", actual_name) + "_from_string(" +
+               text_expr + ")";
       }
       if (is_union_type(schemas, type_name)) {
         // Find the canonical parse function name for this union type.
@@ -2400,9 +2400,11 @@ namespace xb {
           auto it = resolver.union_variant_map->find(variant_key);
           if (it != resolver.union_variant_map->end()) union_name = it->second;
         }
-        if (union_name.empty())
-          union_name = st ? resolver.type_name(st->name().local_name())
-                          : resolver.type_name(type_name.local_name());
+        if (union_name.empty()) {
+          qname actual_name = st ? st->name() : type_name;
+          return resolver.qualify_fn("parse_", actual_name) + "(" + text_expr +
+                 ")";
+        }
         return "parse_" + union_name + "(" + text_expr + ")";
       }
       std::string cpp_type = resolver.resolve(type_name);
