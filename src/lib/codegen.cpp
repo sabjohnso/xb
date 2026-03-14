@@ -977,9 +977,10 @@ namespace xb {
           body += "    " + kw + " constexpr (std::is_same_v<V, " + cpp_type +
                   ">) {\n";
           auto* member_st = resolver.schemas.find_simple_type(member);
-          if (member_st && !member_st->facets().enumeration.empty())
-            body += "      return std::string(to_string(x));\n";
-          else
+          if (member_st && !member_st->facets().enumeration.empty()) {
+            std::string fn = resolver.qualify_call("to_string", member);
+            body += "      return std::string(" + fn + "(x));\n";
+          } else
             body += "      return xb::format(x);\n";
           body += "    }\n";
           first = false;
@@ -1661,16 +1662,19 @@ namespace xb {
     }
 
     // Generate the format expression for a value, considering type.
-    // Enums use to_string(), union types use unqualified format() (found
-    // via ADL on the generated format overload), built-in types use
-    // xb::format().
+    // Enums use to_string(), union types use format(), built-in types use
+    // xb::format().  Cross-namespace calls are explicitly qualified.
     std::string
     format_expr(const std::string& value_expr, const qname& type_name,
-                const schema_set& schemas, const type_resolver& /*resolver*/) {
-      if (is_enum_type(schemas, type_name))
-        return "std::string(to_string(" + value_expr + "))";
-      if (is_union_type(schemas, type_name))
-        return "format(" + value_expr + ")";
+                const schema_set& schemas, const type_resolver& resolver) {
+      if (is_enum_type(schemas, type_name)) {
+        std::string fn = resolver.qualify_call("to_string", type_name);
+        return "std::string(" + fn + "(" + value_expr + "))";
+      }
+      if (is_union_type(schemas, type_name)) {
+        std::string fn = resolver.qualify_call("format", type_name);
+        return fn + "(" + value_expr + ")";
+      }
       return "xb::format(" + value_expr + ")";
     }
 
@@ -1685,21 +1689,23 @@ namespace xb {
     };
 
     // Emit inline write code for a simple-typed element value.
-    // Uses to_string() for enums, unqualified format() for unions (ADL),
-    // and xb::format() for built-in types.
+    // Uses to_string() for enums, format() for unions, and xb::format()
+    // for built-in types.  Cross-namespace calls are explicitly qualified.
     void
     emit_simple_element_write(std::string& body, const std::string& indent,
                               const std::string& qn,
                               const std::string& val_expr,
-                              const qname& type_name,
-                              const schema_set& schemas) {
+                              const qname& type_name, const schema_set& schemas,
+                              const type_resolver& resolver) {
       body += indent + "writer.start_element(" + qn + ");\n";
-      if (is_enum_type(schemas, type_name))
-        body += indent + "writer.characters(std::string(to_string(" + val_expr +
-                ")));\n";
-      else if (is_union_type(schemas, type_name))
-        body += indent + "writer.characters(format(" + val_expr + "));\n";
-      else
+      if (is_enum_type(schemas, type_name)) {
+        std::string fn = resolver.qualify_call("to_string", type_name);
+        body += indent + "writer.characters(std::string(" + fn + "(" +
+                val_expr + ")));\n";
+      } else if (is_union_type(schemas, type_name)) {
+        std::string fn = resolver.qualify_call("format", type_name);
+        body += indent + "writer.characters(" + fn + "(" + val_expr + "));\n";
+      } else
         body += indent + "writer.characters(xb::format(" + val_expr + "));\n";
       body += indent + "writer.end_element();\n";
     }
@@ -1738,7 +1744,7 @@ namespace xb {
           body += "    writer.end_element();\n";
         } else {
           emit_simple_element_write(body, "    ", qn, "item", info.type_name,
-                                    schemas);
+                                    schemas, resolver);
         }
         body += "  }\n";
         return;
@@ -1754,7 +1760,7 @@ namespace xb {
           body += "    writer.end_element();\n";
         } else {
           emit_simple_element_write(body, "    ", qn, "*" + field,
-                                    info.type_name, schemas);
+                                    info.type_name, schemas, resolver);
         }
         body += "  }\n";
         return;
@@ -1768,7 +1774,7 @@ namespace xb {
         body += "  writer.end_element();\n";
       } else {
         emit_simple_element_write(body, "  ", qn, field, info.type_name,
-                                  schemas);
+                                  schemas, resolver);
       }
     }
 
@@ -1999,7 +2005,7 @@ namespace xb {
                     } else {
                       emit_simple_element_write(body, "        ", qn, "item",
                                                 term.type_name(),
-                                                resolver.schemas);
+                                                resolver.schemas, resolver);
                     }
                     body += "      }\n";
                   } else if (is_complex) {
@@ -2011,7 +2017,7 @@ namespace xb {
                   } else {
                     emit_simple_element_write(body, "      ", qn, val,
                                               term.type_name(),
-                                              resolver.schemas);
+                                              resolver.schemas, resolver);
                   }
                   body += "    }\n";
                   first = false;
@@ -2060,7 +2066,7 @@ namespace xb {
                     } else {
                       emit_simple_element_write(body, "      ", qn, val,
                                                 elem->type_name(),
-                                                resolver.schemas);
+                                                resolver.schemas, resolver);
                     }
                     body += "    }\n";
                     first = false;

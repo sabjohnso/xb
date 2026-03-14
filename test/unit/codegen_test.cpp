@@ -5551,3 +5551,58 @@ TEST_CASE("cross-namespace enum attribute qualifies from_string",
   // a different namespace than OrderType
   CHECK(fn->body.find("::side_type_from_string(") != std::string::npos);
 }
+
+// Cross-namespace to_string must be qualified for clarity, even though
+// ADL would find it via the enum argument type.
+TEST_CASE("cross-namespace enum attribute qualifies to_string in write",
+          "[codegen][serialization]") {
+  // Schema 1: defines an enum type in namespace "types"
+  schema s1;
+  s1.set_target_namespace("http://example.com/types");
+
+  facet_set facets;
+  facets.enumeration = {"Buy", "Sell"};
+  s1.add_simple_type(simple_type(qname{"http://example.com/types", "SideType"},
+                                 simple_type_variety::atomic,
+                                 qname{xs_ns, "string"}, facets));
+
+  // Schema 2: complex type with an enum attribute from schema 1
+  schema s2;
+  s2.set_target_namespace("http://example.com/order");
+  s2.add_import(schema_import{"http://example.com/types", ""});
+
+  content_type ct;
+  ct.kind = content_kind::empty;
+
+  std::vector<attribute_use> attrs;
+  attrs.push_back({qname{"", "side"},
+                   qname{"http://example.com/types", "SideType"},
+                   true,
+                   {},
+                   {}});
+
+  s2.add_complex_type(
+      complex_type(qname{"http://example.com/order", "OrderType"}, false, false,
+                   std::move(ct), std::move(attrs)));
+
+  schema_set ss;
+  ss.add(std::move(s1));
+  ss.add(std::move(s2));
+  ss.resolve();
+
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  // Find the write function for the order type
+  const cpp_function* fn = nullptr;
+  for (const auto& f : files) {
+    if (auto* found = find_function(f, "write_order_type")) {
+      fn = found;
+      break;
+    }
+  }
+  REQUIRE(fn != nullptr);
+  // The to_string call must be namespace-qualified
+  CHECK(fn->body.find("::to_string(") != std::string::npos);
+}

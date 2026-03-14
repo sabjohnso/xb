@@ -92,11 +92,20 @@ namespace xb {
     std::string
     qualify_fn(const std::string& prefix, const qname& qn) const {
       std::string fn = prefix + type_name(qn.local_name());
+      return qualify_call(fn, qn);
+    }
+
+    // Qualify an arbitrary function name with the namespace from a qname.
+    // Unlike qualify_fn, this does not embed the type name into the function
+    // name — use it for functions like to_string and format whose names are
+    // independent of the type.
+    std::string
+    qualify_call(const std::string& fn_name, const qname& qn) const {
       if (!qn.namespace_uri().empty() && qn.namespace_uri() != current_ns) {
         std::string ns = resolve_namespace(qn.namespace_uri());
-        if (!ns.empty()) return ns + "::" + fn;
+        if (!ns.empty()) return ns + "::" + fn_name;
       }
-      return fn;
+      return fn_name;
     }
 
     std::string
