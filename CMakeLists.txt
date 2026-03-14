@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.21)
 
 project(xb VERSION 0.15.0 LANGUAGES C CXX)
 
-option(xb_BUILD_TESTING "Build the xb tests" ON)
+option(xb_BUILD_TESTING "Build the xb tests" ${PROJECT_IS_TOP_LEVEL})
 option(xb_BUILD_INTEGRATION_TESTS "Build the xb integration tests" OFF)
 set(xb_CXX_STANDARD 20 CACHE STRING "C++ standard for xb")
 
