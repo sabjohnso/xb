@@ -7,17 +7,6 @@ json_commander_add_executable(xb_cli
   FROM_HEADER xb_main.hpp
   xb_commands.cpp)
 
-# Overwrite the generated main to bypass schema::Loader which crashes on
-# the recursive $ref in the json-commander metaschema.  The schema is
-# validated at development time; runtime validation is unnecessary.
-file(READ ${CMAKE_CURRENT_BINARY_DIR}/xb.json JCMD_SCHEMA_CONTENT)
-set(JCMD_FROM_HEADER_INCLUDE "#include \"xb_main.hpp\"")
-set(JCMD_MAIN_FN "xb_cli::run")
-configure_file(
-  xb_jcmd_main.cpp.in
-  ${CMAKE_CURRENT_BINARY_DIR}/xb_cli_jcmd_main.cpp
-  @ONLY)
-
 # Additional link dependencies beyond what json_commander provides
 target_link_libraries(xb_cli PRIVATE xb::xb)
 if(CURL_FOUND)
