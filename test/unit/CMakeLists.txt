@@ -461,3 +461,9 @@ target_link_libraries(xb_wire_concept_codegen_test
   PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_concept_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_concept_codegen_test COMMAND xb_wire_concept_codegen_test)
+
+add_executable(xb_wire_layout_validation_test wire_layout_validation_test.cpp)
+target_link_libraries(xb_wire_layout_validation_test
+  PRIVATE Catch2::Catch2WithMain xb::header)
+target_compile_features(xb_wire_layout_validation_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_layout_validation_test COMMAND xb_wire_layout_validation_test)
