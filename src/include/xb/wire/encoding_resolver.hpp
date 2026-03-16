@@ -3,6 +3,7 @@
 #include <xb/qname.hpp>
 #include <xb/schema_set.hpp>
 #include <xb/wire/selector_specificity.hpp>
+#include <xb/xpath/schema_eval.hpp>
 
 #include <map>
 #include <optional>
@@ -168,6 +169,11 @@ namespace xb::wire {
           }
         }
         return matches;
+      }
+
+      // path selector: XPath expression evaluated against schema
+      if (sel.path.has_value()) {
+        return xpath::eval_schema_path(*sel.path, schemas);
       }
 
       // type selector: match complex types by local name

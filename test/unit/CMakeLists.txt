@@ -473,3 +473,15 @@ target_link_libraries(xb_wire_encoding_inheritance_test
   PRIVATE Catch2::Catch2WithMain xb::xb)
 target_compile_features(xb_wire_encoding_inheritance_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_encoding_inheritance_test COMMAND xb_wire_encoding_inheritance_test)
+
+add_executable(xb_xpath_parser_test xpath_parser_test.cpp)
+target_link_libraries(xb_xpath_parser_test
+  PRIVATE Catch2::Catch2WithMain xb::header)
+target_compile_features(xb_xpath_parser_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xpath_parser_test COMMAND xb_xpath_parser_test)
+
+add_executable(xb_xpath_schema_eval_test xpath_schema_eval_test.cpp)
+target_link_libraries(xb_xpath_schema_eval_test
+  PRIVATE Catch2::Catch2WithMain xb::xb)
+target_compile_features(xb_xpath_schema_eval_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_xpath_schema_eval_test COMMAND xb_xpath_schema_eval_test)
