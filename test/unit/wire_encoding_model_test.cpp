@@ -1,4 +1,4 @@
-#include <encoding.hpp>
+#include <xb/wire/encoding.hpp>
 
 #include <xb/expat_reader.hpp>
 #include <xb/ostream_writer.hpp>

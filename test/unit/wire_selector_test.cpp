@@ -1,6 +1,6 @@
 #include <xb/wire/selector_specificity.hpp>
 
-#include <encoding.hpp>
+#include <xb/wire/encoding.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

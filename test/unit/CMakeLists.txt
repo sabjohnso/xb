@@ -406,48 +406,41 @@ target_link_libraries(xb_wire_types_test PRIVATE Catch2::Catch2WithMain xb::head
 target_compile_features(xb_wire_types_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_types_test COMMAND xb_wire_types_test)
 
-# --- BES encoding model: generated from xb-encoding.xsd ---
-xb_generate_cpp(
-  TARGET xb_bes_types
-  SCHEMAS ${PROJECT_SOURCE_DIR}/schema/xb-encoding.xsd
-  TYPE_MAP ${PROJECT_SOURCE_DIR}/schema/xb-encoding-typemap.xml
-  NAMESPACE_MAP "http://xb.dev/encoding=xb::bes"
-  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_bes_gen
-  MODE HEADER_ONLY)
+# --- BES encoding types (checked-in, see src/include/xb/wire/encoding.hpp) ---
 
 add_executable(xb_wire_encoding_model_test wire_encoding_model_test.cpp)
 target_link_libraries(xb_wire_encoding_model_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+  PRIVATE Catch2::Catch2WithMain xb::xb)
 target_compile_features(xb_wire_encoding_model_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_encoding_model_test COMMAND xb_wire_encoding_model_test)
 
 add_executable(xb_wire_selector_test wire_selector_test.cpp)
 target_link_libraries(xb_wire_selector_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+  PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_selector_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_selector_test COMMAND xb_wire_selector_test)
 
 add_executable(xb_wire_bes_resolver_test wire_bes_resolver_test.cpp)
 target_link_libraries(xb_wire_bes_resolver_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+  PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_bes_resolver_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_bes_resolver_test COMMAND xb_wire_bes_resolver_test)
 
 add_executable(xb_wire_encoding_resolver_test wire_encoding_resolver_test.cpp)
 target_link_libraries(xb_wire_encoding_resolver_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::xb)
+  PRIVATE Catch2::Catch2WithMain xb::xb)
 target_compile_features(xb_wire_encoding_resolver_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_encoding_resolver_test COMMAND xb_wire_encoding_resolver_test)
 
 add_executable(xb_wire_layout_engine_test wire_layout_engine_test.cpp)
 target_link_libraries(xb_wire_layout_engine_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::header)
+  PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_layout_engine_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_layout_engine_test COMMAND xb_wire_layout_engine_test)
 
 add_executable(xb_wire_binary_codegen_test wire_binary_codegen_test.cpp)
 target_link_libraries(xb_wire_binary_codegen_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::header)
+  PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_binary_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_binary_codegen_test COMMAND xb_wire_binary_codegen_test)
 
@@ -459,12 +452,12 @@ add_test(NAME xb_wire_view_decode_test COMMAND xb_wire_view_decode_test)
 
 add_executable(xb_wire_owned_codegen_test wire_owned_codegen_test.cpp)
 target_link_libraries(xb_wire_owned_codegen_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::header)
+  PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_owned_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_owned_codegen_test COMMAND xb_wire_owned_codegen_test)
 
 add_executable(xb_wire_concept_codegen_test wire_concept_codegen_test.cpp)
 target_link_libraries(xb_wire_concept_codegen_test
-  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::header)
+  PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_concept_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_concept_codegen_test COMMAND xb_wire_concept_codegen_test)

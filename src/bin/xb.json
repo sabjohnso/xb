@@ -138,6 +138,26 @@
           "doc": ["Skip clang-format post-processing of generated files."]
         },
         {
+          "kind": "option",
+          "names": ["encoding"],
+          "doc": ["Binary Encoding Specification (BES) file. When provided, generates binary view/owned types alongside XML types."],
+          "type": "file",
+          "docv": "FILE"
+        },
+        {
+          "kind": "option",
+          "names": ["validation-level"],
+          "doc": ["Default validation level for binary types: full (default), structural, or discriminant."],
+          "type": "string",
+          "docv": "LEVEL",
+          "default": "full"
+        },
+        {
+          "kind": "flag",
+          "names": ["binary-only"],
+          "doc": ["Generate only binary types (suppress XML type generation)."]
+        },
+        {
           "kind": "positional",
           "name": "schemas",
           "doc": ["XSD schema files to process."],

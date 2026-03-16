@@ -1,6 +1,6 @@
 #include <xb/wire/encoding_resolver.hpp>
 
-#include <encoding.hpp>
+#include <xb/wire/encoding.hpp>
 
 #include <xb/complex_type.hpp>
 #include <xb/content_type.hpp>

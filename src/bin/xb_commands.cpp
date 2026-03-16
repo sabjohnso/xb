@@ -24,6 +24,11 @@
 #include <xb/schematron_overlay.hpp>
 #include <xb/schematron_parser.hpp>
 #include <xb/type_map.hpp>
+#include <xb/wire/bes_resolver.hpp>
+#include <xb/wire/binary_codegen.hpp>
+#include <xb/wire/encoding.hpp>
+#include <xb/wire/encoding_resolver.hpp>
+#include <xb/wire/layout_engine.hpp>
 #include <xb/xsd_to_rng.hpp>
 #include <xb/xsd_writer.hpp>
 
@@ -254,20 +259,160 @@ namespace {
     if (ns_style_str == "full")
       codegen_opts.ns_style = xb::namespace_style::full_uri;
 
-    // Generate code
+    // Generate XML types (unless --binary-only)
+    bool binary_only = config.value("binary-only", false);
+    std::string encoding_file = config.value("encoding", "");
+
     std::vector<xb::cpp_file> files;
-    try {
-      xb::codegen gen(schemas, types, codegen_opts);
-      files = gen.generate();
-    } catch (const std::exception& e) {
-      std::cerr << "xb: code generation error: " << e.what() << "\n";
-      return exit_codegen;
+    if (!binary_only) {
+      try {
+        xb::codegen gen(schemas, types, codegen_opts);
+        files = gen.generate();
+      } catch (const std::exception& e) {
+        std::cerr << "xb: code generation error: " << e.what() << "\n";
+        return exit_codegen;
+      }
+    }
+
+    // Generate binary types (when --encoding is provided)
+    std::string binary_header_text;
+    if (!encoding_file.empty()) {
+      try {
+        // Parse BES document
+        std::string bes_xml = read_file(encoding_file);
+        xb::expat_reader bes_reader(bes_xml);
+        bes_reader.read(); // advance to root element
+        auto encoding = xb::bes::read_encoding_type(bes_reader);
+
+        // Resolve imports
+        auto resolved = xb::wire::resolve_imports(
+            std::move(encoding),
+            [&](const std::string& href) -> xb::bes::encoding_type {
+              auto import_path =
+                  (fs::path(encoding_file).parent_path() / href).string();
+              std::string import_xml = read_file(import_path);
+              xb::expat_reader import_reader(import_xml);
+              import_reader.read();
+              return xb::bes::read_encoding_type(import_reader);
+            });
+
+        // Build encoding plan
+        xb::wire::encoding_plan<xb::bes::encoding_type> plan(resolved, schemas);
+
+        // Get defaults
+        xb::bes::defaults_type defaults;
+        if (resolved.defaults.has_value()) defaults = *resolved.defaults;
+
+        // Generate binary types for each bound message
+        std::ostringstream binary_header;
+        binary_header << "#pragma once\n\n";
+        binary_header << "#include <cstddef>\n";
+        binary_header << "#include <cstdint>\n";
+        binary_header << "#include <cstring>\n";
+        binary_header << "#include <optional>\n";
+        binary_header << "#include <span>\n";
+        binary_header << "#include <stdexcept>\n";
+        binary_header << "#include <string_view>\n";
+        binary_header << "#include <variant>\n";
+        binary_header << "#include <vector>\n\n";
+        binary_header << "#include <xb/wire/bits.hpp>\n";
+        binary_header << "#include <xb/wire/byteswap.hpp>\n";
+        binary_header << "#include <xb/wire/types.hpp>\n\n";
+
+        // Collect discriminator entries for framing dispatch
+        std::vector<xb::wire::message_entry> disc_entries;
+
+        for (const auto& bound : plan.messages()) {
+          auto& msg = *bound.message;
+          auto layout = xb::wire::compute_layout(msg, defaults);
+
+          std::string base_name = msg.name;
+
+          // Concept
+          binary_header << xb::wire::generate_concept(base_name + "_message",
+                                                      msg, layout, defaults);
+          binary_header << "\n";
+
+          // Base class
+          binary_header << xb::wire::generate_base_class(base_name + "_base",
+                                                         msg, layout, defaults);
+          binary_header << "\n";
+
+          // View class
+          binary_header << xb::wire::generate_view_class(base_name + "_view",
+                                                         msg, layout, defaults);
+          binary_header << "\n";
+
+          // Mutable view class
+          binary_header << xb::wire::generate_mutable_view_class(
+              base_name + "_mutable_view", msg, layout, defaults);
+          binary_header << "\n";
+
+          // Owned class
+          binary_header << xb::wire::generate_owned_class(
+              base_name + "_owned", msg, layout, defaults);
+          binary_header << "\n";
+
+          // Collect discriminator entry if message has a value
+          if (msg.discriminant_value.has_value()) {
+            disc_entries.push_back(
+                {base_name + "_view", *msg.discriminant_value});
+          }
+        }
+
+        // Generate discriminator if we have entries and framing
+        if (!disc_entries.empty()) {
+          // Find discriminant field from first framing
+          const auto* framing = [&]() -> const xb::bes::framing_type* {
+            for (const auto& bound : plan.messages()) {
+              if (bound.message->framing.has_value()) {
+                return plan.find_framing(*bound.message->framing);
+              }
+            }
+            return nullptr;
+          }();
+
+          if (framing) {
+            // Find discriminant field offset in framing
+            xb::bes::defaults_type framing_defaults = defaults;
+            auto framing_layout =
+                xb::wire::compute_layout(*framing, framing_defaults);
+
+            for (const auto& item : framing->choice) {
+              std::visit(
+                  [&](const auto& v) {
+                    if constexpr (requires { v.field; }) {
+                      // discriminant_type — find the field
+                      for (const auto& fl : framing_layout.fields) {
+                        if (fl.name == v.field && fl.offset_bits.has_value()) {
+                          xb::wire::discriminant_info disc_info;
+                          disc_info.field_name = v.field;
+                          disc_info.offset_bits = *fl.offset_bits;
+                          disc_info.width_bits = fl.width_bits;
+                          binary_header << xb::wire::generate_discriminator(
+                              "discriminate", disc_info, disc_entries);
+                        }
+                      }
+                    }
+                  },
+                  item);
+            }
+          }
+        }
+
+        binary_header_text = binary_header.str();
+
+      } catch (const std::exception& e) {
+        std::cerr << "xb: binary encoding error: " << e.what() << "\n";
+        return exit_codegen;
+      }
     }
 
     // --list-outputs: print filenames and exit
     if (list_outputs) {
       for (const auto& file : files)
         std::cout << file.filename << "\n";
+      if (!binary_header_text.empty()) std::cout << "wire_types.hpp\n";
       return exit_success;
     }
 
@@ -294,6 +439,20 @@ namespace {
       if (!no_format)
         code = xb::format_cpp_code(code, path.string(), style_file);
       out << code;
+    }
+
+    // Write binary header directly (not through cpp_writer)
+    if (!binary_header_text.empty()) {
+      auto path = fs::path(output_dir) / "wire_types.hpp";
+      std::ofstream out(path);
+      if (!out) {
+        std::cerr << "xb: cannot write file: " << path.string() << "\n";
+        return exit_io;
+      }
+      if (!no_format)
+        binary_header_text =
+            xb::format_cpp_code(binary_header_text, path.string(), style_file);
+      out << binary_header_text;
     }
 
     return exit_success;
