@@ -456,3 +456,9 @@ target_link_libraries(xb_wire_view_decode_test
   PRIVATE Catch2::Catch2WithMain xb::header)
 target_compile_features(xb_wire_view_decode_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_wire_view_decode_test COMMAND xb_wire_view_decode_test)
+
+add_executable(xb_wire_owned_codegen_test wire_owned_codegen_test.cpp)
+target_link_libraries(xb_wire_owned_codegen_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_types xb::header)
+target_compile_features(xb_wire_owned_codegen_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_wire_owned_codegen_test COMMAND xb_wire_owned_codegen_test)

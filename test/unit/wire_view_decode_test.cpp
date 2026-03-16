@@ -367,3 +367,110 @@ TEST_CASE("view decode: ITCH-like message layout", "[wire][view_decode]") {
   std::memcpy(&price, span.data() + 34, sizeof(price));
   CHECK(from_wire<std::endian::big>(price) == 150000);
 }
+
+// ---------------------------------------------------------------------------
+// Round-trip: encode via mutator pattern, decode via accessor pattern
+// ---------------------------------------------------------------------------
+
+TEST_CASE("round-trip: big-endian uint32 encode then decode",
+          "[wire][round_trip]") {
+  std::array<std::byte, 4> buf{};
+  std::span<std::byte> wspan(buf);
+
+  // Encode: to_wire + memcpy (mutator pattern)
+  std::uint32_t write_val = to_wire<std::endian::big>(std::uint32_t{42});
+  std::memcpy(wspan.data() + 0, &write_val, sizeof(write_val));
+
+  // Decode: memcpy + from_wire (accessor pattern)
+  std::span<const std::byte> rspan(buf);
+  std::uint32_t read_val;
+  std::memcpy(&read_val, rspan.data() + 0, sizeof(read_val));
+  CHECK(from_wire<std::endian::big>(read_val) == 42);
+}
+
+TEST_CASE("round-trip: little-endian uint64 encode then decode",
+          "[wire][round_trip]") {
+  std::array<std::byte, 8> buf{};
+  std::span<std::byte> wspan(buf);
+
+  std::uint64_t write_val =
+      to_wire<std::endian::little>(std::uint64_t{1000000000ULL});
+  std::memcpy(wspan.data() + 0, &write_val, sizeof(write_val));
+
+  std::span<const std::byte> rspan(buf);
+  std::uint64_t read_val;
+  std::memcpy(&read_val, rspan.data() + 0, sizeof(read_val));
+  CHECK(from_wire<std::endian::little>(read_val) == 1000000000ULL);
+}
+
+TEST_CASE("round-trip: single-byte encode then decode", "[wire][round_trip]") {
+  std::array<std::byte, 1> buf{};
+
+  // Encode
+  buf[0] = static_cast<std::byte>(0xAB);
+
+  // Decode
+  std::span<const std::byte> rspan(buf);
+  CHECK(static_cast<std::uint8_t>(rspan[0]) == 0xAB);
+}
+
+TEST_CASE("round-trip: sub-byte bit fields encode then decode",
+          "[wire][round_trip]") {
+  std::array<std::byte, 1> buf{};
+  std::span<std::byte> wspan(buf);
+
+  // Encode 3-bit field at offset 0, value = 5
+  insert_bits<0, 3>(wspan, std::uint8_t{5});
+  // Encode 5-bit field at offset 3, value = 26
+  insert_bits<3, 5>(wspan, std::uint8_t{26});
+
+  // Decode
+  std::span<const std::byte> rspan(buf);
+  CHECK(extract_bits<0, 3>(rspan) == 5);
+  CHECK(extract_bits<3, 5>(rspan) == 26);
+}
+
+TEST_CASE("round-trip: string encode then decode", "[wire][round_trip]") {
+  std::array<std::byte, 8> buf{};
+  std::span<std::byte> wspan(buf);
+
+  // Encode: copy string, pad with spaces
+  std::string_view sym = "AAPL";
+  std::memcpy(wspan.data(), sym.data(), sym.size());
+  std::memset(wspan.data() + sym.size(), ' ', 8 - sym.size());
+
+  // Decode
+  std::span<const std::byte> rspan(buf);
+  auto result =
+      std::string_view(reinterpret_cast<const char*>(rspan.data()), 8);
+  CHECK(result == "AAPL    ");
+}
+
+TEST_CASE("round-trip: multi-field message encode then decode",
+          "[wire][round_trip]") {
+  // 13-byte message: uint64 price + uint32 quantity + uint8 side
+  std::array<std::byte, 13> buf{};
+  std::span<std::byte> wspan(buf);
+
+  // Encode
+  auto price_w = to_wire<std::endian::big>(std::uint64_t{1500000});
+  std::memcpy(wspan.data() + 0, &price_w, sizeof(price_w));
+
+  auto qty_w = to_wire<std::endian::big>(std::uint32_t{100});
+  std::memcpy(wspan.data() + 8, &qty_w, sizeof(qty_w));
+
+  wspan[12] = static_cast<std::byte>(1); // side = Buy
+
+  // Decode
+  std::span<const std::byte> rspan(buf);
+
+  std::uint64_t price_r;
+  std::memcpy(&price_r, rspan.data() + 0, sizeof(price_r));
+  CHECK(from_wire<std::endian::big>(price_r) == 1500000ULL);
+
+  std::uint32_t qty_r;
+  std::memcpy(&qty_r, rspan.data() + 8, sizeof(qty_r));
+  CHECK(from_wire<std::endian::big>(qty_r) == 100);
+
+  CHECK(static_cast<std::uint8_t>(rspan[12]) == 1);
+}

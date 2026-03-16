@@ -235,6 +235,64 @@ namespace xb::wire {
           << "; }\n";
     }
 
+    // --- Write mutator emitters ---
+
+    // Emit mutator for a byte-aligned integer field using to_wire
+    inline void
+    emit_aligned_int_mutator(std::ostringstream& out, const std::string& name,
+                             const std::string& cpp_type,
+                             const std::string& endian, unsigned offset_bytes,
+                             unsigned width_bytes) {
+      out << "  void set_" << name << "(" << cpp_type << " v) {\n";
+      if (width_bytes == 1) {
+        out << "    buf_[" << offset_bytes
+            << "] = static_cast<std::byte>(v);\n";
+      } else {
+        out << "    v = xb::wire::to_wire<" << endian << ">(v);\n";
+        out << "    std::memcpy(buf_.data() + " << offset_bytes
+            << ", &v, sizeof(v));\n";
+      }
+      out << "  }\n";
+    }
+
+    // Emit mutator for a sub-byte field using insert_bits
+    inline void
+    emit_bitfield_mutator(std::ostringstream& out, const std::string& name,
+                          const std::string& cpp_type, unsigned offset_bits,
+                          unsigned width_bits) {
+      out << "  void set_" << name << "(" << cpp_type << " v) {\n";
+      out << "    xb::wire::insert_bits<" << offset_bits << ", " << width_bits
+          << ">(buf_, static_cast<xb::wire::detail::uint_for_width_t<"
+          << width_bits << ">>(v));\n";
+      out << "  }\n";
+    }
+
+    // Emit mutator for a fixed-width string field
+    inline void
+    emit_string_mutator(std::ostringstream& out, const std::string& name,
+                        unsigned offset_bytes, unsigned width_bytes) {
+      out << "  void set_" << name << "(std::string_view v) {\n";
+      out << "    auto n = std::min(v.size(), std::size_t{" << width_bytes
+          << "});\n";
+      out << "    std::memcpy(buf_.data() + " << offset_bytes
+          << ", v.data(), n);\n";
+      out << "    std::memset(buf_.data() + " << offset_bytes << " + n, ' ', "
+          << width_bytes << " - n);\n";
+      out << "  }\n";
+    }
+
+    // Emit mutator for a raw binary field
+    inline void
+    emit_raw_mutator(std::ostringstream& out, const std::string& name,
+                     unsigned offset_bytes, unsigned width_bytes) {
+      out << "  void set_" << name << "(std::span<const std::byte> v) {\n";
+      out << "    auto n = std::min(v.size(), std::size_t{" << width_bytes
+          << "});\n";
+      out << "    std::memcpy(buf_.data() + " << offset_bytes
+          << ", v.data(), n);\n";
+      out << "  }\n";
+    }
+
     // Build field index: maps field name → index into message.choice
     // for looking up encoding params from the original BES field.
     template <typename Message>
@@ -335,6 +393,65 @@ namespace xb::wire {
         return false;
       }
 
+      // Emit a write mutator for a resolved field.
+      template <typename Defaults>
+      bool
+      emit_mutator(std::ostringstream& out, const resolved_field& rf,
+                   const Defaults& defaults) const {
+        // No mutators for padding or constants
+        if (rf.category == field_category::padding ||
+            rf.category == field_category::constant)
+          return false;
+
+        for (const auto& item : message.choice) {
+          auto emitted = std::visit(
+              [&](const auto& v) -> bool {
+                using V = std::decay_t<decltype(v)>;
+                if constexpr (has_name_concept<V> && has_bits_concept<V>) {
+                  if (v.name != rf.name) return false;
+
+                  // Raw binary field
+                  if (field_is_raw(v) && rf.offset_bits.has_value() &&
+                      *rf.offset_bits % 8 == 0 && rf.width_bits % 8 == 0) {
+                    emit_raw_mutator(out, rf.name, *rf.offset_bits / 8,
+                                     rf.width_bits / 8);
+                    return true;
+                  }
+
+                  // String field
+                  if (field_is_string(v) && rf.offset_bits.has_value() &&
+                      *rf.offset_bits % 8 == 0 && rf.width_bits % 8 == 0) {
+                    emit_string_mutator(out, rf.name, *rf.offset_bits / 8,
+                                        rf.width_bits / 8);
+                    return true;
+                  }
+
+                  // Integer field
+                  bool is_signed = field_is_signed(v);
+                  auto cpp_type = is_signed
+                                      ? int_type_for_width(rf.width_bits)
+                                      : uint_type_for_width(rf.width_bits);
+                  auto endian = resolve_endian(v, defaults);
+
+                  if (rf.offset_bits.has_value() &&
+                      is_byte_aligned(*rf.offset_bits, rf.width_bits)) {
+                    emit_aligned_int_mutator(out, rf.name, cpp_type, endian,
+                                             *rf.offset_bits / 8,
+                                             rf.width_bits / 8);
+                  } else if (rf.offset_bits.has_value()) {
+                    emit_bitfield_mutator(out, rf.name, cpp_type,
+                                          *rf.offset_bits, rf.width_bits);
+                  }
+                  return true;
+                }
+                return false;
+              },
+              item);
+          if (emitted) return true;
+        }
+        return false;
+      }
+
       // Concept helpers matching layout_engine's pattern
       template <typename T>
       static constexpr bool has_name_concept = requires(T t) { t.name; };
@@ -375,6 +492,87 @@ namespace xb::wire {
 
     for (const auto& rf : layout.fields) {
       source.emit_accessor(out, rf, defaults);
+      out << "\n";
+    }
+
+    out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
+
+    out << "};\n";
+
+    return out.str();
+  }
+
+  /// Generate a C++ owned class for a fixed-layout BES message.
+  /// The class owns a std::vector<std::byte> and provides both
+  /// read accessors and write mutators.
+  template <typename Message, typename Defaults>
+  std::string
+  generate_owned_class(const std::string& class_name, const Message& message,
+                       const resolved_layout& layout,
+                       const Defaults& defaults) {
+    std::ostringstream out;
+
+    unsigned wire_bytes = layout.is_fixed ? (layout.total_bits + 7) / 8 : 0;
+
+    out << "class " << class_name << " {\n";
+    out << "  std::vector<std::byte> buf_;\n";
+    out << "public:\n";
+    out << "  " << class_name << "() : buf_(wire_size, std::byte{0}) {}\n\n";
+
+    detail::field_source<Message> source{message};
+
+    for (const auto& rf : layout.fields) {
+      source.emit_accessor(out, rf, defaults);
+      source.emit_mutator(out, rf, defaults);
+      out << "\n";
+    }
+
+    out << "  auto buffer() const -> std::span<const std::byte> { return "
+           "buf_; }\n";
+    out << "  auto mutable_buffer() -> std::span<std::byte> { return "
+           "buf_; }\n";
+    out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
+
+    out << "};\n";
+
+    return out.str();
+  }
+
+  /// Generate a C++ mutable view class for a fixed-layout BES message.
+  /// Non-owning: wraps a std::span<std::byte> with both read accessors
+  /// and write mutators.
+  template <typename Message, typename Defaults>
+  std::string
+  generate_mutable_view_class(const std::string& class_name,
+                              const Message& message,
+                              const resolved_layout& layout,
+                              const Defaults& defaults) {
+    std::ostringstream out;
+
+    unsigned wire_bytes = layout.is_fixed ? (layout.total_bits + 7) / 8 : 0;
+
+    out << "template <xb::wire::validation_level V = "
+           "xb::wire::validation_level::full>\n";
+    out << "class " << class_name << " {\n";
+    out << "  std::span<std::byte> buf_;\n";
+    out << "public:\n";
+    out << "  explicit " << class_name
+        << "(std::span<std::byte> buf) : buf_(buf) {\n";
+    if (layout.is_fixed && wire_bytes > 0) {
+      out << "    if constexpr (V >= xb::wire::validation_level::structural) "
+             "{\n";
+      out << "      if (buf.size() < wire_size)\n";
+      out << "        throw std::runtime_error(\"" << class_name
+          << ": buffer too small\");\n";
+      out << "    }\n";
+    }
+    out << "  }\n\n";
+
+    detail::field_source<Message> source{message};
+
+    for (const auto& rf : layout.fields) {
+      source.emit_accessor(out, rf, defaults);
+      source.emit_mutator(out, rf, defaults);
       out << "\n";
     }
 
