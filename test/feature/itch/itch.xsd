@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://example.com/itch"
+           xmlns:tns="http://example.com/itch"
+           elementFormDefault="qualified">
+
+  <!-- NASDAQ ITCH 5.0 Add Order (simplified subset) -->
+  <xs:complexType name="AddOrder">
+    <xs:sequence>
+      <xs:element name="stock_locate" type="xs:unsignedShort"/>
+      <xs:element name="tracking_number" type="xs:unsignedShort"/>
+      <xs:element name="timestamp" type="xs:unsignedLong"/>
+      <xs:element name="order_reference" type="xs:unsignedLong"/>
+      <xs:element name="side" type="xs:unsignedByte"/>
+      <xs:element name="shares" type="xs:unsignedInt"/>
+      <xs:element name="stock" type="xs:string"/>
+      <xs:element name="price" type="xs:unsignedInt"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- NASDAQ ITCH 5.0 Trade (simplified subset) -->
+  <xs:complexType name="Trade">
+    <xs:sequence>
+      <xs:element name="stock_locate" type="xs:unsignedShort"/>
+      <xs:element name="tracking_number" type="xs:unsignedShort"/>
+      <xs:element name="timestamp" type="xs:unsignedLong"/>
+      <xs:element name="order_reference" type="xs:unsignedLong"/>
+      <xs:element name="side" type="xs:unsignedByte"/>
+      <xs:element name="shares" type="xs:unsignedInt"/>
+      <xs:element name="stock" type="xs:string"/>
+      <xs:element name="price" type="xs:unsignedInt"/>
+      <xs:element name="match_number" type="xs:unsignedLong"/>
+    </xs:sequence>
+  </xs:complexType>
+
+</xs:schema>

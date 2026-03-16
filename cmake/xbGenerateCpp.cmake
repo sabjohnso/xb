@@ -25,6 +25,9 @@ at build time.
       [GENERATE_DOCS]
       [SEPARATE_FWD_HEADER]
       [NO_FORMAT]
+      [ENCODING <bes-file>]
+      [VALIDATION_LEVEL <full|structural|discriminant>]
+      [BINARY_ONLY]
     )
 
   ``MODE`` controls the output layout:
@@ -64,8 +67,8 @@ at build time.
 
 function(xb_generate_cpp)
   cmake_parse_arguments(XB_GEN
-    "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT"
-    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE"
+    "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT;BINARY_ONLY"
+    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL"
     "SCHEMAS;NAMESPACE_MAP"
     ${ARGN})
 
@@ -164,12 +167,27 @@ function(xb_generate_cpp)
     list(APPEND xb_cmd --no-format)
   endif()
 
+  if(XB_GEN_ENCODING)
+    list(APPEND xb_cmd --encoding "${XB_GEN_ENCODING}")
+  endif()
+
+  if(XB_GEN_VALIDATION_LEVEL)
+    list(APPEND xb_cmd --validation-level "${XB_GEN_VALIDATION_LEVEL}")
+  endif()
+
+  if(XB_GEN_BINARY_ONLY)
+    list(APPEND xb_cmd --binary-only)
+  endif()
+
   list(APPEND xb_cmd ${XB_GEN_SCHEMAS})
 
   # --- Collect dependencies for the custom command ---
   set(xb_deps ${XB_GEN_SCHEMAS})
   if(XB_GEN_TYPE_MAP)
     list(APPEND xb_deps "${XB_GEN_TYPE_MAP}")
+  endif()
+  if(XB_GEN_ENCODING)
+    list(APPEND xb_deps "${XB_GEN_ENCODING}")
   endif()
 
   # --- Determine header/source suffixes for file matching ---
@@ -223,6 +241,12 @@ function(xb_generate_cpp)
         endif()
         if(XB_GEN_SEPARATE_FWD_HEADER)
           list(APPEND list_cmd --separate-fwd-header)
+        endif()
+        if(XB_GEN_ENCODING)
+          list(APPEND list_cmd --encoding "${XB_GEN_ENCODING}")
+        endif()
+        if(XB_GEN_BINARY_ONLY)
+          list(APPEND list_cmd --binary-only)
         endif()
         list(APPEND list_cmd ${XB_GEN_SCHEMAS})
 

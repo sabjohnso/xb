@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ITCH 5.0 binary encoding specification (simplified subset).
+     Big-endian, fixed-width fields, space-padded ASCII strings,
+     prices in 4 implied decimal places. -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/itch">
+
+  <defaults byte-order="big-endian"/>
+
+  <message name="AddOrder" type="AddOrder" discriminant-value="0x41">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="stock_locate" bits="16"/>
+    <field name="tracking_number" bits="16"/>
+    <field name="timestamp" bits="48"/>
+    <field name="order_reference" bits="64"/>
+    <field name="side" bits="8"/>
+    <field name="shares" bits="32"/>
+    <field name="stock" bits="64" encoding="ascii"/>
+    <field name="price" bits="32"/>
+  </message>
+
+  <message name="Trade" type="Trade" discriminant-value="0x50">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="stock_locate" bits="16"/>
+    <field name="tracking_number" bits="16"/>
+    <field name="timestamp" bits="48"/>
+    <field name="order_reference" bits="64"/>
+    <field name="side" bits="8"/>
+    <field name="shares" bits="32"/>
+    <field name="stock" bits="64" encoding="ascii"/>
+    <field name="price" bits="32"/>
+    <field name="match_number" bits="64"/>
+  </message>
+
+</encoding>

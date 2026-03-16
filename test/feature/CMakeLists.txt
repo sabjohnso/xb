@@ -131,6 +131,21 @@ target_link_libraries(xb_xeag_lexer_pascal_test
 target_compile_features(xb_xeag_lexer_pascal_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xeag_lexer_pascal_test COMMAND xb_xeag_lexer_pascal_test)
 
+# --- ITCH binary encoding integration test ---
+xb_generate_cpp(
+  TARGET xb_itch_binary_types
+  SCHEMAS ${PROJECT_SOURCE_DIR}/test/feature/itch/itch.xsd
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/itch/itch.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_itch_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_itch_binary_test itch_binary_test.cpp)
+target_link_libraries(xb_itch_binary_test
+  PRIVATE Catch2::Catch2WithMain xb_itch_binary_types xb::header)
+target_compile_features(xb_itch_binary_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_itch_binary_test COMMAND xb_itch_binary_test)
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})
