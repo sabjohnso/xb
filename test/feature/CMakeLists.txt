@@ -146,6 +146,12 @@ target_link_libraries(xb_itch_binary_test
 target_compile_features(xb_itch_binary_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_itch_binary_test COMMAND xb_itch_binary_test)
 
+add_executable(xb_itch_benchmark_test itch_benchmark_test.cpp)
+target_link_libraries(xb_itch_benchmark_test
+  PRIVATE Catch2::Catch2WithMain xb_itch_binary_types xb::header)
+target_compile_features(xb_itch_benchmark_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_itch_benchmark_test COMMAND xb_itch_benchmark_test)
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})
