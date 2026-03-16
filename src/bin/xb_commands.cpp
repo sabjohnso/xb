@@ -720,13 +720,14 @@ namespace {
 
 int
 xb_cli::run(const nlohmann::json& config) {
-  // Detect subcommand from unique config keys:
-  // - "input" key → convert
-  // - "element" key → sample-doc
-  // - "source" key → fetch
-  // - otherwise → generate (root command)
-  if (config.contains("input")) return run_convert(config);
-  if (config.contains("element")) return run_sample_doc(config);
-  if (config.contains("source")) return run_fetch(config);
-  return run_generate(config);
+  auto command = config.at("command").get<std::string>();
+  const auto& cmd_config = config.at(command);
+
+  if (command == "generate") return run_generate(cmd_config);
+  if (command == "sample-doc") return run_sample_doc(cmd_config);
+  if (command == "fetch") return run_fetch(cmd_config);
+  if (command == "convert") return run_convert(cmd_config);
+
+  std::cerr << "xb: unknown command: " << command << "\n";
+  return exit_usage;
 }
