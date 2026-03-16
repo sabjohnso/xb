@@ -452,6 +452,44 @@ namespace xb::wire {
         return false;
       }
 
+      // Resolve the C++ return type string for a field in the layout.
+      // Used by concept generation, base class generation, and accessor
+      // emission.
+      template <typename Defaults>
+      std::string
+      field_return_type(const resolved_field& rf,
+                        const Defaults& /*defaults*/) const {
+        if (rf.category == field_category::constant) return "auto";
+        if (rf.category == field_category::padding) return "";
+
+        for (const auto& item : message.choice) {
+          auto result = std::visit(
+              [&](const auto& v) -> std::string {
+                using V = std::decay_t<decltype(v)>;
+                if constexpr (has_name_concept<V> && has_bits_concept<V>) {
+                  if (v.name != rf.name) return "";
+
+                  if (field_is_raw(v)) return "std::span<const std::byte>";
+                  if (field_is_string(v)) return "std::string_view";
+
+                  bool is_signed = field_is_signed(v);
+                  auto cpp_type = is_signed
+                                      ? int_type_for_width(rf.width_bits)
+                                      : uint_type_for_width(rf.width_bits);
+
+                  if (field_has_null_value(v))
+                    return "std::optional<" + cpp_type + ">";
+
+                  return cpp_type;
+                }
+                return "";
+              },
+              item);
+          if (!result.empty()) return result;
+        }
+        return "";
+      }
+
       // Concept helpers matching layout_engine's pattern
       template <typename T>
       static constexpr bool has_name_concept = requires(T t) { t.name; };
@@ -579,6 +617,154 @@ namespace xb::wire {
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
 
     out << "};\n";
+
+    return out.str();
+  }
+
+  /// Generate a C++20 concept for a BES message type.
+  template <typename Message, typename Defaults>
+  std::string
+  generate_concept(const std::string& concept_name, const Message& message,
+                   const resolved_layout& layout, const Defaults& defaults) {
+    std::ostringstream out;
+
+    out << "template <typename T>\n";
+    out << "concept " << concept_name << " = requires(const T& t) {\n";
+
+    detail::field_source<Message> source{message};
+
+    bool has_requirements = false;
+    for (const auto& rf : layout.fields) {
+      if (rf.category == field_category::padding) continue;
+
+      auto ret_type = source.field_return_type(rf, defaults);
+      if (ret_type.empty()) continue;
+
+      if (rf.category == field_category::constant) {
+        out << "  t." << rf.name << "();\n";
+      } else {
+        out << "  { t." << rf.name << "() } -> std::convertible_to<" << ret_type
+            << ">;\n";
+      }
+      has_requirements = true;
+    }
+
+    if (!has_requirements) out << "  requires true;\n";
+
+    out << "};\n";
+
+    return out.str();
+  }
+
+  /// Generate an abstract base class for a BES message type.
+  template <typename Message, typename Defaults>
+  std::string
+  generate_base_class(const std::string& class_name, const Message& message,
+                      const resolved_layout& layout, const Defaults& defaults) {
+    std::ostringstream out;
+
+    out << "class " << class_name << " {\n";
+    out << "public:\n";
+    out << "  virtual ~" << class_name << "() = default;\n";
+
+    detail::field_source<Message> source{message};
+
+    for (const auto& rf : layout.fields) {
+      if (rf.category == field_category::padding) continue;
+
+      if (rf.category == field_category::constant) {
+        // Constants are static, not virtual — find the value
+        for (const auto& item : message.choice) {
+          std::visit(
+              [&](const auto& v) {
+                using V = std::decay_t<decltype(v)>;
+                if constexpr (detail::field_source<
+                                  Message>::template has_name_concept<V>) {
+                  if constexpr (detail::has_value_member<V>) {
+                    if constexpr (!detail::field_source<
+                                      Message>::template has_bits_concept<V>) {
+                      if (v.name == rf.name) {
+                        detail::emit_constant_accessor(out, rf.name, v.value);
+                      }
+                    }
+                  }
+                }
+              },
+              item);
+        }
+        continue;
+      }
+
+      auto ret_type = source.field_return_type(rf, defaults);
+      if (ret_type.empty()) continue;
+
+      out << "  virtual " << ret_type << " " << rf.name << "() const = 0;\n";
+    }
+
+    out << "};\n";
+
+    return out.str();
+  }
+
+  /// Discriminant field metadata for discriminator generation.
+  struct discriminant_info {
+    std::string field_name;
+    unsigned offset_bits;
+    unsigned width_bits;
+  };
+
+  /// Entry mapping a discriminant value to a view class name.
+  struct message_entry {
+    std::string view_class_name;
+    std::string discriminant_value;
+  };
+
+  /// Generate a discriminator function that reads a type field and
+  /// returns a std::variant of view types.
+  inline std::string
+  generate_discriminator(const std::string& function_name,
+                         const discriminant_info& disc,
+                         const std::vector<message_entry>& entries) {
+    std::ostringstream out;
+
+    auto disc_type = detail::uint_type_for_width(disc.width_bits);
+
+    // Build variant type list
+    out << "template <xb::wire::validation_level V = "
+           "xb::wire::validation_level::full>\n";
+    out << "auto " << function_name << "(std::span<const std::byte> buf)\n";
+    out << "    -> std::variant<";
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+      if (i > 0) out << ", ";
+      out << entries[i].view_class_name << "<V>";
+    }
+    out << "> {\n";
+
+    // Read the discriminant field
+    if (detail::is_byte_aligned(disc.offset_bits, disc.width_bits) &&
+        disc.width_bits == 8) {
+      out << "  auto disc = static_cast<" << disc_type << ">(buf["
+          << disc.offset_bits / 8 << "]);\n";
+    } else if (detail::is_byte_aligned(disc.offset_bits, disc.width_bits)) {
+      out << "  " << disc_type << " disc;\n";
+      out << "  std::memcpy(&disc, buf.data() + " << disc.offset_bits / 8
+          << ", sizeof(disc));\n";
+      out << "  disc = xb::wire::from_wire<std::endian::big>(disc);\n";
+    } else {
+      out << "  auto disc = static_cast<" << disc_type
+          << ">(xb::wire::extract_bits<" << disc.offset_bits << ", "
+          << disc.width_bits << ">(buf));\n";
+    }
+
+    // Switch on discriminant value
+    for (const auto& entry : entries) {
+      out << "  if (disc == static_cast<" << disc_type << ">("
+          << entry.discriminant_value << ")) return " << entry.view_class_name
+          << "<V>(buf);\n";
+    }
+
+    out << "  throw std::runtime_error(\"unknown message type\");\n";
+    out << "}\n";
 
     return out.str();
   }
