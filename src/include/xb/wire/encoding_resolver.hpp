@@ -214,11 +214,46 @@ namespace xb::wire {
         }
       }
 
-      // Build the result
+      // Build the result from explicit bindings
       for (auto& [type, cand] : best) {
         auto idx = messages_.size();
         messages_.push_back({type, cand.msg});
         type_index_[type] = idx;
+      }
+
+      // Encoding inheritance: for unbound derived types that extend
+      // a bound base type, inherit the base's encoding.  Iterate
+      // until no new bindings are added (handles transitive chains).
+      propagate_inheritance(schemas);
+    }
+
+    void
+    propagate_inheritance(const schema_set& schemas) {
+      bool changed = true;
+      while (changed) {
+        changed = false;
+        for (const auto& s : schemas.schemas()) {
+          for (const auto& ct : s.complex_types()) {
+            // Skip already-bound types
+            if (type_index_.contains(ct.name())) continue;
+
+            // Check for complex content with extension derivation
+            auto* cc = std::get_if<complex_content>(&ct.content().detail);
+            if (!cc) continue;
+            if (cc->derivation != derivation_method::extension) continue;
+
+            // Look up the base type's binding
+            auto base_it = type_index_.find(cc->base_type_name);
+            if (base_it == type_index_.end()) continue;
+
+            // Inherit: bind derived type to the base's message
+            auto idx = messages_.size();
+            messages_.push_back(
+                {ct.name(), messages_[base_it->second].message});
+            type_index_[ct.name()] = idx;
+            changed = true;
+          }
+        }
       }
     }
   };
