@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -194,6 +195,63 @@ TEST_CASE("view decode: string at non-zero offset", "[wire][view_decode]") {
       std::string_view(reinterpret_cast<const char*>(span.data() + 4), 4);
 
   CHECK(result == "IBM ");
+}
+
+// ---------------------------------------------------------------------------
+// Raw binary data decode
+// ---------------------------------------------------------------------------
+
+TEST_CASE("view decode: raw binary span at offset", "[wire][view_decode]") {
+  // 4-byte header + 8 bytes of raw payload
+  std::array<std::byte, 12> buf = {B(0x00), B(0x01), B(0x02), B(0x03),
+                                   B(0xDE), B(0xAD), B(0xBE), B(0xEF),
+                                   B(0xCA), B(0xFE), B(0xBA), B(0xBE)};
+  std::span<const std::byte> span(buf);
+
+  // Pattern: buf_.subspan(offset, size)
+  auto result = span.subspan(4, 8);
+
+  REQUIRE(result.size() == 8);
+  CHECK(result[0] == B(0xDE));
+  CHECK(result[1] == B(0xAD));
+  CHECK(result[7] == B(0xBE));
+}
+
+// ---------------------------------------------------------------------------
+// Optional field decode (null sentinel)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("view decode: optional uint32 with null sentinel - present",
+          "[wire][view_decode]") {
+  // price = 150000 = 0x000249F0, null = 0xFFFFFFFF
+  std::array<std::byte, 4> buf = {B(0x00), B(0x02), B(0x49), B(0xF0)};
+  std::span<const std::byte> span(buf);
+
+  std::uint32_t v;
+  std::memcpy(&v, span.data() + 0, sizeof(v));
+  v = from_wire<std::endian::big>(v);
+  auto result = (v == static_cast<std::uint32_t>(0xFFFFFFFF))
+                    ? std::optional<std::uint32_t>(std::nullopt)
+                    : std::optional<std::uint32_t>(v);
+
+  REQUIRE(result.has_value());
+  CHECK(*result == 150000);
+}
+
+TEST_CASE("view decode: optional uint32 with null sentinel - absent",
+          "[wire][view_decode]") {
+  // null = 0xFFFFFFFF
+  std::array<std::byte, 4> buf = {B(0xFF), B(0xFF), B(0xFF), B(0xFF)};
+  std::span<const std::byte> span(buf);
+
+  std::uint32_t v;
+  std::memcpy(&v, span.data() + 0, sizeof(v));
+  v = from_wire<std::endian::big>(v);
+  auto result = (v == static_cast<std::uint32_t>(0xFFFFFFFF))
+                    ? std::optional<std::uint32_t>(std::nullopt)
+                    : std::optional<std::uint32_t>(v);
+
+  CHECK_FALSE(result.has_value());
 }
 
 // ---------------------------------------------------------------------------

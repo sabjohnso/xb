@@ -37,6 +37,10 @@ namespace xb::wire {
     template <typename T>
     concept has_byte_order = requires(T t) { t.byte_order; };
 
+    // Concept: has null_value member (field_type with sentinel)
+    template <typename T>
+    concept has_null_value = requires(T t) { t.null_value; };
+
     // Concept: has value member (constant_type)
     template <typename T>
     concept has_value_member = requires(T t) { t.value; };
@@ -78,6 +82,16 @@ namespace xb::wire {
       return false;
     }
 
+    // Determine if a field's encoding is raw binary
+    template <typename Field>
+    bool
+    field_is_raw(const Field& f) {
+      if constexpr (has_encoding<Field>) {
+        if (f.encoding.has_value()) { return to_string(*f.encoding) == "raw"; }
+      }
+      return false;
+    }
+
     // Determine if a field's encoding is signed (twos_complement)
     template <typename Field>
     bool
@@ -88,6 +102,24 @@ namespace xb::wire {
         }
       }
       return false;
+    }
+
+    // Determine if a field has a null_value sentinel
+    template <typename Field>
+    bool
+    field_has_null_value(const Field& f) {
+      if constexpr (has_null_value<Field>) { return f.null_value.has_value(); }
+      return false;
+    }
+
+    // Get the null_value string from a field
+    template <typename Field>
+    std::string
+    field_null_value(const Field& f) {
+      if constexpr (has_null_value<Field>) {
+        if (f.null_value.has_value()) return *f.null_value;
+      }
+      return "";
     }
 
     // Check if offset is byte-aligned and width is a standard size
@@ -130,6 +162,16 @@ namespace xb::wire {
       out << "  }\n";
     }
 
+    // Emit accessor for a raw binary field returning span
+    inline void
+    emit_raw_accessor(std::ostringstream& out, const std::string& name,
+                      unsigned offset_bytes, unsigned width_bytes) {
+      out << "  auto " << name << "() const -> std::span<const std::byte> {\n";
+      out << "    return buf_.subspan(" << offset_bytes << ", " << width_bytes
+          << ");\n";
+      out << "  }\n";
+    }
+
     // Emit accessor for a fixed-width string field
     inline void
     emit_string_accessor(std::ostringstream& out, const std::string& name,
@@ -138,6 +180,50 @@ namespace xb::wire {
       out << "    return std::string_view("
           << "reinterpret_cast<const char*>(buf_.data() + " << offset_bytes
           << "), " << width_bytes << ");\n";
+      out << "  }\n";
+    }
+
+    // Emit optional accessor for a byte-aligned integer with null sentinel
+    inline void
+    emit_optional_aligned_int_accessor(std::ostringstream& out,
+                                       const std::string& name,
+                                       const std::string& cpp_type,
+                                       const std::string& endian,
+                                       unsigned offset_bytes,
+                                       unsigned width_bytes,
+                                       const std::string& null_val) {
+      out << "  auto " << name << "() const -> std::optional<" << cpp_type
+          << "> {\n";
+      if (width_bytes == 1) {
+        out << "    auto v = static_cast<" << cpp_type << ">(buf_["
+            << offset_bytes << "]);\n";
+      } else {
+        out << "    " << cpp_type << " v;\n";
+        out << "    std::memcpy(&v, buf_.data() + " << offset_bytes
+            << ", sizeof(v));\n";
+        out << "    v = xb::wire::from_wire<" << endian << ">(v);\n";
+      }
+      out << "    if (v == static_cast<" << cpp_type << ">(" << null_val
+          << ")) return std::nullopt;\n";
+      out << "    return v;\n";
+      out << "  }\n";
+    }
+
+    // Emit optional accessor for a sub-byte field with null sentinel
+    inline void
+    emit_optional_bitfield_accessor(std::ostringstream& out,
+                                    const std::string& name,
+                                    const std::string& cpp_type,
+                                    unsigned offset_bits, unsigned width_bits,
+                                    const std::string& null_val) {
+      out << "  auto " << name << "() const -> std::optional<" << cpp_type
+          << "> {\n";
+      out << "    auto v = static_cast<" << cpp_type
+          << ">(xb::wire::extract_bits<" << offset_bits << ", " << width_bits
+          << ">(buf_));\n";
+      out << "    if (v == static_cast<" << cpp_type << ">(" << null_val
+          << ")) return std::nullopt;\n";
+      out << "    return v;\n";
       out << "  }\n";
     }
 
@@ -196,6 +282,14 @@ namespace xb::wire {
                 if constexpr (has_name_concept<V> && has_bits_concept<V>) {
                   if (v.name != rf.name) return false;
 
+                  // Raw binary field?
+                  if (field_is_raw(v) && rf.offset_bits.has_value() &&
+                      *rf.offset_bits % 8 == 0 && rf.width_bits % 8 == 0) {
+                    emit_raw_accessor(out, rf.name, *rf.offset_bits / 8,
+                                      rf.width_bits / 8);
+                    return true;
+                  }
+
                   // String field?
                   if (field_is_string(v) && rf.offset_bits.has_value() &&
                       *rf.offset_bits % 8 == 0 && rf.width_bits % 8 == 0) {
@@ -210,9 +304,20 @@ namespace xb::wire {
                                       ? int_type_for_width(rf.width_bits)
                                       : uint_type_for_width(rf.width_bits);
                   auto endian = resolve_endian(v, defaults);
+                  bool has_null = field_has_null_value(v);
+                  auto null_val = field_null_value(v);
 
-                  if (rf.offset_bits.has_value() &&
+                  if (has_null && rf.offset_bits.has_value() &&
                       is_byte_aligned(*rf.offset_bits, rf.width_bits)) {
+                    emit_optional_aligned_int_accessor(
+                        out, rf.name, cpp_type, endian, *rf.offset_bits / 8,
+                        rf.width_bits / 8, null_val);
+                  } else if (has_null && rf.offset_bits.has_value()) {
+                    emit_optional_bitfield_accessor(out, rf.name, cpp_type,
+                                                    *rf.offset_bits,
+                                                    rf.width_bits, null_val);
+                  } else if (rf.offset_bits.has_value() &&
+                             is_byte_aligned(*rf.offset_bits, rf.width_bits)) {
                     emit_aligned_int_accessor(out, rf.name, cpp_type, endian,
                                               *rf.offset_bits / 8,
                                               rf.width_bits / 8);
@@ -246,11 +351,25 @@ namespace xb::wire {
                       const resolved_layout& layout, const Defaults& defaults) {
     std::ostringstream out;
 
+    // wire_size computed early — used in both the constant and the check
+    unsigned wire_bytes = layout.is_fixed ? (layout.total_bits + 7) / 8 : 0;
+
+    out << "template <xb::wire::validation_level V = "
+           "xb::wire::validation_level::full>\n";
     out << "class " << class_name << " {\n";
     out << "  std::span<const std::byte> buf_;\n";
     out << "public:\n";
     out << "  explicit " << class_name
-        << "(std::span<const std::byte> buf) : buf_(buf) {}\n\n";
+        << "(std::span<const std::byte> buf) : buf_(buf) {\n";
+    if (layout.is_fixed && wire_bytes > 0) {
+      out << "    if constexpr (V >= xb::wire::validation_level::structural) "
+             "{\n";
+      out << "      if (buf.size() < wire_size)\n";
+      out << "        throw std::runtime_error(\"" << class_name
+          << ": buffer too small\");\n";
+      out << "    }\n";
+    }
+    out << "  }\n\n";
 
     detail::field_source<Message> source{message};
 
@@ -259,8 +378,6 @@ namespace xb::wire {
       out << "\n";
     }
 
-    // wire_size constant
-    unsigned wire_bytes = layout.is_fixed ? (layout.total_bits + 7) / 8 : 0;
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
 
     out << "};\n";

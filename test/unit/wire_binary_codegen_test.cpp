@@ -209,6 +209,163 @@ TEST_CASE("binary_codegen: fixed-width string field",
   CHECK_THAT(code, ContainsSubstring("string_view"));
 }
 
+TEST_CASE("binary_codegen: raw binary field returns span",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "WithPayload";
+
+  field_type f;
+  f.name = "payload";
+  f.bits = 128; // 16 bytes
+  f.encoding = primitive_encoding_type::raw;
+  msg.choice.push_back(std::move(f));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("payload_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("payload()"));
+  CHECK_THAT(code, ContainsSubstring("std::span<const std::byte>"));
+  // Should use subspan at correct offset and size
+  CHECK_THAT(code, ContainsSubstring("buf_.subspan("));
+}
+
+TEST_CASE("binary_codegen: enum-integer field returns integer",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "WithEnum";
+
+  field_type f;
+  f.name = "side";
+  f.bits = 8;
+  f.encoding = primitive_encoding_type::enum_integer;
+
+  // Add enum map with XSD→wire mappings
+  enum_map_type em;
+  enum_entry_type e1;
+  e1.xsd_value = "Buy";
+  e1.wire_value = "1";
+  enum_entry_type e2;
+  e2.xsd_value = "Sell";
+  e2.wire_value = "2";
+  em.entry = {e1, e2};
+  f.enum_map = em;
+
+  msg.choice.push_back(std::move(f));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("enum_view", msg, layout, defaults);
+
+  // At the view layer, enum fields decode as integers
+  CHECK_THAT(code, ContainsSubstring("side()"));
+  CHECK_THAT(code, ContainsSubstring("std::uint8_t"));
+}
+
+TEST_CASE("binary_codegen: enum-char field returns integer",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "WithCharEnum";
+
+  field_type f;
+  f.name = "msg_type";
+  f.bits = 8;
+  f.encoding = primitive_encoding_type::enum_char;
+
+  msg.choice.push_back(std::move(f));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("char_enum_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("msg_type()"));
+  CHECK_THAT(code, ContainsSubstring("std::uint8_t"));
+}
+
+TEST_CASE("binary_codegen: null_value field returns optional",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "WithOptional";
+
+  field_type f;
+  f.name = "price";
+  f.bits = 32;
+  f.null_value = "0xFFFFFFFF";
+  msg.choice.push_back(std::move(f));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("optional_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("price()"));
+  CHECK_THAT(code, ContainsSubstring("std::optional"));
+  CHECK_THAT(code, ContainsSubstring("0xFFFFFFFF"));
+}
+
+TEST_CASE("binary_codegen: null_value sub-byte field returns optional",
+          "[wire][binary_codegen]") {
+  defaults_type defaults;
+  defaults.byte_order = byte_order_type::big_endian;
+  defaults.alignment = 0;
+
+  message_type msg;
+  msg.name = "BitOptional";
+
+  field_type f;
+  f.name = "level";
+  f.bits = 4;
+  f.null_value = "0xF";
+  msg.choice.push_back(std::move(f));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("bit_opt_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("level()"));
+  CHECK_THAT(code, ContainsSubstring("std::optional"));
+  CHECK_THAT(code, ContainsSubstring("extract_bits"));
+  CHECK_THAT(code, ContainsSubstring("0xF"));
+}
+
+// ---------------------------------------------------------------------------
+// Validation level NTTP
+// ---------------------------------------------------------------------------
+
+TEST_CASE("binary_codegen: view class has validation_level template parameter",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Simple";
+  msg.choice.push_back(make_field("value", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("simple_view", msg, layout, defaults);
+
+  // Class should be templated on validation_level
+  CHECK_THAT(code, ContainsSubstring("validation_level"));
+  CHECK_THAT(code, ContainsSubstring("template"));
+}
+
+TEST_CASE("binary_codegen: structural validation checks buffer size",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Checked";
+  msg.choice.push_back(make_field("data", 64));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("checked_view", msg, layout, defaults);
+
+  // At structural level or above, constructor should validate buffer size
+  CHECK_THAT(code, ContainsSubstring("if constexpr"));
+  CHECK_THAT(code, ContainsSubstring("wire_size"));
+}
+
 TEST_CASE("binary_codegen: empty message", "[wire][binary_codegen]") {
   auto defaults = make_defaults(byte_order_type::big_endian);
 
