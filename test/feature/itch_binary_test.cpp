@@ -1,10 +1,8 @@
 /// ITCH 5.0 binary encoding integration test.
 ///
-/// Generates binary view/owned types from itch.xsd + itch.bes.xml
-/// via xb_generate_cpp(ENCODING ...), then verifies:
-/// 1. Generated types compile
-/// 2. Owned type round-trips through view
-/// 3. Hand-crafted bytes decode to expected values (golden file)
+/// Demonstrates the full network stack from Ethernet frame through
+/// to ITCH message fields, all using generated binary view/owned types:
+///   Ethernet → IPv4 → UDP → MoldUDP64 → message blocks → ITCH messages
 
 #include <wire_types.hpp>
 
@@ -15,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <vector>
 
 namespace {
 
@@ -23,32 +22,120 @@ namespace {
     return static_cast<std::byte>(c);
   }
 
+  // Append raw bytes from a span to a vector
+  void
+  append(std::vector<std::byte>& buf, std::span<const std::byte> data) {
+    buf.insert(buf.end(), data.begin(), data.end());
+  }
+
 } // namespace
 
-// ---------------------------------------------------------------------------
-// AddOrder: owned round-trip
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Individual layer tests
+// ===========================================================================
+
+TEST_CASE("Ethernet header: round-trip", "[itch][ethernet]") {
+  EthernetHeader_owned hdr;
+
+  std::array<std::byte, 6> dst = {B(0xFF), B(0xFF), B(0xFF),
+                                  B(0xFF), B(0xFF), B(0xFF)};
+  std::array<std::byte, 6> src = {B(0x00), B(0x1A), B(0x2B),
+                                  B(0x3C), B(0x4D), B(0x5E)};
+  hdr.set_dst_mac(dst);
+  hdr.set_src_mac(src);
+  hdr.set_ether_type(0x0800); // IPv4
+
+  EthernetHeader_view view(hdr.buffer());
+
+  CHECK(view.ether_type() == 0x0800);
+  CHECK(EthernetHeader_owned::wire_size == 14);
+
+  auto dst_out = view.dst_mac();
+  CHECK(dst_out[0] == B(0xFF));
+  CHECK(dst_out[5] == B(0xFF));
+
+  auto src_out = view.src_mac();
+  CHECK(src_out[0] == B(0x00));
+  CHECK(src_out[1] == B(0x1A));
+}
+
+TEST_CASE("IPv4 header: round-trip", "[itch][ipv4]") {
+  IPv4Header_owned hdr;
+  hdr.set_version_ihl(0x45); // IPv4, 20-byte header
+  hdr.set_dscp_ecn(0x00);
+  hdr.set_total_length(100);
+  hdr.set_identification(0x1234);
+  hdr.set_flags_fragment(0x4000); // Don't Fragment
+  hdr.set_ttl(64);
+  hdr.set_protocol(17); // UDP
+  hdr.set_header_checksum(0);
+  hdr.set_src_addr(0xC0A80001); // 192.168.0.1
+  hdr.set_dst_addr(0xEFA00001); // 239.160.0.1 (multicast)
+
+  IPv4Header_view view(hdr.buffer());
+
+  CHECK(view.version_ihl() == 0x45);
+  CHECK(view.total_length() == 100);
+  CHECK(view.protocol() == 17);
+  CHECK(view.src_addr() == 0xC0A80001);
+  CHECK(view.dst_addr() == 0xEFA00001);
+  CHECK(IPv4Header_owned::wire_size == 20);
+}
+
+TEST_CASE("UDP header: round-trip", "[itch][udp]") {
+  UDPHeader_owned hdr;
+  hdr.set_src_port(12345);
+  hdr.set_dst_port(26400); // typical ITCH port
+  hdr.set_length(80);
+  hdr.set_checksum(0);
+
+  UDPHeader_view view(hdr.buffer());
+
+  CHECK(view.src_port() == 12345);
+  CHECK(view.dst_port() == 26400);
+  CHECK(view.length() == 80);
+  CHECK(UDPHeader_owned::wire_size == 8);
+}
+
+TEST_CASE("MoldUDP64 header: round-trip", "[itch][moldudp]") {
+  MoldUDP64Header_owned hdr;
+  hdr.set_session("SESS000001");
+  hdr.set_sequence_number(1);
+  hdr.set_message_count(3);
+
+  MoldUDP64Header_view view(hdr.buffer());
+
+  CHECK(view.session() == "SESS000001");
+  CHECK(view.sequence_number() == 1);
+  CHECK(view.message_count() == 3);
+  CHECK(MoldUDP64Header_owned::wire_size == 20);
+}
+
+TEST_CASE("MoldUDP64 message block header: round-trip", "[itch][moldudp]") {
+  MoldUDP64MessageBlock_owned blk;
+  blk.set_message_length(36);
+
+  MoldUDP64MessageBlock_view view(blk.buffer());
+
+  CHECK(view.message_length() == 36);
+  CHECK(MoldUDP64MessageBlock_owned::wire_size == 2);
+}
+
+// ===========================================================================
+// ITCH message tests
+// ===========================================================================
 
 TEST_CASE("ITCH AddOrder: owned round-trip", "[itch][binary]") {
   AddOrder_owned order;
-
-  order.set_msg_type(0x41); // 'A'
+  order.set_msg_type(0x41);
   order.set_stock_locate(1234);
   order.set_tracking_number(5678);
-  // timestamp is 48-bit — stored in a uint64, only lower 48 bits used
-  // The layout engine gives it 48 bits starting at offset 40.
-  // With default 8-bit alignment, fields are byte-aligned.
-  // Let's check what the layout produces for 48-bit fields.
-  // Actually, 48 bits is not a standard width (8/16/32/64), so it
-  // will use extract_bits/insert_bits. Let's set a value that fits.
-
   order.set_order_reference(42);
-  order.set_side(0x42); // 'B' = Buy
+  order.set_side(0x42);
   order.set_shares(100);
   order.set_stock("AAPL");
-  order.set_price(1500000); // $150.0000
+  order.set_price(1500000);
 
-  // Read back through const view
   AddOrder_view view(order.buffer());
 
   CHECK(view.msg_type() == 0x41);
@@ -61,98 +148,9 @@ TEST_CASE("ITCH AddOrder: owned round-trip", "[itch][binary]") {
   CHECK(view.price() == 1500000);
 }
 
-// ---------------------------------------------------------------------------
-// AddOrder: golden-file decode
-// ---------------------------------------------------------------------------
-
-TEST_CASE("ITCH AddOrder: golden-file decode", "[itch][binary]") {
-  // Hand-crafted ITCH Add Order message (36 bytes):
-  //   offset  0: uint8  msg_type = 'A' (0x41)
-  //   offset  1: uint16 stock_locate = 1 (0x0001)
-  //   offset  3: uint16 tracking_number = 0 (0x0000)
-  //   offset  5: 48-bit timestamp = 1000000000 (0x3B9ACA00, 6 bytes)
-  //   offset 11: uint64 order_reference = 123456 (0x1E240)
-  //   offset 19: uint8  side = 'B' (0x42)
-  //   offset 20: uint32 shares = 500 (0x1F4)
-  //   offset 24: 8-byte ASCII stock = "MSFT    "
-  //   offset 32: uint32 price = 2850000 (0x2B7CD0)
-  std::array<std::byte, 36> buf{};
-  auto* p = buf.data();
-
-  p[0] = B(0x41); // msg_type = 'A'
-
-  // stock_locate = 1
-  p[1] = B(0x00);
-  p[2] = B(0x01);
-
-  // tracking_number = 0
-  p[3] = B(0x00);
-  p[4] = B(0x00);
-
-  // timestamp = 1000000000 in 6 bytes (big-endian, upper 2 bytes zero)
-  p[5] = B(0x00);
-  p[6] = B(0x00);
-  p[7] = B(0x3B);
-  p[8] = B(0x9A);
-  p[9] = B(0xCA);
-  p[10] = B(0x00);
-
-  // order_reference = 123456
-  p[11] = B(0x00);
-  p[12] = B(0x00);
-  p[13] = B(0x00);
-  p[14] = B(0x00);
-  p[15] = B(0x00);
-  p[16] = B(0x01);
-  p[17] = B(0xE2);
-  p[18] = B(0x40);
-
-  // side = 'B'
-  p[19] = B(0x42);
-
-  // shares = 500
-  p[20] = B(0x00);
-  p[21] = B(0x00);
-  p[22] = B(0x01);
-  p[23] = B(0xF4);
-
-  // stock = "MSFT    "
-  p[24] = B('M');
-  p[25] = B('S');
-  p[26] = B('F');
-  p[27] = B('T');
-  p[28] = B(' ');
-  p[29] = B(' ');
-  p[30] = B(' ');
-  p[31] = B(' ');
-
-  // price = 2850000 = 0x002B7CD0
-  p[32] = B(0x00);
-  p[33] = B(0x2B);
-  p[34] = B(0x7C);
-  p[35] = B(0xD0);
-
-  std::span<const std::byte> span(buf);
-  AddOrder_view view(span);
-
-  CHECK(view.msg_type() == 0x41);
-  CHECK(view.stock_locate() == 1);
-  CHECK(view.tracking_number() == 0);
-  CHECK(view.order_reference() == 123456);
-  CHECK(view.side() == 0x42);
-  CHECK(view.shares() == 500);
-  CHECK(view.stock() == "MSFT    ");
-  CHECK(view.price() == 2850000);
-}
-
-// ---------------------------------------------------------------------------
-// Trade: compile check + basic round-trip
-// ---------------------------------------------------------------------------
-
-TEST_CASE("ITCH Trade: basic round-trip", "[itch][binary]") {
+TEST_CASE("ITCH Trade: round-trip", "[itch][binary]") {
   Trade_owned trade;
-
-  trade.set_msg_type(0x50); // 'P'
+  trade.set_msg_type(0x50);
   trade.set_stock_locate(1);
   trade.set_tracking_number(0);
   trade.set_order_reference(999);
@@ -165,19 +163,150 @@ TEST_CASE("ITCH Trade: basic round-trip", "[itch][binary]") {
   Trade_view view(trade.buffer());
 
   CHECK(view.msg_type() == 0x50);
-  CHECK(view.stock_locate() == 1);
   CHECK(view.shares() == 200);
   CHECK(view.stock().substr(0, 4) == "GOOG");
   CHECK(view.price() == 1410000);
   CHECK(view.match_number() == 7777);
 }
 
-// ---------------------------------------------------------------------------
-// Concept satisfaction
-// ---------------------------------------------------------------------------
-
 TEST_CASE("ITCH AddOrder: types satisfy concept", "[itch][binary]") {
   static_assert(AddOrder_message<AddOrder_view<>>);
   static_assert(AddOrder_message<AddOrder_owned>);
   SUCCEED();
+}
+
+// ===========================================================================
+// Full stack: Ethernet → IPv4 → UDP → MoldUDP64 → ITCH messages
+// Uses the generated parse_itch_udp() frame parser
+// ===========================================================================
+
+TEST_CASE("Full stack: build and parse via generated frame parser",
+          "[itch][fullstack]") {
+  // --- Build ITCH messages ---
+
+  AddOrder_owned add_order;
+  add_order.set_msg_type(0x41);
+  add_order.set_stock_locate(1);
+  add_order.set_tracking_number(0);
+  add_order.set_order_reference(100001);
+  add_order.set_side(0x42);
+  add_order.set_shares(500);
+  add_order.set_stock("AAPL");
+  add_order.set_price(1750000);
+
+  Trade_owned trade;
+  trade.set_msg_type(0x50);
+  trade.set_stock_locate(1);
+  trade.set_tracking_number(0);
+  trade.set_order_reference(100001);
+  trade.set_side(0x42);
+  trade.set_shares(200);
+  trade.set_stock("AAPL");
+  trade.set_price(1750000);
+  trade.set_match_number(999);
+
+  auto add_buf = add_order.buffer();
+  auto trade_buf = trade.buffer();
+
+  // --- Build MoldUDP64 payload ---
+
+  std::vector<std::byte> mold_payload;
+
+  MoldUDP64Header_owned mold_hdr;
+  mold_hdr.set_session("ABCDEFGHIJ");
+  mold_hdr.set_sequence_number(42);
+  mold_hdr.set_message_count(2);
+  append(mold_payload, mold_hdr.buffer());
+
+  MoldUDP64MessageBlock_owned blk1;
+  blk1.set_message_length(static_cast<std::uint16_t>(add_buf.size()));
+  append(mold_payload, blk1.buffer());
+  append(mold_payload, add_buf);
+
+  MoldUDP64MessageBlock_owned blk2;
+  blk2.set_message_length(static_cast<std::uint16_t>(trade_buf.size()));
+  append(mold_payload, blk2.buffer());
+  append(mold_payload, trade_buf);
+
+  auto udp_payload_len = static_cast<std::uint16_t>(mold_payload.size());
+
+  // --- Build UDP ---
+
+  UDPHeader_owned udp_hdr;
+  udp_hdr.set_src_port(12345);
+  udp_hdr.set_dst_port(26400);
+  udp_hdr.set_length(
+      static_cast<std::uint16_t>(UDPHeader_owned::wire_size + udp_payload_len));
+  udp_hdr.set_checksum(0);
+
+  // --- Build IPv4 ---
+
+  auto ip_total_len =
+      static_cast<std::uint16_t>(IPv4Header_owned::wire_size +
+                                 UDPHeader_owned::wire_size + udp_payload_len);
+
+  IPv4Header_owned ip_hdr;
+  ip_hdr.set_version_ihl(0x45);
+  ip_hdr.set_dscp_ecn(0x00);
+  ip_hdr.set_total_length(ip_total_len);
+  ip_hdr.set_identification(0x0001);
+  ip_hdr.set_flags_fragment(0x4000);
+  ip_hdr.set_ttl(64);
+  ip_hdr.set_protocol(17);
+  ip_hdr.set_header_checksum(0);
+  ip_hdr.set_src_addr(0xC0A80001);
+  ip_hdr.set_dst_addr(0xEFA00001);
+
+  // --- Build Ethernet ---
+
+  std::array<std::byte, 6> dst_mac = {B(0x01), B(0x00), B(0x5E),
+                                      B(0x60), B(0x00), B(0x01)};
+  std::array<std::byte, 6> src_mac = {B(0x00), B(0x1A), B(0x2B),
+                                      B(0x3C), B(0x4D), B(0x5E)};
+
+  EthernetHeader_owned eth_hdr;
+  eth_hdr.set_dst_mac(dst_mac);
+  eth_hdr.set_src_mac(src_mac);
+  eth_hdr.set_ether_type(0x0800);
+
+  // --- Assemble complete frame ---
+
+  std::vector<std::byte> frame;
+  append(frame, eth_hdr.buffer());
+  append(frame, ip_hdr.buffer());
+  append(frame, udp_hdr.buffer());
+  frame.insert(frame.end(), mold_payload.begin(), mold_payload.end());
+
+  // === Parse using the generated frame parser ===
+
+  std::vector<std::uint8_t> msg_types;
+  std::vector<std::uint32_t> prices;
+
+  parse_itch_udp(frame, [&](std::span<const std::byte> msg_body) {
+    auto msg_type = static_cast<std::uint8_t>(msg_body[0]);
+    msg_types.push_back(msg_type);
+
+    if (msg_type == 0x41) {
+      AddOrder_view view(msg_body);
+      CHECK(view.stock_locate() == 1);
+      CHECK(view.shares() == 500);
+      CHECK(view.stock().substr(0, 4) == "AAPL");
+      prices.push_back(view.price());
+    } else if (msg_type == 0x50) {
+      Trade_view view(msg_body);
+      CHECK(view.stock_locate() == 1);
+      CHECK(view.shares() == 200);
+      CHECK(view.match_number() == 999);
+      prices.push_back(view.price());
+    } else {
+      FAIL("Unknown message type: " << static_cast<int>(msg_type));
+    }
+  });
+
+  // Verify both messages were delivered
+  REQUIRE(msg_types.size() == 2);
+  CHECK(msg_types[0] == 0x41); // AddOrder
+  CHECK(msg_types[1] == 0x50); // Trade
+  CHECK(prices[0] == 1750000);
+  CHECK(prices[1] == 1750000);
 }

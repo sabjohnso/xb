@@ -1,13 +1,111 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- ITCH 5.0 binary encoding specification (simplified subset).
-     Big-endian, fixed-width fields, space-padded ASCII strings,
-     prices in 4 implied decimal places. -->
+<!-- ITCH 5.0 binary encoding specification with full network stack.
+     Ethernet → IPv4 → UDP → MoldUDP64 → ITCH messages.
+     All big-endian (network byte order). -->
 <encoding xmlns="http://xb.dev/encoding"
           target-namespace="http://example.com/itch">
 
   <defaults byte-order="big-endian"/>
 
-  <message name="AddOrder" type="AddOrder" discriminant-value="0x41">
+  <!-- === Framing definitions === -->
+
+  <framing name="ethernet">
+    <field name="dst_mac" bits="48" encoding="raw"/>
+    <field name="src_mac" bits="48" encoding="raw"/>
+    <field name="ether_type" bits="16"/>
+  </framing>
+
+  <framing name="ipv4">
+    <field name="version_ihl" bits="8"/>
+    <field name="dscp_ecn" bits="8"/>
+    <field name="total_length" bits="16"/>
+    <field name="identification" bits="16"/>
+    <field name="flags_fragment" bits="16"/>
+    <field name="ttl" bits="8"/>
+    <field name="protocol" bits="8"/>
+    <discriminant field="protocol"/>
+    <field name="header_checksum" bits="16"/>
+    <field name="src_addr" bits="32"/>
+    <field name="dst_addr" bits="32"/>
+    <payload/>
+  </framing>
+
+  <framing name="udp">
+    <field name="src_port" bits="16"/>
+    <field name="dst_port" bits="16"/>
+    <field name="length" bits="16"/>
+    <length field="length" includes="header" unit="bytes"/>
+    <field name="checksum" bits="16"/>
+    <payload length-field="length"/>
+  </framing>
+
+  <framing name="moldudp64-message-block">
+    <field name="message_length" bits="16"/>
+    <length field="message_length" unit="bytes"/>
+    <payload length-field="message_length"/>
+  </framing>
+
+  <framing name="moldudp64">
+    <field name="session" bits="80" encoding="ascii"/>
+    <field name="sequence_number" bits="64"/>
+    <field name="message_count" bits="16"/>
+    <repeat count-field="message_count">
+      <field name="message_length" bits="16"/>
+      <length field="message_length" unit="bytes"/>
+      <payload length-field="message_length"/>
+    </repeat>
+  </framing>
+
+  <!-- Layer composition: Ethernet → IPv4 → UDP → MoldUDP64 -->
+  <frame-stack name="itch-udp">
+    <layer ref="ethernet" match="ether_type" value="0x0800"/>
+    <layer ref="ipv4" match="protocol" value="17"/>
+    <layer ref="udp"/>
+    <layer ref="moldudp64"/>
+  </frame-stack>
+
+  <!-- === Message type definitions === -->
+
+  <!-- Standalone views for each protocol header -->
+  <message name="EthernetHeader" type="EthernetHeader">
+    <field name="dst_mac" bits="48" encoding="raw"/>
+    <field name="src_mac" bits="48" encoding="raw"/>
+    <field name="ether_type" bits="16"/>
+  </message>
+
+  <message name="IPv4Header" type="IPv4Header">
+    <field name="version_ihl" bits="8"/>
+    <field name="dscp_ecn" bits="8"/>
+    <field name="total_length" bits="16"/>
+    <field name="identification" bits="16"/>
+    <field name="flags_fragment" bits="16"/>
+    <field name="ttl" bits="8"/>
+    <field name="protocol" bits="8"/>
+    <field name="header_checksum" bits="16"/>
+    <field name="src_addr" bits="32"/>
+    <field name="dst_addr" bits="32"/>
+  </message>
+
+  <message name="UDPHeader" type="UDPHeader">
+    <field name="src_port" bits="16"/>
+    <field name="dst_port" bits="16"/>
+    <field name="length" bits="16"/>
+    <field name="checksum" bits="16"/>
+  </message>
+
+  <message name="MoldUDP64Header" type="MoldUDP64Header">
+    <field name="session" bits="80" encoding="ascii"/>
+    <field name="sequence_number" bits="64"/>
+    <field name="message_count" bits="16"/>
+  </message>
+
+  <message name="MoldUDP64MessageBlock" type="MoldUDP64MessageBlock">
+    <field name="message_length" bits="16"/>
+  </message>
+
+  <!-- ITCH messages -->
+  <message name="AddOrder" type="AddOrder" discriminant-value="0x41"
+           frame-stack="itch-udp">
     <wire-field name="msg_type" bits="8"/>
     <field name="stock_locate" bits="16"/>
     <field name="tracking_number" bits="16"/>
@@ -19,7 +117,8 @@
     <field name="price" bits="32"/>
   </message>
 
-  <message name="Trade" type="Trade" discriminant-value="0x50">
+  <message name="Trade" type="Trade" discriminant-value="0x50"
+           frame-stack="itch-udp">
     <wire-field name="msg_type" bits="8"/>
     <field name="stock_locate" bits="16"/>
     <field name="tracking_number" bits="16"/>

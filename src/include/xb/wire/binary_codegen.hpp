@@ -167,8 +167,8 @@ namespace xb::wire {
     emit_raw_accessor(std::ostringstream& out, const std::string& name,
                       unsigned offset_bytes, unsigned width_bytes) {
       out << "  auto " << name << "() const -> std::span<const std::byte> {\n";
-      out << "    return buf_.subspan(" << offset_bytes << ", " << width_bytes
-          << ");\n";
+      out << "    return std::span<const std::byte>(buf_).subspan("
+          << offset_bytes << ", " << width_bytes << ");\n";
       out << "  }\n";
     }
 
@@ -764,6 +764,83 @@ namespace xb::wire {
     }
 
     out << "  throw std::runtime_error(\"unknown message type\");\n";
+    out << "}\n";
+
+    return out.str();
+  }
+
+  /// A layer in a frame parser: a fixed-size header with optional
+  /// match condition and optional message iteration.
+  struct frame_layer {
+    std::string view_class_name; // e.g., "EthernetHeader_view"
+    unsigned wire_size_bytes;    // fixed header size
+    std::string match_field;     // field to check (empty = no match)
+    std::string match_value;     // expected value
+    // If this layer has a repeat (message iteration):
+    std::string count_field;        // field on this header with count
+    std::string block_length_field; // field on block header with msg length
+    std::string block_view_class;   // view class for the block header
+    unsigned block_wire_size = 0;   // block header size in bytes
+  };
+
+  /// Generate a callback-based frame parser that peels layers from a
+  /// frame-stack and invokes the callback for each message body.
+  inline std::string
+  generate_frame_parser(const std::string& function_name,
+                        const std::vector<frame_layer>& layers) {
+    std::ostringstream out;
+
+    out << "template <typename Callback>\n";
+    out << "void " << function_name
+        << "(std::span<const std::byte> frame, Callback&& cb) {\n";
+    out << "  std::size_t offset = 0;\n\n";
+
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+      const auto& layer = layers[i];
+      std::string var = "layer_" + std::to_string(i);
+
+      out << "  // Layer: " << layer.view_class_name << "\n";
+      out << "  if (frame.size() < offset + " << layer.wire_size_bytes
+          << ") return;\n";
+      out << "  " << layer.view_class_name << " " << var
+          << "(frame.subspan(offset, " << layer.wire_size_bytes << "));\n";
+
+      // Match condition
+      if (!layer.match_field.empty()) {
+        out << "  if (" << var << "." << layer.match_field
+            << "() != static_cast<decltype(" << var << "." << layer.match_field
+            << "())>(" << layer.match_value << ")) return;\n";
+      }
+
+      out << "  offset += " << layer.wire_size_bytes << ";\n";
+
+      // Message iteration (only on the last layer with repeat)
+      if (!layer.count_field.empty()) {
+        out << "\n  for (decltype(" << var << "." << layer.count_field
+            << "()) i = 0; i < " << var << "." << layer.count_field
+            << "(); ++i) {\n";
+
+        if (layer.block_wire_size > 0) {
+          out << "    if (frame.size() < offset + " << layer.block_wire_size
+              << ") return;\n";
+          out << "    " << layer.block_view_class << " blk"
+              << "(frame.subspan(offset, " << layer.block_wire_size << "));\n";
+          out << "    auto msg_len = blk." << layer.block_length_field
+              << "();\n";
+          out << "    offset += " << layer.block_wire_size << ";\n";
+        } else {
+          out << "    // No block header — messages are contiguous\n";
+        }
+
+        out << "    if (frame.size() < offset + msg_len) return;\n";
+        out << "    cb(frame.subspan(offset, msg_len));\n";
+        out << "    offset += msg_len;\n";
+        out << "  }\n";
+      }
+
+      out << "\n";
+    }
+
     out << "}\n";
 
     return out.str();

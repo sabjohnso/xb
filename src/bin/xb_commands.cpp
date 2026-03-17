@@ -400,6 +400,117 @@ namespace {
           }
         }
 
+        // Build framing-name → message-view-name map.
+        // Convention: the BES has matching message and framing entries
+        // with the same field layout. We find messages whose name
+        // matches a framing name (case-insensitive prefix match) or
+        // whose fields match.
+        // Sanitize name for C++ identifier (replace - with _)
+        auto sanitize = [](std::string s) {
+          for (auto& c : s)
+            if (c == '-') c = '_';
+          return s;
+        };
+
+        // Strip non-alphanumeric and lowercase for fuzzy matching
+        auto normalize = [](const std::string& s) {
+          std::string r;
+          for (auto c : s)
+            if (std::isalnum(static_cast<unsigned char>(c)))
+              r += static_cast<char>(
+                  std::tolower(static_cast<unsigned char>(c)));
+          return r;
+        };
+
+        auto find_view_for_framing =
+            [&](const std::string& framing_name) -> std::string {
+          auto frm_norm = normalize(framing_name);
+          for (const auto& bound : plan.messages()) {
+            auto msg_norm = normalize(bound.message->name);
+            if (msg_norm.starts_with(frm_norm) ||
+                frm_norm.starts_with(msg_norm))
+              return bound.message->name + "_view";
+          }
+          return sanitize(framing_name) + "_view";
+        };
+
+        // Generate frame parsers for each frame-stack
+        for (const auto& choice_item : resolved.choice) {
+          const auto* fs = std::get_if<xb::bes::frame_stack_type>(&choice_item);
+          if (!fs) continue;
+
+          std::vector<xb::wire::frame_layer> layers;
+
+          for (const auto& layer : fs->layer) {
+            const auto* framing = plan.find_framing(layer.ref);
+            if (!framing) continue;
+
+            xb::wire::frame_layer fl;
+            fl.view_class_name = find_view_for_framing(layer.ref);
+
+            // Match condition from layer
+            if (layer.match.has_value()) fl.match_field = *layer.match;
+            if (layer.value.has_value()) fl.match_value = *layer.value;
+
+            // Compute fixed header size (fields before any repeat)
+            unsigned fixed_bits = 0;
+            bool has_repeat = false;
+            for (const auto& fi : framing->choice) {
+              if (std::holds_alternative<std::unique_ptr<xb::bes::repeat_type>>(
+                      fi)) {
+                has_repeat = true;
+
+                auto& rp = std::get<std::unique_ptr<xb::bes::repeat_type>>(fi);
+                if (rp && rp->count_field.has_value()) {
+                  fl.count_field = *rp->count_field;
+
+                  for (const auto& ri : rp->choice) {
+                    if (auto* lf = std::get_if<xb::bes::length_type>(&ri))
+                      fl.block_length_field = lf->field;
+                    if (auto* ff = std::get_if<xb::bes::field_type>(&ri))
+                      fl.block_wire_size += (ff->bits + 7) / 8;
+                  }
+
+                  // Find the message block view class
+                  fl.block_view_class =
+                      find_view_for_framing("moldudp64-message-block");
+                }
+                break; // stop summing fixed bits
+              }
+
+              // Sum field bits for the fixed header portion
+              std::visit(
+                  [&](const auto& v) {
+                    if constexpr (requires { v.bits; }) {
+                      if constexpr (std::is_integral_v<
+                                        std::decay_t<decltype(v.bits)>>)
+                        fixed_bits += v.bits;
+                    }
+                  },
+                  fi);
+            }
+
+            if (!has_repeat) {
+              // Fully fixed framing — use compute_layout
+              auto framing_layout =
+                  xb::wire::compute_layout(*framing, defaults);
+              fl.wire_size_bytes = framing_layout.is_fixed
+                                       ? (framing_layout.total_bits + 7) / 8
+                                       : (fixed_bits + 7) / 8;
+            } else {
+              fl.wire_size_bytes = (fixed_bits + 7) / 8;
+            }
+
+            layers.push_back(std::move(fl));
+          }
+
+          if (!layers.empty()) {
+            binary_header << xb::wire::generate_frame_parser(
+                "parse_" + sanitize(fs->name), layers);
+            binary_header << "\n";
+          }
+        }
+
         binary_header_text = binary_header.str();
 
       } catch (const std::exception& e) {

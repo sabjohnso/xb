@@ -4,6 +4,57 @@
            xmlns:tns="http://example.com/itch"
            elementFormDefault="qualified">
 
+  <!-- Ethernet II frame header -->
+  <xs:complexType name="EthernetHeader">
+    <xs:sequence>
+      <xs:element name="dst_mac" type="xs:hexBinary"/>
+      <xs:element name="src_mac" type="xs:hexBinary"/>
+      <xs:element name="ether_type" type="xs:unsignedShort"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- IPv4 header (fixed 20 bytes, no options) -->
+  <xs:complexType name="IPv4Header">
+    <xs:sequence>
+      <xs:element name="version_ihl" type="xs:unsignedByte"/>
+      <xs:element name="dscp_ecn" type="xs:unsignedByte"/>
+      <xs:element name="total_length" type="xs:unsignedShort"/>
+      <xs:element name="identification" type="xs:unsignedShort"/>
+      <xs:element name="flags_fragment" type="xs:unsignedShort"/>
+      <xs:element name="ttl" type="xs:unsignedByte"/>
+      <xs:element name="protocol" type="xs:unsignedByte"/>
+      <xs:element name="header_checksum" type="xs:unsignedShort"/>
+      <xs:element name="src_addr" type="xs:unsignedInt"/>
+      <xs:element name="dst_addr" type="xs:unsignedInt"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- UDP header -->
+  <xs:complexType name="UDPHeader">
+    <xs:sequence>
+      <xs:element name="src_port" type="xs:unsignedShort"/>
+      <xs:element name="dst_port" type="xs:unsignedShort"/>
+      <xs:element name="length" type="xs:unsignedShort"/>
+      <xs:element name="checksum" type="xs:unsignedShort"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- MoldUDP64 session header -->
+  <xs:complexType name="MoldUDP64Header">
+    <xs:sequence>
+      <xs:element name="session" type="xs:string"/>
+      <xs:element name="sequence_number" type="xs:unsignedLong"/>
+      <xs:element name="message_count" type="xs:unsignedShort"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- MoldUDP64 per-message block header -->
+  <xs:complexType name="MoldUDP64MessageBlock">
+    <xs:sequence>
+      <xs:element name="message_length" type="xs:unsignedShort"/>
+    </xs:sequence>
+  </xs:complexType>
+
   <!-- NASDAQ ITCH 5.0 Add Order (simplified subset) -->
   <xs:complexType name="AddOrder">
     <xs:sequence>
