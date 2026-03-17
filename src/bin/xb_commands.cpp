@@ -29,6 +29,7 @@
 #include <xb/wire/encoding.hpp>
 #include <xb/wire/encoding_resolver.hpp>
 #include <xb/wire/layout_engine.hpp>
+#include <xb/wire/layout_validation.hpp>
 #include <xb/xsd_to_rng.hpp>
 #include <xb/xsd_writer.hpp>
 
@@ -325,6 +326,12 @@ namespace {
         for (const auto& bound : plan.messages()) {
           auto& msg = *bound.message;
           auto layout = xb::wire::compute_layout(msg, defaults);
+
+          // Validate field widths against XSD type annotations
+          auto field_errors = xb::wire::validate_message_fields(msg);
+          for (const auto& err : field_errors) {
+            std::cerr << "xb: warning: " << err.message << "\n";
+          }
 
           std::string base_name = msg.name;
 

@@ -4,6 +4,8 @@
 
 #include <xb/complex_type.hpp>
 #include <xb/content_type.hpp>
+#include <xb/element_decl.hpp>
+#include <xb/model_group.hpp>
 #include <xb/schema.hpp>
 #include <xb/schema_set.hpp>
 
@@ -41,6 +43,25 @@ namespace {
                             /*mixed=*/false,
                             xb::content_type{xb::content_kind::element_only,
                                              xb::complex_content{}});
+  }
+
+  // Build a complex type with named elements in a sequence
+  xb::complex_type
+  make_complex_type_with_elements(const std::string& ns,
+                                  const std::string& name,
+                                  std::vector<std::string> element_names) {
+    xb::model_group seq(xb::compositor_kind::sequence);
+    for (auto& ename : element_names) {
+      seq.add_particle(xb::particle(xb::element_decl(
+          xb::qname{ns, ename},
+          xb::qname{"http://www.w3.org/2001/XMLSchema", "string"})));
+    }
+    xb::complex_content cc;
+    cc.content_model = std::move(seq);
+    return xb::complex_type(
+        xb::qname{ns, name}, /*abstract=*/false,
+        /*mixed=*/false,
+        xb::content_type{xb::content_kind::element_only, std::move(cc)});
   }
 
 } // namespace
@@ -404,4 +425,107 @@ TEST_CASE("encoding_plan: unknown framing ref throws descriptive error",
   CHECK_THROWS_WITH(plan_type(enc, schemas),
                     Catch::Matchers::ContainsSubstring("nonexistent") &&
                         Catch::Matchers::ContainsSubstring("bad-stack"));
+}
+
+// ---------------------------------------------------------------------------
+// Field name cross-validation against XSD element names
+// ---------------------------------------------------------------------------
+
+TEST_CASE("encoding_plan: field names matching XSD elements are accepted",
+          "[wire][encoding_resolver]") {
+  auto ct = make_complex_type_with_elements(
+      "http://example.com", "Order", {"stock_locate", "shares", "price"});
+  auto schemas = make_schema("http://example.com", std::move(ct));
+
+  encoding_type enc;
+  enc.target_namespace = "http://example.com";
+
+  message_type msg;
+  msg.name = "Order";
+  msg.type = "Order";
+
+  field_type f1;
+  f1.name = "stock_locate";
+  f1.bits = 16;
+  msg.choice.push_back(std::move(f1));
+
+  field_type f2;
+  f2.name = "shares";
+  f2.bits = 32;
+  msg.choice.push_back(std::move(f2));
+
+  field_type f3;
+  f3.name = "price";
+  f3.bits = 32;
+  msg.choice.push_back(std::move(f3));
+
+  enc.choice.push_back(std::move(msg));
+
+  plan_type plan(enc, schemas);
+  CHECK(plan.messages().size() == 1);
+}
+
+TEST_CASE("encoding_plan: field name not in XSD type throws error",
+          "[wire][encoding_resolver]") {
+  auto ct = make_complex_type_with_elements("http://example.com", "Order",
+                                            {"stock_locate", "shares"});
+  auto schemas = make_schema("http://example.com", std::move(ct));
+
+  encoding_type enc;
+  enc.target_namespace = "http://example.com";
+
+  message_type msg;
+  msg.name = "Order";
+  msg.type = "Order";
+
+  field_type f1;
+  f1.name = "stock_locate";
+  f1.bits = 16;
+  msg.choice.push_back(std::move(f1));
+
+  field_type f2;
+  f2.name = "nonexistent_field";
+  f2.bits = 32;
+  msg.choice.push_back(std::move(f2));
+
+  enc.choice.push_back(std::move(msg));
+
+  CHECK_THROWS_WITH(plan_type(enc, schemas),
+                    Catch::Matchers::ContainsSubstring("nonexistent_field") &&
+                        Catch::Matchers::ContainsSubstring("Order"));
+}
+
+TEST_CASE("encoding_plan: wire-field name not in XSD type is exempt",
+          "[wire][encoding_resolver]") {
+  auto ct = make_complex_type_with_elements("http://example.com", "Order",
+                                            {"stock_locate", "shares"});
+  auto schemas = make_schema("http://example.com", std::move(ct));
+
+  encoding_type enc;
+  enc.target_namespace = "http://example.com";
+
+  message_type msg;
+  msg.name = "Order";
+  msg.type = "Order";
+
+  // wire-field: no XSD counterpart expected
+  wire_field_type wf;
+  wf.name = "msg_type";
+  wf.bits = 8;
+  msg.choice.push_back(std::move(wf));
+
+  field_type f1;
+  f1.name = "stock_locate";
+  f1.bits = 16;
+  msg.choice.push_back(std::move(f1));
+
+  field_type f2;
+  f2.name = "shares";
+  f2.bits = 32;
+  msg.choice.push_back(std::move(f2));
+
+  enc.choice.push_back(std::move(msg));
+
+  plan_type plan(enc, schemas);
+  CHECK(plan.messages().size() == 1);
 }

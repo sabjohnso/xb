@@ -7,6 +7,7 @@
 
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -31,6 +32,37 @@ namespace xb::wire {
     qname target_type;
     const MessageType* message;
   };
+
+  // Collect element local names from a model group (recursive).
+  inline void
+  collect_element_names(const model_group& mg, std::set<std::string>& names) {
+    for (const auto& p : mg.particles()) {
+      std::visit(
+          [&](const auto& term) {
+            using T = std::decay_t<decltype(term)>;
+            if constexpr (std::is_same_v<T, element_decl>) {
+              names.insert(term.name().local_name());
+            } else if constexpr (std::is_same_v<T, element_ref>) {
+              names.insert(term.ref.local_name());
+            } else if constexpr (std::is_same_v<T,
+                                                std::unique_ptr<model_group>>) {
+              if (term) collect_element_names(*term, names);
+            }
+          },
+          p.term);
+    }
+  }
+
+  // Collect element local names from a complex type's content model.
+  inline std::set<std::string>
+  element_names_of(const complex_type& ct) {
+    std::set<std::string> names;
+    auto* cc = std::get_if<complex_content>(&ct.content().detail);
+    if (cc && cc->content_model.has_value()) {
+      collect_element_names(*cc->content_model, names);
+    }
+    return names;
+  }
 
   // Parse Clark notation: "{namespace}localName" → qname
   inline std::optional<qname>
@@ -230,10 +262,56 @@ namespace xb::wire {
         type_index_[type] = idx;
       }
 
+      // Validate field names against XSD element names
+      validate_field_names(schemas);
+
       // Encoding inheritance: for unbound derived types that extend
       // a bound base type, inherit the base's encoding.  Iterate
       // until no new bindings are added (handles transitive chains).
       propagate_inheritance(schemas);
+    }
+
+    // Concept: field_type has an offset member; wire_field_type does not.
+    template <typename T>
+    static constexpr bool is_data_field = requires(T t) {
+      t.name;
+      t.bits;
+      t.offset;
+    };
+
+    template <typename T>
+    static constexpr bool is_named_field = requires(T t) {
+      t.name;
+      t.bits;
+    } && !is_data_field<T>;
+
+    void
+    validate_field_names(const schema_set& schemas) const {
+      for (const auto& bound : messages_) {
+        const auto* ct = schemas.find_complex_type(bound.target_type);
+        if (!ct) continue;
+
+        auto xsd_elements = element_names_of(*ct);
+        if (xsd_elements.empty()) continue;
+
+        for (const auto& item : bound.message->choice) {
+          std::visit(
+              [&](const auto& v) {
+                using V = std::decay_t<decltype(v)>;
+                if constexpr (is_data_field<V>) {
+                  // Data field: must match an XSD element name
+                  if (!xsd_elements.contains(v.name)) {
+                    throw std::runtime_error(
+                        "message '" + bound.message->name + "': field '" +
+                        v.name + "' does not match any element in XSD type '" +
+                        bound.target_type.local_name() + "'");
+                  }
+                }
+                // wire_field_type, padding, constants, etc. — exempt
+              },
+              item);
+        }
+      }
     }
 
     void
