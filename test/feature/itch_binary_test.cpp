@@ -23,10 +23,17 @@ namespace {
   }
 
   // Append raw bytes from a span to a vector
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 14
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
   void
   append(std::vector<std::byte>& buf, std::span<const std::byte> data) {
     buf.insert(buf.end(), data.begin(), data.end());
   }
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 14
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace
 

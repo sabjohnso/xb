@@ -46,6 +46,14 @@ namespace xb {
 
     virtual std::string_view
     namespace_uri_for_prefix(std::string_view prefix) const = 0;
+
+    /** @brief Line number (1-based) of the current event in the source. */
+    virtual std::size_t
+    line() const = 0;
+
+    /** @brief Column number (0-based) of the current event in the source. */
+    virtual std::size_t
+    column() const = 0;
   };
 
 } // namespace xb

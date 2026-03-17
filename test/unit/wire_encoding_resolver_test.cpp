@@ -8,6 +8,7 @@
 #include <xb/schema_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <string>
 
@@ -220,6 +221,11 @@ TEST_CASE("encoding_plan: frame-stack lookup by name",
   schemas.resolve();
 
   encoding_type enc;
+
+  xb::bes::framing_type framing;
+  framing.name = "ethernet";
+  enc.choice.push_back(std::move(framing));
+
   frame_stack_type fs;
   fs.name = "itch_multicast";
   layer_type l;
@@ -355,4 +361,47 @@ TEST_CASE("encoding_plan: multiple messages bind independently",
   REQUIRE(trade != nullptr);
   CHECK(order->message->name == "Order");
   CHECK(trade->message->name == "Trade");
+}
+
+// ---------------------------------------------------------------------------
+// Frame-stack reference validation
+// ---------------------------------------------------------------------------
+
+TEST_CASE("encoding_plan: valid framing ref does not throw",
+          "[wire][encoding_resolver]") {
+  encoding_type enc;
+  xb::schema_set schemas;
+  schemas.resolve();
+
+  xb::bes::framing_type framing;
+  framing.name = "ethernet";
+  enc.choice.push_back(std::move(framing));
+
+  xb::bes::frame_stack_type fs;
+  fs.name = "my-stack";
+  layer_type layer;
+  layer.ref = "ethernet";
+  fs.layer.push_back(std::move(layer));
+  enc.choice.push_back(std::move(fs));
+
+  plan_type plan(enc, schemas);
+  CHECK(plan.find_frame_stack("my-stack") != nullptr);
+}
+
+TEST_CASE("encoding_plan: unknown framing ref throws descriptive error",
+          "[wire][encoding_resolver]") {
+  encoding_type enc;
+  xb::schema_set schemas;
+  schemas.resolve();
+
+  xb::bes::frame_stack_type fs;
+  fs.name = "bad-stack";
+  layer_type layer;
+  layer.ref = "nonexistent";
+  fs.layer.push_back(std::move(layer));
+  enc.choice.push_back(std::move(fs));
+
+  CHECK_THROWS_WITH(plan_type(enc, schemas),
+                    Catch::Matchers::ContainsSubstring("nonexistent") &&
+                        Catch::Matchers::ContainsSubstring("bad-stack"));
 }

@@ -76,6 +76,16 @@ namespace {
     namespace_uri_for_prefix(std::string_view /*prefix*/) const override {
       return {};
     }
+
+    std::size_t
+    line() const override {
+      return 1;
+    }
+
+    std::size_t
+    column() const override {
+      return 0;
+    }
   };
 
 } // namespace

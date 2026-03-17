@@ -29,6 +29,8 @@ namespace xb {
       std::vector<attribute> attributes;
       std::vector<ns_decl> ns_decls;
       std::size_t depth;
+      std::size_t line;
+      std::size_t column;
     };
 
     // Parse "uri\nlocal" into a qname. Unqualified names have no separator.
@@ -46,6 +48,7 @@ namespace xb {
     std::size_t cursor = 0;
     std::size_t current_depth = 0;
     std::vector<ns_decl> pending_ns_decls;
+    XML_Parser parser = nullptr; // set during parsing for line/column capture
 
     static void XMLCALL
     on_start_ns_decl(void* user_data, const char* prefix, const char* uri) {
@@ -63,6 +66,10 @@ namespace xb {
       ev.type = xml_node_type::start_element;
       ev.name = parse_expat_name(name);
       ev.depth = self->current_depth;
+      ev.line =
+          static_cast<std::size_t>(XML_GetCurrentLineNumber(self->parser));
+      ev.column =
+          static_cast<std::size_t>(XML_GetCurrentColumnNumber(self->parser));
       ev.ns_decls = std::move(self->pending_ns_decls);
       self->pending_ns_decls.clear();
 
@@ -81,6 +88,10 @@ namespace xb {
       ev.type = xml_node_type::end_element;
       ev.name = parse_expat_name(name);
       ev.depth = self->current_depth;
+      ev.line =
+          static_cast<std::size_t>(XML_GetCurrentLineNumber(self->parser));
+      ev.column =
+          static_cast<std::size_t>(XML_GetCurrentColumnNumber(self->parser));
 
       self->events.push_back(std::move(ev));
       self->current_depth--;
@@ -101,6 +112,10 @@ namespace xb {
       ev.type = xml_node_type::characters;
       ev.text.assign(s, static_cast<std::size_t>(len));
       ev.depth = self->current_depth;
+      ev.line =
+          static_cast<std::size_t>(XML_GetCurrentLineNumber(self->parser));
+      ev.column =
+          static_cast<std::size_t>(XML_GetCurrentColumnNumber(self->parser));
       self->events.push_back(std::move(ev));
     }
   };
@@ -113,6 +128,7 @@ namespace xb {
       throw std::runtime_error("failed to create expat parser");
     }
 
+    impl_->parser = parser;
     XML_SetUserData(parser, impl_.get());
     XML_SetElementHandler(parser, impl::on_start_element, impl::on_end_element);
     XML_SetCharacterDataHandler(parser, impl::on_character_data);
@@ -127,10 +143,12 @@ namespace xb {
       msg += ": ";
       msg += XML_ErrorString(XML_GetErrorCode(parser));
       XML_ParserFree(parser);
+      impl_->parser = nullptr;
       throw std::runtime_error(msg);
     }
 
     XML_ParserFree(parser);
+    impl_->parser = nullptr;
 
     if (impl_->events.empty()) {
       throw std::runtime_error("XML parse error: no content");
@@ -210,6 +228,16 @@ namespace xb {
       }
     }
     return {};
+  }
+
+  std::size_t
+  expat_reader::line() const {
+    return impl_->events[impl_->cursor - 1].line;
+  }
+
+  std::size_t
+  expat_reader::column() const {
+    return impl_->events[impl_->cursor - 1].column;
   }
 
 } // namespace xb

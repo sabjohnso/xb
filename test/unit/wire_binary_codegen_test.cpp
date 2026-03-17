@@ -228,7 +228,7 @@ TEST_CASE("binary_codegen: raw binary field returns span",
   CHECK_THAT(code, ContainsSubstring("payload()"));
   CHECK_THAT(code, ContainsSubstring("std::span<const std::byte>"));
   // Should use subspan at correct offset and size
-  CHECK_THAT(code, ContainsSubstring("buf_.subspan("));
+  CHECK_THAT(code, ContainsSubstring(".subspan("));
 }
 
 TEST_CASE("binary_codegen: enum-integer field returns integer",

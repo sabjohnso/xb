@@ -74,6 +74,9 @@ namespace xb::wire {
             choice);
       }
 
+      // Validate frame-stack layer references
+      validate_frame_stack_refs();
+
       // Bind messages to XSD types
       bind_messages(encoding, schemas);
     }
@@ -231,6 +234,19 @@ namespace xb::wire {
       // a bound base type, inherit the base's encoding.  Iterate
       // until no new bindings are added (handles transitive chains).
       propagate_inheritance(schemas);
+    }
+
+    void
+    validate_frame_stack_refs() const {
+      for (const auto& [name, fs] : frame_stacks_) {
+        for (const auto& layer : fs->layer) {
+          if (framings_.find(layer.ref) == framings_.end()) {
+            throw std::runtime_error("frame-stack '" + name +
+                                     "': layer references unknown framing '" +
+                                     layer.ref + "'");
+          }
+        }
+      }
     }
 
     void

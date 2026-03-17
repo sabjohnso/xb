@@ -49,6 +49,12 @@ namespace xb {
     std::string_view
     namespace_uri_for_prefix(std::string_view prefix) const override;
 
+    std::size_t
+    line() const override;
+
+    std::size_t
+    column() const override;
+
   private:
     struct impl;
     std::unique_ptr<impl> impl_;

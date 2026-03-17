@@ -185,6 +185,54 @@ TEST_CASE("reader: depth tracking", "[xml_reader]") {
   CHECK(reader.depth() == 1);
 }
 
+// ---------------------------------------------------------------------------
+// Source location tracking
+// ---------------------------------------------------------------------------
+
+TEST_CASE("reader: line number on single-line document", "[xml_reader]") {
+  expat_reader reader("<root><child/></root>");
+
+  REQUIRE(reader.read()); // start root
+  CHECK(reader.line() == 1);
+
+  REQUIRE(reader.read()); // start child
+  CHECK(reader.line() == 1);
+}
+
+TEST_CASE("reader: line number advances across newlines", "[xml_reader]") {
+  expat_reader reader("<root>\n  <a/>\n  <b/>\n</root>");
+
+  REQUIRE(reader.read()); // start root — line 1
+  CHECK(reader.line() == 1);
+
+  REQUIRE(reader.read()); // characters "\n  "
+  REQUIRE(reader.read()); // start a — line 2
+  CHECK(reader.node_type() == xml_node_type::start_element);
+  CHECK(reader.name().local_name() == "a");
+  CHECK(reader.line() == 2);
+
+  REQUIRE(reader.read()); // end a
+  REQUIRE(reader.read()); // characters "\n  "
+  REQUIRE(reader.read()); // start b — line 3
+  CHECK(reader.node_type() == xml_node_type::start_element);
+  CHECK(reader.name().local_name() == "b");
+  CHECK(reader.line() == 3);
+}
+
+TEST_CASE("reader: column number within a line", "[xml_reader]") {
+  expat_reader reader("<root>\n  <child/>\n</root>");
+
+  REQUIRE(reader.read()); // start root
+  // column() returns a value (exact position is impl-defined)
+
+  REQUIRE(reader.read()); // characters
+  REQUIRE(reader.read()); // start child
+  CHECK(reader.node_type() == xml_node_type::start_element);
+  CHECK(reader.name().local_name() == "child");
+  // child starts at column 2 (0-indexed) or 3 (1-indexed) depending on expat
+  CHECK(reader.column() > 0);
+}
+
 TEST_CASE("reader: throws on malformed XML", "[xml_reader]") {
   CHECK_THROWS_AS(expat_reader("<unclosed>"), std::runtime_error);
 }
