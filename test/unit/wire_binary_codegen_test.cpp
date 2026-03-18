@@ -589,3 +589,53 @@ TEST_CASE("binary_codegen: constructor auto-sets wire-only discriminant",
   CHECK_THAT(code, ContainsSubstring("set_msg_type"));
   CHECK_THAT(code, ContainsSubstring("0x41"));
 }
+
+// ---------------------------------------------------------------------------
+// Discriminator endianness (UX-7)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("binary_codegen: little-endian discriminator uses from_wire<little>",
+          "[wire][binary_codegen]") {
+  discriminant_info disc;
+  disc.field_name = "msg_type";
+  disc.offset_bits = 0;
+  disc.width_bits = 16;
+  disc.endian = "std::endian::little";
+
+  std::vector<message_entry> entries;
+  entries.push_back({"OrderView", "0x0041"});
+
+  auto code = generate_discriminator("disc_le", disc, entries);
+  CHECK_THAT(code, ContainsSubstring("std::endian::little"));
+  CHECK_THAT(code, !ContainsSubstring("std::endian::big"));
+}
+
+TEST_CASE("binary_codegen: big-endian discriminator uses from_wire<big>",
+          "[wire][binary_codegen]") {
+  discriminant_info disc;
+  disc.field_name = "msg_type";
+  disc.offset_bits = 0;
+  disc.width_bits = 16;
+  disc.endian = "std::endian::big";
+
+  std::vector<message_entry> entries;
+  entries.push_back({"OrderView", "0x0041"});
+
+  auto code = generate_discriminator("disc_be", disc, entries);
+  CHECK_THAT(code, ContainsSubstring("std::endian::big"));
+}
+
+TEST_CASE("binary_codegen: single-byte discriminator skips from_wire",
+          "[wire][binary_codegen]") {
+  discriminant_info disc;
+  disc.field_name = "msg_type";
+  disc.offset_bits = 0;
+  disc.width_bits = 8;
+  disc.endian = "std::endian::big"; // should be ignored for 8-bit
+
+  std::vector<message_entry> entries;
+  entries.push_back({"OrderView", "0x41"});
+
+  auto code = generate_discriminator("disc_1b", disc, entries);
+  CHECK_THAT(code, !ContainsSubstring("from_wire"));
+}

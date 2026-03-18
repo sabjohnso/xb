@@ -450,6 +450,52 @@ namespace {
                           disc_info.field_name = v.field;
                           disc_info.offset_bits = *fl.offset_bits;
                           disc_info.width_bits = fl.width_bits;
+
+                          // Resolve byte order for discriminant field
+                          // Check the field in the framing for per-field
+                          // override
+                          disc_info.endian = "std::endian::big";
+                          for (const auto& fi : framing->choice) {
+                            std::visit(
+                                [&](const auto& fv) {
+                                  if constexpr (requires {
+                                                  fv.name;
+                                                  fv.byte_order;
+                                                }) {
+                                    if (fv.name == v.field &&
+                                        fv.byte_order.has_value()) {
+                                      auto s =
+                                          xb::bes::to_string(*fv.byte_order);
+                                      if (s == "little-endian")
+                                        disc_info.endian =
+                                            "std::endian::little";
+                                      else if (s == "native")
+                                        disc_info.endian =
+                                            "std::endian::native";
+                                    }
+                                  }
+                                },
+                                fi);
+                          }
+                          // Fall back to framing byte_order
+                          if (disc_info.endian == "std::endian::big" &&
+                              framing->byte_order.has_value()) {
+                            auto s = xb::bes::to_string(*framing->byte_order);
+                            if (s == "little-endian")
+                              disc_info.endian = "std::endian::little";
+                            else if (s == "native")
+                              disc_info.endian = "std::endian::native";
+                          }
+                          // Fall back to global defaults
+                          if (disc_info.endian == "std::endian::big" &&
+                              defaults.byte_order.has_value()) {
+                            auto s = xb::bes::to_string(*defaults.byte_order);
+                            if (s == "little-endian")
+                              disc_info.endian = "std::endian::little";
+                            else if (s == "native")
+                              disc_info.endian = "std::endian::native";
+                          }
+
                           binary_header << xb::wire::generate_discriminator(
                               "discriminate", disc_info, disc_entries);
                         }

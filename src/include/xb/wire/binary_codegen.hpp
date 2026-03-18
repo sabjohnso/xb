@@ -885,6 +885,7 @@ namespace xb::wire {
     std::string field_name;
     unsigned offset_bits;
     unsigned width_bits;
+    std::string endian = "std::endian::big";
   };
 
   /// Entry mapping a discriminant value to a view class name.
@@ -923,7 +924,7 @@ namespace xb::wire {
       out << "  " << disc_type << " disc;\n";
       out << "  std::memcpy(&disc, buf.data() + " << disc.offset_bits / 8
           << ", sizeof(disc));\n";
-      out << "  disc = xb::wire::from_wire<std::endian::big>(disc);\n";
+      out << "  disc = xb::wire::from_wire<" << disc.endian << ">(disc);\n";
     } else {
       out << "  auto disc = static_cast<" << disc_type
           << ">(xb::wire::extract_bits<" << disc.offset_bits << ", "
