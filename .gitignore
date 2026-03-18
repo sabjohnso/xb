@@ -30,5 +30,8 @@ Asm/
 *.exe
 *.EXE
 
+# bootstrap-generated file (produced by xb_bootstrap at build time)
+src/include/xb/wire/encoding.hpp
+
 # organization
 *.org
