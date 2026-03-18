@@ -15,6 +15,10 @@
 #include <span>
 #include <vector>
 
+// The ITCH BES has target-namespace="http://example.com/itch"
+// → C++ namespace "itch" (short-name style)
+using namespace itch;
+
 namespace {
 
   constexpr std::byte

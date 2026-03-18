@@ -13,6 +13,8 @@
 #include <cstring>
 #include <span>
 
+using namespace itch;
+
 namespace {
 
   constexpr std::byte

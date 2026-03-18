@@ -145,6 +145,20 @@ target_link_libraries(xb_bes_only_test
 target_compile_features(xb_bes_only_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_bes_only_test COMMAND xb_bes_only_test)
 
+# --- BES backward-compatibility test: no namespace ---
+xb_generate_cpp(
+  TARGET xb_bes_global_ns_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/itch/itch-nonamespace.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_bes_global_ns_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_bes_global_ns_test bes_global_ns_test.cpp)
+target_link_libraries(xb_bes_global_ns_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_global_ns_types xb::header)
+target_compile_features(xb_bes_global_ns_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_bes_global_ns_test COMMAND xb_bes_global_ns_test)
+
 # --- ITCH binary encoding integration test ---
 xb_generate_cpp(
   TARGET xb_itch_binary_types

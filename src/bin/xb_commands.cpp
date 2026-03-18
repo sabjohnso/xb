@@ -350,6 +350,30 @@ namespace {
         binary_header << "#include <xb/wire/byteswap.hpp>\n";
         binary_header << "#include <xb/wire/types.hpp>\n\n";
 
+        // Derive C++ namespace from BES target-namespace
+        std::string binary_ns;
+        if (resolved.target_namespace.has_value() &&
+            !resolved.target_namespace->empty()) {
+          // Check namespace_map for explicit override first
+          auto ns_it = namespace_map.find(*resolved.target_namespace);
+          if (ns_it != namespace_map.end()) {
+            binary_ns = ns_it->second;
+          } else if (codegen_opts.ns_style == xb::namespace_style::short_name) {
+            std::set<std::string> all_ns;
+            if (resolved.target_namespace.has_value())
+              all_ns.insert(*resolved.target_namespace);
+            binary_ns = xb::default_namespace_for(*resolved.target_namespace,
+                                                  all_ns, codegen_opts);
+          } else {
+            binary_ns =
+                xb::cpp_namespace_for(*resolved.target_namespace, codegen_opts);
+          }
+        }
+
+        if (!binary_ns.empty()) {
+          binary_header << "namespace " << binary_ns << " {\n\n";
+        }
+
         // Collect discriminator entries for framing dispatch
         std::vector<xb::wire::message_entry> disc_entries;
 
@@ -546,6 +570,10 @@ namespace {
                 "parse_" + sanitize(fs->name), layers);
             binary_header << "\n";
           }
+        }
+
+        if (!binary_ns.empty()) {
+          binary_header << "} // namespace " << binary_ns << "\n";
         }
 
         binary_header_text = binary_header.str();

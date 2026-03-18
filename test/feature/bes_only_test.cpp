@@ -3,16 +3,22 @@
 /// Verifies that binary view/owned types can be generated from a BES file
 /// without providing a separate XSD schema.  The synthetic XSD types are
 /// inferred from the BES field definitions.
+///
+/// When the BES has a target-namespace, generated types are wrapped in a
+/// C++ namespace derived from the URI.
 
 #include <wire_types.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
 #include <string_view>
+
+// The ITCH BES has target-namespace="http://example.com/itch"
+// → C++ namespace "itch" (short-name style, last URI segment)
+using namespace itch;
 
 // ===========================================================================
 // AddOrder — round-trip via owned + view
@@ -68,11 +74,6 @@ TEST_CASE("BES-only: Trade round-trip", "[bes_only]") {
 // ===========================================================================
 
 TEST_CASE("BES-only: wire sizes are correct", "[bes_only]") {
-  // AddOrder: wire_field(8) + 16+16+48+64+8+32+64+32 = 8 + 280 = 288 bits
-  //           = 36 bytes
   CHECK(AddOrder_owned::wire_size == 36);
-
-  // Trade: wire_field(8) + 16+16+48+64+8+32+64+32+64 = 8 + 344 = 352 bits
-  //        = 44 bytes
   CHECK(Trade_owned::wire_size == 44);
 }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ITCH 5.0 binary encoding specification without target-namespace.
+     Used to test backward-compatible global namespace generation. -->
+<encoding xmlns="http://xb.dev/encoding">
+
+  <defaults byte-order="big-endian"/>
+
+  <message name="SimpleOrder" type="SimpleOrder">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="stock_locate" bits="16"/>
+    <field name="shares" bits="32"/>
+    <field name="stock" bits="64" encoding="ascii"/>
+    <field name="price" bits="32"/>
+  </message>
+
+</encoding>
