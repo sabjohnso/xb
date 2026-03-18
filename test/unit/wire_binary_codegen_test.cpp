@@ -524,3 +524,68 @@ TEST_CASE("binary_codegen: view class groups data fields before wire-only",
   REQUIRE(wire_pos != std::string::npos);
   CHECK(data_pos < wire_pos);
 }
+
+// ---------------------------------------------------------------------------
+// Builder / constructor (UX-6)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("binary_codegen: owned class has aggregate constructor",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Order";
+  msg.choice.push_back(make_wire_field("msg_type", 8));
+  msg.choice.push_back(make_field("stock_locate", 16));
+  msg.choice.push_back(make_field("shares", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_owned_class("order_owned", msg, layout, defaults);
+
+  // Constructor takes data fields only (not wire-only)
+  CHECK_THAT(code, ContainsSubstring("order_owned("));
+  CHECK_THAT(code, ContainsSubstring("stock_locate"));
+  CHECK_THAT(code, ContainsSubstring("shares"));
+  // Should not take msg_type as parameter (it's wire-only)
+  // The default constructor should still exist
+  CHECK_THAT(code, ContainsSubstring("order_owned()"));
+}
+
+TEST_CASE("binary_codegen: owned class has args struct",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Trade";
+  msg.choice.push_back(make_field("price", 32));
+  msg.choice.push_back(
+      make_field("symbol", 64, primitive_encoding_type::ascii));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_owned_class("trade_owned", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("struct args"));
+  CHECK_THAT(code, ContainsSubstring("trade_owned(args"));
+}
+
+TEST_CASE("binary_codegen: constructor auto-sets wire-only discriminant",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "AddOrder";
+  msg.discriminant_value = "0x41";
+
+  wire_field_type wf;
+  wf.name = "msg_type";
+  wf.bits = 8;
+  msg.choice.push_back(std::move(wf));
+  msg.choice.push_back(make_field("price", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_owned_class("add_order_owned", msg, layout, defaults);
+
+  // Constructor body should auto-set msg_type to 0x41
+  CHECK_THAT(code, ContainsSubstring("set_msg_type"));
+  CHECK_THAT(code, ContainsSubstring("0x41"));
+}

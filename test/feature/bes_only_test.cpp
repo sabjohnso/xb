@@ -77,3 +77,40 @@ TEST_CASE("BES-only: wire sizes are correct", "[bes_only]") {
   CHECK(AddOrder_owned::wire_size == 36);
   CHECK(Trade_owned::wire_size == 44);
 }
+
+// ===========================================================================
+// Aggregate constructor
+// ===========================================================================
+
+TEST_CASE("BES-only: AddOrder aggregate constructor", "[bes_only]") {
+  AddOrder_owned order(42, 7, 1234567890ULL, 9999ULL, 'B', 100, "AAPL", 15025);
+
+  AddOrder_view view(order.buffer());
+  CHECK(view.stock_locate() == 42);
+  CHECK(view.tracking_number() == 7);
+  CHECK(view.shares() == 100);
+  CHECK(view.stock() == "AAPL");
+  CHECK(view.price() == 15025);
+  // Wire-only msg_type auto-set from discriminant-value
+  CHECK(view.msg_type() == 0x41);
+}
+
+// ===========================================================================
+// Designated-initializer factory
+// ===========================================================================
+
+TEST_CASE("BES-only: AddOrder designated-init factory", "[bes_only]") {
+  auto order = AddOrder_owned({
+      .stock_locate = 42,
+      .shares = 100,
+      .stock = "GOOG",
+      .price = 28000,
+  });
+
+  AddOrder_view view(order.buffer());
+  CHECK(view.stock_locate() == 42);
+  CHECK(view.shares() == 100);
+  CHECK(view.stock() == "GOOG");
+  CHECK(view.price() == 28000);
+  CHECK(view.msg_type() == 0x41);
+}

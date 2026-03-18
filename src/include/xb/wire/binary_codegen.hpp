@@ -616,6 +616,79 @@ namespace xb::wire {
 
     detail::field_source<Message> source{message};
 
+    // Collect data field names and types for constructors
+    struct param_info {
+      std::string name;
+      std::string type;
+    };
+
+    std::vector<param_info> data_params;
+    for (const auto& rf : layout.fields) {
+      if (rf.category != field_category::data) continue;
+      auto t = source.field_return_type(rf, defaults);
+      if (t.empty()) continue;
+      // Strip std::optional wrapper for constructor params
+      if (t.starts_with("std::optional<") && t.back() == '>') {
+        t = t.substr(14, t.size() - 15);
+      }
+      data_params.push_back({rf.name, t});
+    }
+
+    // Emit args struct for designated-initializer construction
+    if (!data_params.empty()) {
+      out << "  struct args {\n";
+      for (const auto& p : data_params) {
+        out << "    " << p.type << " " << p.name << "{};\n";
+      }
+      out << "  };\n\n";
+
+      // Constructor from args
+      out << "  explicit " << class_name
+          << "(args a) : buf_(wire_size, std::byte{0}) {\n";
+      for (const auto& p : data_params) {
+        out << "    set_" << p.name << "(a." << p.name << ");\n";
+      }
+      // Auto-set wire-only discriminant value
+      if constexpr (requires { message.discriminant_value; }) {
+        if (message.discriminant_value.has_value() &&
+            !message.discriminant_value->empty()) {
+          // Find the first wire-only field to set
+          for (const auto& rf : layout.fields) {
+            if (rf.category == field_category::wire_only) {
+              out << "    set_" << rf.name << "(" << *message.discriminant_value
+                  << ");\n";
+              break;
+            }
+          }
+        }
+      }
+      out << "  }\n\n";
+
+      // Aggregate constructor with positional parameters
+      out << "  " << class_name << "(";
+      for (std::size_t i = 0; i < data_params.size(); ++i) {
+        if (i > 0) out << ", ";
+        out << data_params[i].type << " " << data_params[i].name << "_arg";
+      }
+      out << ")\n      : buf_(wire_size, std::byte{0}) {\n";
+      for (const auto& p : data_params) {
+        out << "    set_" << p.name << "(" << p.name << "_arg);\n";
+      }
+      if constexpr (requires { message.discriminant_value; }) {
+        if (message.discriminant_value.has_value() &&
+            !message.discriminant_value->empty()) {
+          for (const auto& rf : layout.fields) {
+            if (rf.category == field_category::wire_only) {
+              out << "    set_" << rf.name << "(" << *message.discriminant_value
+                  << ");\n";
+              break;
+            }
+          }
+        }
+      }
+      out << "  }\n\n";
+    }
+
     bool has_wire_only = std::any_of(
         layout.fields.begin(), layout.fields.end(), [](const auto& rf) {
           return rf.category == field_category::wire_only;
