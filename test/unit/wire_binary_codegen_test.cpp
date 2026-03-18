@@ -693,3 +693,67 @@ TEST_CASE("binary_codegen: frame parser returns ok on success",
 
   CHECK_THAT(code, ContainsSubstring("parse_result::ok"));
 }
+
+// ---------------------------------------------------------------------------
+// constexpr construction (UX-9)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("binary_codegen: view class has constexpr from_trusted factory",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Simple";
+  msg.choice.push_back(make_field("price", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("simple_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("from_trusted"));
+  CHECK_THAT(code, ContainsSubstring("constexpr"));
+}
+
+TEST_CASE("binary_codegen: single-byte view accessor is constexpr",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "CxView";
+  msg.choice.push_back(make_field("flag", 8));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("cx_view", msg, layout, defaults);
+
+  // Single-byte accessor should be constexpr
+  CHECK_THAT(code, ContainsSubstring("constexpr auto flag()"));
+}
+
+TEST_CASE("binary_codegen: multi-byte view accessor is not constexpr",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "NoConstexpr";
+  msg.choice.push_back(make_field("price", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("nce_view", msg, layout, defaults);
+
+  // Multi-byte accessor uses memcpy — not constexpr in C++20
+  CHECK_THAT(code, ContainsSubstring("auto price()"));
+  CHECK_THAT(code, !ContainsSubstring("constexpr auto price()"));
+}
+
+TEST_CASE("binary_codegen: view class has trusted_tag private constructor",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Tagged";
+  msg.choice.push_back(make_field("val", 8));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("tagged_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("trusted_tag"));
+}

@@ -137,12 +137,15 @@ namespace xb::wire {
                               const std::string& cpp_type,
                               const std::string& endian, unsigned offset_bytes,
                               unsigned width_bytes) {
-      out << "  auto " << name << "() const -> " << cpp_type << " {\n";
       if (width_bytes == 1) {
+        // Single-byte access is constexpr-safe
+        out << "  constexpr auto " << name << "() const -> " << cpp_type
+            << " {\n";
         out << "    return static_cast<" << cpp_type << ">(buf_["
             << offset_bytes << "]);\n";
       } else {
-        // Use memcpy to avoid aliasing issues, then from_wire
+        // Multi-byte memcpy is not constexpr in C++20
+        out << "  auto " << name << "() const -> " << cpp_type << " {\n";
         out << "    " << cpp_type << " v;\n";
         out << "    std::memcpy(&v, buf_.data() + " << offset_bytes
             << ", sizeof(v));\n";
@@ -156,7 +159,8 @@ namespace xb::wire {
     emit_bitfield_accessor(std::ostringstream& out, const std::string& name,
                            const std::string& cpp_type, unsigned offset_bits,
                            unsigned width_bits) {
-      out << "  auto " << name << "() const -> " << cpp_type << " {\n";
+      out << "  constexpr auto " << name << "() const -> " << cpp_type
+          << " {\n";
       out << "    return static_cast<" << cpp_type
           << ">(xb::wire::extract_bits<" << offset_bits << ", " << width_bits
           << ">(buf_));\n";
@@ -239,8 +243,8 @@ namespace xb::wire {
                                     const std::string& cpp_type,
                                     unsigned offset_bits, unsigned width_bits,
                                     const std::string& null_val) {
-      out << "  auto " << name << "() const -> std::optional<" << cpp_type
-          << "> {\n";
+      out << "  constexpr auto " << name << "() const -> std::optional<"
+          << cpp_type << "> {\n";
       out << "    auto v = static_cast<" << cpp_type
           << ">(xb::wire::extract_bits<" << offset_bits << ", " << width_bits
           << ">(buf_));\n";
@@ -550,6 +554,9 @@ namespace xb::wire {
            "xb::wire::validation_level::full>\n";
     out << "class " << class_name << " {\n";
     out << "  std::span<const std::byte> buf_;\n";
+    out << "  struct trusted_tag {};\n";
+    out << "  constexpr " << class_name
+        << "(std::span<const std::byte> buf, trusted_tag) : buf_(buf) {}\n";
     out << "public:\n";
     out << "  explicit " << class_name
         << "(std::span<const std::byte> buf) : buf_(buf) {\n";
@@ -561,6 +568,12 @@ namespace xb::wire {
           << ": buffer too small\");\n";
       out << "    }\n";
     }
+    out << "  }\n\n";
+
+    // constexpr factory for trusted (pre-validated) buffers
+    out << "  static constexpr auto from_trusted(std::span<const std::byte> "
+           "buf) {\n";
+    out << "    return " << class_name << "(buf, trusted_tag{});\n";
     out << "  }\n\n";
 
     detail::field_source<Message> source{message};
