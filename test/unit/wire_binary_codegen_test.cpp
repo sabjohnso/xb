@@ -639,3 +639,57 @@ TEST_CASE("binary_codegen: single-byte discriminator skips from_wire",
   auto code = generate_discriminator("disc_1b", disc, entries);
   CHECK_THAT(code, !ContainsSubstring("from_wire"));
 }
+
+// ---------------------------------------------------------------------------
+// Frame parser error reporting (UX-8)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("binary_codegen: frame parser returns parse_result",
+          "[wire][binary_codegen]") {
+  frame_layer l1;
+  l1.view_class_name = "EthView";
+  l1.wire_size_bytes = 14;
+  l1.match_field = "ether_type";
+  l1.match_value = "0x0800";
+
+  auto code = generate_frame_parser("parse_test", {l1});
+
+  // Should return parse_result, not void
+  CHECK_THAT(code, ContainsSubstring("parse_result"));
+  CHECK_THAT(code, !ContainsSubstring("void"));
+}
+
+TEST_CASE("binary_codegen: frame parser emits truncated on short buffer",
+          "[wire][binary_codegen]") {
+  frame_layer l1;
+  l1.view_class_name = "EthView";
+  l1.wire_size_bytes = 14;
+
+  auto code = generate_frame_parser("parse_trunc", {l1});
+
+  CHECK_THAT(code, ContainsSubstring("parse_result::truncated"));
+}
+
+TEST_CASE("binary_codegen: frame parser emits mismatch on match failure",
+          "[wire][binary_codegen]") {
+  frame_layer l1;
+  l1.view_class_name = "EthView";
+  l1.wire_size_bytes = 14;
+  l1.match_field = "ether_type";
+  l1.match_value = "0x0800";
+
+  auto code = generate_frame_parser("parse_mm", {l1});
+
+  CHECK_THAT(code, ContainsSubstring("parse_result::mismatch"));
+}
+
+TEST_CASE("binary_codegen: frame parser returns ok on success",
+          "[wire][binary_codegen]") {
+  frame_layer l1;
+  l1.view_class_name = "EthView";
+  l1.wire_size_bytes = 14;
+
+  auto code = generate_frame_parser("parse_ok", {l1});
+
+  CHECK_THAT(code, ContainsSubstring("parse_result::ok"));
+}

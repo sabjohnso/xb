@@ -960,13 +960,14 @@ namespace xb::wire {
 
   /// Generate a callback-based frame parser that peels layers from a
   /// frame-stack and invokes the callback for each message body.
+  /// Returns xb::wire::parse_result indicating success or failure mode.
   inline std::string
   generate_frame_parser(const std::string& function_name,
                         const std::vector<frame_layer>& layers) {
     std::ostringstream out;
 
     out << "template <typename Callback>\n";
-    out << "void " << function_name
+    out << "xb::wire::parse_result " << function_name
         << "(std::span<const std::byte> frame, Callback&& cb) {\n";
     out << "  std::size_t offset = 0;\n\n";
 
@@ -974,9 +975,9 @@ namespace xb::wire {
       const auto& layer = layers[i];
       std::string var = "layer_" + std::to_string(i);
 
-      out << "  // Layer: " << layer.view_class_name << "\n";
+      out << "  // Layer " << i << ": " << layer.view_class_name << "\n";
       out << "  if (frame.size() < offset + " << layer.wire_size_bytes
-          << ") return;\n";
+          << ") return xb::wire::parse_result::truncated;\n";
       out << "  " << layer.view_class_name << " " << var
           << "(frame.subspan(offset, " << layer.wire_size_bytes << "));\n";
 
@@ -984,7 +985,8 @@ namespace xb::wire {
       if (!layer.match_field.empty()) {
         out << "  if (" << var << "." << layer.match_field
             << "() != static_cast<decltype(" << var << "." << layer.match_field
-            << "())>(" << layer.match_value << ")) return;\n";
+            << "())>(" << layer.match_value
+            << ")) return xb::wire::parse_result::mismatch;\n";
       }
 
       out << "  offset += " << layer.wire_size_bytes << ";\n";
@@ -997,7 +999,7 @@ namespace xb::wire {
 
         if (layer.block_wire_size > 0) {
           out << "    if (frame.size() < offset + " << layer.block_wire_size
-              << ") return;\n";
+              << ") return xb::wire::parse_result::truncated;\n";
           out << "    " << layer.block_view_class << " blk"
               << "(frame.subspan(offset, " << layer.block_wire_size << "));\n";
           out << "    auto msg_len = blk." << layer.block_length_field
@@ -1007,7 +1009,8 @@ namespace xb::wire {
           out << "    // No block header — messages are contiguous\n";
         }
 
-        out << "    if (frame.size() < offset + msg_len) return;\n";
+        out << "    if (frame.size() < offset + msg_len) "
+               "return xb::wire::parse_result::truncated;\n";
         out << "    cb(frame.subspan(offset, msg_len));\n";
         out << "    offset += msg_len;\n";
         out << "  }\n";
@@ -1016,6 +1019,7 @@ namespace xb::wire {
       out << "\n";
     }
 
+    out << "  return xb::wire::parse_result::ok;\n";
     out << "}\n";
 
     return out.str();

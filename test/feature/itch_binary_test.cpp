@@ -293,7 +293,7 @@ TEST_CASE("Full stack: build and parse via generated frame parser",
   std::vector<std::uint8_t> msg_types;
   std::vector<std::uint32_t> prices;
 
-  parse_itch_udp(frame, [&](std::span<const std::byte> msg_body) {
+  auto result = parse_itch_udp(frame, [&](std::span<const std::byte> msg_body) {
     auto msg_type = static_cast<std::uint8_t>(msg_body[0]);
     msg_types.push_back(msg_type);
 
@@ -314,10 +314,42 @@ TEST_CASE("Full stack: build and parse via generated frame parser",
     }
   });
 
+  CHECK(result == xb::wire::parse_result::ok);
+
   // Verify both messages were delivered
   REQUIRE(msg_types.size() == 2);
   CHECK(msg_types[0] == 0x41); // AddOrder
   CHECK(msg_types[1] == 0x50); // Trade
   CHECK(prices[0] == 1750000);
   CHECK(prices[1] == 1750000);
+}
+
+TEST_CASE("Frame parser: wrong EtherType returns mismatch",
+          "[itch][fullstack]") {
+  // Build a minimal frame with wrong EtherType (not 0x0800)
+  std::vector<std::byte> frame(64, std::byte{0});
+
+  // Set EtherType to 0x86DD (IPv6) at offset 12-13
+  frame[12] = std::byte{0x86};
+  frame[13] = std::byte{0xDD};
+
+  std::size_t msg_count = 0;
+  auto result =
+      parse_itch_udp(frame, [&](std::span<const std::byte>) { ++msg_count; });
+
+  CHECK(result == xb::wire::parse_result::mismatch);
+  CHECK(msg_count == 0);
+}
+
+TEST_CASE("Frame parser: truncated frame returns truncated",
+          "[itch][fullstack]") {
+  // Buffer too small for even the first layer (Ethernet = 14 bytes)
+  std::vector<std::byte> frame(5, std::byte{0});
+
+  std::size_t msg_count = 0;
+  auto result =
+      parse_itch_udp(frame, [&](std::span<const std::byte>) { ++msg_count; });
+
+  CHECK(result == xb::wire::parse_result::truncated);
+  CHECK(msg_count == 0);
 }

@@ -26,4 +26,19 @@ namespace xb::wire {
   using const_buffer = std::span<const std::byte>;
   using mutable_buffer = std::span<std::byte>;
 
+  // --- parse_result: frame parser outcome ----------------------------------
+
+  enum class parse_result {
+    ok,        ///< All layers parsed, all messages delivered.
+    truncated, ///< Buffer too small for next layer or message.
+    mismatch,  ///< Match condition failed (wrong protocol).
+    empty,     ///< No messages (e.g., message_count == 0).
+  };
+
+  struct parse_error {
+    parse_result result;
+    unsigned layer_index;
+    std::size_t byte_offset;
+  };
+
 } // namespace xb::wire
