@@ -434,3 +434,93 @@ TEST_CASE("binary_codegen: raw_ accessor returns full-width unstripped view",
   CHECK_THAT(code, ContainsSubstring("ticker()"));
   CHECK_THAT(code, ContainsSubstring("raw_ticker()"));
 }
+
+// ---------------------------------------------------------------------------
+// Wire-field vs data field visibility (UX-5)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("binary_codegen: view class has wire-only annotations",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Annotated";
+  msg.choice.push_back(make_wire_field("msg_type", 8));
+  msg.choice.push_back(make_field("price", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("ann_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("[wire-only]"));
+  CHECK_THAT(code, ContainsSubstring("[data]"));
+}
+
+TEST_CASE("binary_codegen: concept excludes wire-only fields",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "MixedFields";
+  msg.choice.push_back(make_wire_field("msg_type", 8));
+  msg.choice.push_back(make_field("price", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_concept("mixed_message", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("price()"));
+  CHECK_THAT(code, !ContainsSubstring("msg_type"));
+}
+
+TEST_CASE("binary_codegen: base class excludes wire-only virtuals",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "BaseFields";
+  msg.choice.push_back(make_wire_field("msg_type", 8));
+  msg.choice.push_back(make_field("price", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_base_class("base_cls", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("price()"));
+  CHECK_THAT(code, !ContainsSubstring("msg_type"));
+}
+
+TEST_CASE("binary_codegen: wire-only fields still accessible on view",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Accessible";
+  msg.choice.push_back(make_wire_field("msg_type", 8));
+  msg.choice.push_back(make_field("price", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("acc_view", msg, layout, defaults);
+
+  // Both fields accessible on view (not hidden, just annotated)
+  CHECK_THAT(code, ContainsSubstring("msg_type()"));
+  CHECK_THAT(code, ContainsSubstring("price()"));
+}
+
+TEST_CASE("binary_codegen: view class groups data fields before wire-only",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "Grouped";
+  msg.choice.push_back(make_wire_field("msg_type", 8));
+  msg.choice.push_back(make_field("price", 32));
+  msg.choice.push_back(make_field("quantity", 32));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("grp_view", msg, layout, defaults);
+
+  // Data fields should come before wire-only separator
+  auto data_pos = code.find("[data]");
+  auto wire_pos = code.find("wire-only fields");
+  REQUIRE(data_pos != std::string::npos);
+  REQUIRE(wire_pos != std::string::npos);
+  CHECK(data_pos < wire_pos);
+}

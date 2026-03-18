@@ -3,6 +3,7 @@
 
 #include <xb/wire/layout_engine.hpp>
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <variant>
@@ -564,9 +565,29 @@ namespace xb::wire {
 
     detail::field_source<Message> source{message};
 
+    // Check if there are any wire-only fields
+    bool has_wire_only = std::any_of(
+        layout.fields.begin(), layout.fields.end(), [](const auto& rf) {
+          return rf.category == field_category::wire_only;
+        });
+
+    // Pass 1: data fields
     for (const auto& rf : layout.fields) {
+      if (rf.category == field_category::wire_only) continue;
+      if (rf.category == field_category::data) out << "  // [data]\n";
       source.emit_accessor(out, rf, defaults);
       out << "\n";
+    }
+
+    // Pass 2: wire-only fields with separator
+    if (has_wire_only) {
+      out << "  // --- wire-only fields ---\n";
+      for (const auto& rf : layout.fields) {
+        if (rf.category != field_category::wire_only) continue;
+        out << "  // [wire-only]\n";
+        source.emit_accessor(out, rf, defaults);
+        out << "\n";
+      }
     }
 
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
@@ -595,10 +616,30 @@ namespace xb::wire {
 
     detail::field_source<Message> source{message};
 
+    bool has_wire_only = std::any_of(
+        layout.fields.begin(), layout.fields.end(), [](const auto& rf) {
+          return rf.category == field_category::wire_only;
+        });
+
+    // Pass 1: data fields
     for (const auto& rf : layout.fields) {
+      if (rf.category == field_category::wire_only) continue;
+      if (rf.category == field_category::data) out << "  // [data]\n";
       source.emit_accessor(out, rf, defaults);
       source.emit_mutator(out, rf, defaults);
       out << "\n";
+    }
+
+    // Pass 2: wire-only fields
+    if (has_wire_only) {
+      out << "  // --- wire-only fields ---\n";
+      for (const auto& rf : layout.fields) {
+        if (rf.category != field_category::wire_only) continue;
+        out << "  // [wire-only]\n";
+        source.emit_accessor(out, rf, defaults);
+        source.emit_mutator(out, rf, defaults);
+        out << "\n";
+      }
     }
 
     out << "  auto buffer() const -> std::span<const std::byte> { return "
@@ -644,10 +685,30 @@ namespace xb::wire {
 
     detail::field_source<Message> source{message};
 
+    bool has_wire_only = std::any_of(
+        layout.fields.begin(), layout.fields.end(), [](const auto& rf) {
+          return rf.category == field_category::wire_only;
+        });
+
+    // Pass 1: data fields
     for (const auto& rf : layout.fields) {
+      if (rf.category == field_category::wire_only) continue;
+      if (rf.category == field_category::data) out << "  // [data]\n";
       source.emit_accessor(out, rf, defaults);
       source.emit_mutator(out, rf, defaults);
       out << "\n";
+    }
+
+    // Pass 2: wire-only fields
+    if (has_wire_only) {
+      out << "  // --- wire-only fields ---\n";
+      for (const auto& rf : layout.fields) {
+        if (rf.category != field_category::wire_only) continue;
+        out << "  // [wire-only]\n";
+        source.emit_accessor(out, rf, defaults);
+        source.emit_mutator(out, rf, defaults);
+        out << "\n";
+      }
     }
 
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
@@ -671,7 +732,9 @@ namespace xb::wire {
 
     bool has_requirements = false;
     for (const auto& rf : layout.fields) {
+      // Concepts expose only data fields — skip wire-only and padding
       if (rf.category == field_category::padding) continue;
+      if (rf.category == field_category::wire_only) continue;
 
       auto ret_type = source.field_return_type(rf, defaults);
       if (ret_type.empty()) continue;
@@ -706,7 +769,9 @@ namespace xb::wire {
     detail::field_source<Message> source{message};
 
     for (const auto& rf : layout.fields) {
+      // Base class exposes only data fields — skip wire-only and padding
       if (rf.category == field_category::padding) continue;
+      if (rf.category == field_category::wire_only) continue;
 
       if (rf.category == field_category::constant) {
         // Constants are static, not virtual — find the value
