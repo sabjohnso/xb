@@ -25,6 +25,7 @@
 #include <xb/schematron_parser.hpp>
 #include <xb/type_map.hpp>
 #include <xb/wire/bes_resolver.hpp>
+#include <xb/wire/bes_to_xsd.hpp>
 #include <xb/wire/binary_codegen.hpp>
 #include <xb/wire/encoding.hpp>
 #include <xb/wire/encoding_resolver.hpp>
@@ -139,11 +140,6 @@ namespace {
         schema_files.push_back(s.get<std::string>());
     }
 
-    if (schema_files.empty()) {
-      std::cerr << "xb: no input files\n";
-      return exit_usage;
-    }
-
     // Extract options
     std::string output_dir = config.value("output-dir", ".");
     std::string type_map_file = config.value("type-map", "");
@@ -169,46 +165,83 @@ namespace {
     else if (mode_str == "file-per-type")
       mode = xb::output_mode::file_per_type;
 
+    // Check: BES-only mode requires --encoding
+    bool binary_only = config.value("binary-only", false);
+    std::string encoding_file = config.value("encoding", "");
+    bool bes_only_mode =
+        binary_only && !encoding_file.empty() && schema_files.empty();
+
+    if (schema_files.empty() && !bes_only_mode) {
+      std::cerr << "xb: no input files\n";
+      return exit_usage;
+    }
+
     // Separate structural schemas from Schematron files
     std::vector<std::string> sch_files;
     xb::schema_set schemas;
-    for (const auto& file : schema_files) {
-      std::string content = read_file(file);
-      if (has_extension(file, ".sch")) {
-        sch_files.push_back(file);
-        continue;
-      }
+
+    if (bes_only_mode) {
+      // BES-only mode: synthesize schemas from BES
       try {
-        parse_schema_file(file, content, schemas);
+        std::string bes_xml = read_file(encoding_file);
+        xb::expat_reader bes_reader(bes_xml);
+        bes_reader.read();
+        auto bes_encoding = xb::bes::read_encoding_type(bes_reader);
+        auto resolved = xb::wire::resolve_imports(
+            std::move(bes_encoding),
+            [&](const std::string& href) -> xb::bes::encoding_type {
+              auto import_path =
+                  (fs::path(encoding_file).parent_path() / href).string();
+              std::string import_xml = read_file(import_path);
+              xb::expat_reader import_reader(import_xml);
+              import_reader.read();
+              return xb::bes::read_encoding_type(import_reader);
+            });
+        schemas = xb::wire::build_synthetic_schemas(resolved);
       } catch (const std::exception& e) {
-        std::cerr << "xb: error parsing schema " << file << ": " << e.what()
-                  << "\n";
+        std::cerr << "xb: error building synthetic schemas from BES: "
+                  << e.what() << "\n";
         return exit_parse;
       }
-    }
+    } else {
+      for (const auto& file : schema_files) {
+        std::string content = read_file(file);
+        if (has_extension(file, ".sch")) {
+          sch_files.push_back(file);
+          continue;
+        }
+        try {
+          parse_schema_file(file, content, schemas);
+        } catch (const std::exception& e) {
+          std::cerr << "xb: error parsing schema " << file << ": " << e.what()
+                    << "\n";
+          return exit_parse;
+        }
+      }
 
-    // Resolve cross-references
-    try {
-      schemas.resolve();
-    } catch (const std::exception& e) {
-      std::cerr << "xb: schema resolution error: " << e.what() << "\n";
-      return exit_parse;
-    }
-
-    // Apply Schematron overlays (after resolution)
-    for (const auto& file : sch_files) {
-      std::string content = read_file(file);
+      // Resolve cross-references
       try {
-        xb::expat_reader reader(content);
-        xb::schematron_parser sch_parser;
-        auto sch = sch_parser.parse(reader);
-        auto ov = xb::schematron_overlay(schemas, sch);
-        for (const auto& w : ov.warnings)
-          std::cerr << "xb: schematron warning: " << w << "\n";
+        schemas.resolve();
       } catch (const std::exception& e) {
-        std::cerr << "xb: error parsing schematron " << file << ": " << e.what()
-                  << "\n";
+        std::cerr << "xb: schema resolution error: " << e.what() << "\n";
         return exit_parse;
+      }
+
+      // Apply Schematron overlays (after resolution)
+      for (const auto& file : sch_files) {
+        std::string content = read_file(file);
+        try {
+          xb::expat_reader reader(content);
+          xb::schematron_parser sch_parser;
+          auto sch = sch_parser.parse(reader);
+          auto ov = xb::schematron_overlay(schemas, sch);
+          for (const auto& w : ov.warnings)
+            std::cerr << "xb: schematron warning: " << w << "\n";
+        } catch (const std::exception& e) {
+          std::cerr << "xb: error parsing schematron " << file << ": "
+                    << e.what() << "\n";
+          return exit_parse;
+        }
       }
     }
 
@@ -261,9 +294,6 @@ namespace {
       codegen_opts.ns_style = xb::namespace_style::full_uri;
 
     // Generate XML types (unless --binary-only)
-    bool binary_only = config.value("binary-only", false);
-    std::string encoding_file = config.value("encoding", "");
-
     std::vector<xb::cpp_file> files;
     if (!binary_only) {
       try {
@@ -989,6 +1019,57 @@ namespace {
     return exit_success;
   }
 
+  // ---------------------------------------------------------------------------
+  // generate-xsd subcommand
+  // ---------------------------------------------------------------------------
+
+  int
+  run_generate_xsd(const nlohmann::json& config) {
+    std::string encoding_file = config.value("encoding", "");
+    std::string output_file = config.value("output", "");
+
+    if (encoding_file.empty()) {
+      std::cerr << "xb generate-xsd: --encoding is required\n";
+      return exit_usage;
+    }
+
+    try {
+      std::string bes_xml = read_file(encoding_file);
+      xb::expat_reader bes_reader(bes_xml);
+      bes_reader.read();
+      auto encoding = xb::bes::read_encoding_type(bes_reader);
+
+      auto resolved = xb::wire::resolve_imports(
+          std::move(encoding),
+          [&](const std::string& href) -> xb::bes::encoding_type {
+            auto import_path =
+                (fs::path(encoding_file).parent_path() / href).string();
+            std::string import_xml = read_file(import_path);
+            xb::expat_reader import_reader(import_xml);
+            import_reader.read();
+            return xb::bes::read_encoding_type(import_reader);
+          });
+
+      auto xsd = xb::wire::generate_xsd(resolved);
+
+      if (output_file.empty()) {
+        std::cout << xsd;
+      } else {
+        std::ofstream out(output_file);
+        if (!out) {
+          std::cerr << "xb: cannot write file: " << output_file << "\n";
+          return exit_io;
+        }
+        out << xsd;
+      }
+
+      return exit_success;
+    } catch (const std::exception& e) {
+      std::cerr << "xb generate-xsd: " << e.what() << "\n";
+      return exit_codegen;
+    }
+  }
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -1001,6 +1082,7 @@ xb_cli::run(const nlohmann::json& config) {
   const auto& cmd_config = config.at(command);
 
   if (command == "generate") return run_generate(cmd_config);
+  if (command == "generate-xsd") return run_generate_xsd(cmd_config);
   if (command == "sample-doc") return run_sample_doc(cmd_config);
   if (command == "fetch") return run_fetch(cmd_config);
   if (command == "convert") return run_convert(cmd_config);

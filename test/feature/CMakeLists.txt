@@ -131,6 +131,20 @@ target_link_libraries(xb_xeag_lexer_pascal_test
 target_compile_features(xb_xeag_lexer_pascal_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xeag_lexer_pascal_test COMMAND xb_xeag_lexer_pascal_test)
 
+# --- BES-only code generation test (no XSD) ---
+xb_generate_cpp(
+  TARGET xb_bes_only_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/itch/itch.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_bes_only_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_bes_only_test bes_only_test.cpp)
+target_link_libraries(xb_bes_only_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_only_types xb::header)
+target_compile_features(xb_bes_only_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_bes_only_test COMMAND xb_bes_only_test)
+
 # --- ITCH binary encoding integration test ---
 xb_generate_cpp(
   TARGET xb_itch_binary_types

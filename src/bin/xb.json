@@ -258,6 +258,30 @@
       ]
     },
     {
+      "name": "generate-xsd",
+      "doc": [
+        "Generate XSD from a Binary Encoding Specification (BES) file.",
+        "Produces a standards-conformant XSD with facet constraints derived from the binary wire layout."
+      ],
+      "args": [
+        {
+          "kind": "option",
+          "names": ["encoding", "e"],
+          "doc": ["Binary Encoding Specification (BES) file."],
+          "type": "file",
+          "docv": "FILE",
+          "required": true
+        },
+        {
+          "kind": "option",
+          "names": ["output", "o"],
+          "doc": ["Output file (default: stdout)."],
+          "type": "file",
+          "docv": "FILE"
+        }
+      ]
+    },
+    {
       "name": "convert",
       "doc": [
         "Convert between schema formats (XSD/DTD/RNG/RNC).",

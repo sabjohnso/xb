@@ -11,7 +11,7 @@ at build time.
 
     xb_generate_cpp(
       TARGET <name>
-      SCHEMAS <file> [<file>...]
+      [SCHEMAS <file> [<file>...]]
       [OUTPUT_DIR <dir>]
       [TYPE_MAP <file>]
       [NAMESPACE_MAP <uri=ns> ...]
@@ -28,7 +28,14 @@ at build time.
       [ENCODING <bes-file>]
       [VALIDATION_LEVEL <full|structural|discriminant>]
       [BINARY_ONLY]
+      [XSD_OUTPUT <file>]
     )
+
+  ``SCHEMAS`` is required unless ``ENCODING`` + ``BINARY_ONLY`` are both
+  present, in which case schemas are synthesized from the BES.
+
+  ``XSD_OUTPUT`` writes a derived XSD alongside the generated C++ when in
+  BES-only mode.  Useful for documentation, validation, and interop.
 
   ``MODE`` controls the output layout:
 
@@ -68,7 +75,7 @@ at build time.
 function(xb_generate_cpp)
   cmake_parse_arguments(XB_GEN
     "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT;BINARY_ONLY"
-    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL"
+    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL;XSD_OUTPUT"
     "SCHEMAS;NAMESPACE_MAP"
     ${ARGN})
 
@@ -78,7 +85,11 @@ function(xb_generate_cpp)
   endif()
 
   if(NOT XB_GEN_SCHEMAS)
-    message(FATAL_ERROR "xb_generate_cpp: SCHEMAS is required")
+    if(XB_GEN_ENCODING AND XB_GEN_BINARY_ONLY)
+      # BES-only mode: schemas are synthesized from BES
+    else()
+      message(FATAL_ERROR "xb_generate_cpp: SCHEMAS is required (unless ENCODING + BINARY_ONLY)")
+    endif()
   endif()
 
   # --- Default OUTPUT_DIR ---
@@ -308,5 +319,22 @@ function(xb_generate_cpp)
     add_library(${XB_GEN_TARGET} INTERFACE)
     target_include_directories(${XB_GEN_TARGET} INTERFACE "${XB_GEN_OUTPUT_DIR}")
     add_dependencies(${XB_GEN_TARGET} ${XB_GEN_TARGET}_generate)
+  endif()
+
+  # --- Optional XSD generation from BES ---
+  if(XB_GEN_XSD_OUTPUT AND XB_GEN_ENCODING)
+    set(xsd_cmd "$<TARGET_FILE:${xb_exe}>" generate-xsd
+      --encoding "${XB_GEN_ENCODING}"
+      --output "${XB_GEN_XSD_OUTPUT}")
+
+    add_custom_command(
+      OUTPUT "${XB_GEN_XSD_OUTPUT}"
+      COMMAND ${xsd_cmd}
+      DEPENDS "${XB_GEN_ENCODING}" "$<TARGET_FILE:${xb_exe}>"
+      COMMENT "Generating XSD from BES for ${XB_GEN_TARGET}"
+      VERBATIM)
+
+    add_custom_target(${XB_GEN_TARGET}_xsd DEPENDS "${XB_GEN_XSD_OUTPUT}")
+    add_dependencies(${XB_GEN_TARGET} ${XB_GEN_TARGET}_xsd)
   endif()
 endfunction()

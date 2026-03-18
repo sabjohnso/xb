@@ -485,3 +485,9 @@ target_link_libraries(xb_xpath_schema_eval_test
   PRIVATE Catch2::Catch2WithMain xb::xb)
 target_compile_features(xb_xpath_schema_eval_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 add_test(NAME xb_xpath_schema_eval_test COMMAND xb_xpath_schema_eval_test)
+
+add_executable(xb_bes_to_xsd_test bes_to_xsd_test.cpp)
+target_link_libraries(xb_bes_to_xsd_test
+  PRIVATE Catch2::Catch2WithMain xb::xb)
+target_compile_features(xb_bes_to_xsd_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+add_test(NAME xb_bes_to_xsd_test COMMAND xb_bes_to_xsd_test)
