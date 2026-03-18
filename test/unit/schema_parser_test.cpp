@@ -1,5 +1,6 @@
 #include <xb/expat_reader.hpp>
 #include <xb/schema_parser.hpp>
+#include <xb/schema_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -1171,4 +1172,97 @@ TEST_CASE("schema_parser: no annotation", "[schema_parser]") {
   )");
   REQUIRE(s.complex_types().size() == 1);
   CHECK(!s.complex_types()[0].doc_annotation().has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate anonymous type deduplication
+// ---------------------------------------------------------------------------
+
+TEST_CASE("schema_parser: identical anonymous types across complex types "
+          "are deduplicated",
+          "[schema_parser]") {
+  // Two complex types both have a "timestamp" element with identical
+  // inline xs:simpleType restriction.  Without deduplication, the parser
+  // synthesizes "timestamp_type" twice and schema_set::resolve() throws.
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:t="urn:test">
+      <xs:complexType name="AddOrder">
+        <xs:sequence>
+          <xs:element name="price" type="xs:unsignedInt"/>
+          <xs:element name="timestamp">
+            <xs:simpleType>
+              <xs:restriction base="xs:unsignedLong">
+                <xs:maxInclusive value="281474976710655"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:complexType>
+      <xs:complexType name="Trade">
+        <xs:sequence>
+          <xs:element name="amount" type="xs:unsignedInt"/>
+          <xs:element name="timestamp">
+            <xs:simpleType>
+              <xs:restriction base="xs:unsignedLong">
+                <xs:maxInclusive value="281474976710655"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+
+  // Should parse without throwing — identical anonymous types merged
+  xb::schema_set ss;
+  ss.add(std::move(s));
+  CHECK_NOTHROW(ss.resolve());
+
+  // Both elements should reference the same type
+  auto* add_order = ss.find_complex_type(qname("urn:test", "AddOrder"));
+  auto* trade = ss.find_complex_type(qname("urn:test", "Trade"));
+  REQUIRE(add_order != nullptr);
+  REQUIRE(trade != nullptr);
+
+  // The deduplication should produce exactly one timestamp_type
+  CHECK(ss.find_simple_type(qname("urn:test", "timestamp_type")) != nullptr);
+}
+
+TEST_CASE("schema_parser: different anonymous types with same element name "
+          "get distinct names",
+          "[schema_parser]") {
+  // Two complex types both have a "value" element but with DIFFERENT
+  // inline restrictions.  These must get distinct synthesized names.
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:t="urn:test">
+      <xs:complexType name="TypeA">
+        <xs:sequence>
+          <xs:element name="value">
+            <xs:simpleType>
+              <xs:restriction base="xs:unsignedShort">
+                <xs:maxInclusive value="4095"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:complexType>
+      <xs:complexType name="TypeB">
+        <xs:sequence>
+          <xs:element name="value">
+            <xs:simpleType>
+              <xs:restriction base="xs:unsignedInt">
+                <xs:maxInclusive value="65535"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:schema>
+  )");
+
+  xb::schema_set ss;
+  ss.add(std::move(s));
+  CHECK_NOTHROW(ss.resolve());
 }

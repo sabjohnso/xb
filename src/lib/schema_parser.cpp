@@ -425,8 +425,7 @@ namespace xb {
           alts = parse_alternatives(reader, reader.depth());
         } else {
           // May have anonymous type child
-          std::string synth_name = elem_name + "_type";
-          type_name = qname(tns, synth_name);
+          std::string synth_base = elem_name + "_type";
           std::size_t elem_depth = reader.depth();
           bool found_anon = false;
 
@@ -442,8 +441,42 @@ namespace xb {
             }
 
             if (reader.name().local_name() == "simpleType") {
-              auto st = parse_simple_type(reader, tns, synth_name);
-              anon_simple_types.push_back(std::move(st));
+              auto st = parse_simple_type(reader, tns, synth_base);
+
+              // Deduplicate: check for existing type with same name
+              std::string final_name = synth_base;
+              bool reused = false;
+              for (const auto& existing : anon_simple_types) {
+                if (existing.name() != qname(tns, synth_base)) continue;
+                // Name collision — check structural identity
+                if (existing.variety() == st.variety() &&
+                    existing.base_type_name() == st.base_type_name() &&
+                    existing.facets() == st.facets() &&
+                    existing.item_type_name() == st.item_type_name() &&
+                    existing.member_type_names() == st.member_type_names()) {
+                  reused = true;
+                  break;
+                }
+                // Different structure — find a unique name
+                unsigned suffix = 2;
+                while (std::any_of(
+                    anon_simple_types.begin(), anon_simple_types.end(),
+                    [&](const auto& s) {
+                      return s.name() == qname(tns, synth_base + "_" +
+                                                        std::to_string(suffix));
+                    }))
+                  ++suffix;
+                final_name = synth_base + "_" + std::to_string(suffix);
+                // Reconstruct with new name
+                st = simple_type(qname(tns, final_name), st.variety(),
+                                 st.base_type_name(), st.facets(),
+                                 st.item_type_name(), st.member_type_names(),
+                                 st.assertions());
+                break;
+              }
+
+              if (!reused) anon_simple_types.push_back(std::move(st));
+              type_name = qname(tns, final_name);
               found_anon = true;
             } else if (reader.name().local_name() == "complexType") {
               // Parse inline complex type
@@ -459,11 +492,39 @@ namespace xb {
                   reader, tns, ct_content, ct_attrs, ct_agrefs, ct_awild, mixed,
                   anon_simple_types, anon_complex_types, ct_oc, ct_asserts);
 
-              anon_complex_types.push_back(
-                  complex_type(qname(tns, synth_name), false, mixed,
-                               std::move(ct_content), std::move(ct_attrs),
-                               std::move(ct_agrefs), std::move(ct_awild),
-                               std::move(ct_oc), std::move(ct_asserts)));
+              // Deduplicate complex anonymous types by name
+              std::string final_name = synth_base;
+              bool reused = false;
+              auto new_ct = complex_type(
+                  qname(tns, synth_base), false, mixed, std::move(ct_content),
+                  std::move(ct_attrs), std::move(ct_agrefs),
+                  std::move(ct_awild), std::move(ct_oc), std::move(ct_asserts));
+              for (const auto& existing : anon_complex_types) {
+                if (existing.name().local_name() == synth_base &&
+                    existing.name().namespace_uri() == tns) {
+                  // For complex types, check if structurally identical
+                  // by comparing content kind and mixed flag
+                  if (existing.mixed() == new_ct.mixed() &&
+                      existing.content().kind == new_ct.content().kind) {
+                    reused = true;
+                    break;
+                  }
+                  unsigned suffix = 2;
+                  while (std::any_of(
+                      anon_complex_types.begin(), anon_complex_types.end(),
+                      [&](const auto& c) {
+                        return c.name() ==
+                               qname(tns,
+                                     synth_base + "_" + std::to_string(suffix));
+                      }))
+                    ++suffix;
+                  final_name = synth_base + "_" + std::to_string(suffix);
+                  break;
+                }
+              }
+
+              if (!reused) { anon_complex_types.push_back(std::move(new_ct)); }
+              type_name = qname(tns, final_name);
               found_anon = true;
             } else if (reader.name().local_name() == "alternative") {
               auto test = opt_attr(reader, "test");
