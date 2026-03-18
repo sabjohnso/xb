@@ -155,7 +155,7 @@ TEST_CASE("ITCH AddOrder: owned round-trip", "[itch][binary]") {
   CHECK(view.order_reference() == 42);
   CHECK(view.side() == 0x42);
   CHECK(view.shares() == 100);
-  CHECK(view.stock().substr(0, 4) == "AAPL");
+  CHECK(view.stock() == "AAPL");
   CHECK(view.price() == 1500000);
 }
 
@@ -175,7 +175,7 @@ TEST_CASE("ITCH Trade: round-trip", "[itch][binary]") {
 
   CHECK(view.msg_type() == 0x50);
   CHECK(view.shares() == 200);
-  CHECK(view.stock().substr(0, 4) == "GOOG");
+  CHECK(view.stock() == "GOOG");
   CHECK(view.price() == 1410000);
   CHECK(view.match_number() == 7777);
 }
@@ -301,7 +301,7 @@ TEST_CASE("Full stack: build and parse via generated frame parser",
       AddOrder_view view(msg_body);
       CHECK(view.stock_locate() == 1);
       CHECK(view.shares() == 500);
-      CHECK(view.stock().substr(0, 4) == "AAPL");
+      CHECK(view.stock() == "AAPL");
       prices.push_back(view.price());
     } else if (msg_type == 0x50) {
       Trade_view view(msg_body);

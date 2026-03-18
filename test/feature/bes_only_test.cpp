@@ -42,7 +42,7 @@ TEST_CASE("BES-only: AddOrder round-trip", "[bes_only]") {
   CHECK(view.order_reference() == 9999ULL);
   CHECK(view.side() == 'B');
   CHECK(view.shares() == 100);
-  CHECK(view.stock() == std::string_view("AAPL    "));
+  CHECK(view.stock() == std::string_view("AAPL"));
   CHECK(view.price() == 15025);
 }
 
@@ -65,7 +65,7 @@ TEST_CASE("BES-only: Trade round-trip", "[bes_only]") {
   Trade_view view(trade.buffer());
   CHECK(view.stock_locate() == 1);
   CHECK(view.shares() == 200);
-  CHECK(view.stock() == std::string_view("MSFT    "));
+  CHECK(view.stock() == std::string_view("MSFT"));
   CHECK(view.match_number() == 12345ULL);
 }
 

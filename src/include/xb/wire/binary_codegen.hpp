@@ -172,11 +172,33 @@ namespace xb::wire {
       out << "  }\n";
     }
 
-    // Emit accessor for a fixed-width string field
+    // Emit accessor for a fixed-width string field (trimmed).
+    // Strips trailing padding characters (space by default).
     inline void
     emit_string_accessor(std::ostringstream& out, const std::string& name,
-                         unsigned offset_bytes, unsigned width_bytes) {
+                         unsigned offset_bytes, unsigned width_bytes,
+                         char pad_char = ' ') {
       out << "  auto " << name << "() const -> std::string_view {\n";
+      out << "    std::string_view raw("
+          << "reinterpret_cast<const char*>(buf_.data() + " << offset_bytes
+          << "), " << width_bytes << ");\n";
+      // Emit the trim: find_last_not_of the padding char
+      if (pad_char == '\0') {
+        out << "    auto pos = raw.find_last_not_of('\\0');\n";
+      } else {
+        out << "    auto pos = raw.find_last_not_of('" << pad_char << "');\n";
+      }
+      out << "    return pos == std::string_view::npos "
+          << "? std::string_view{} : raw.substr(0, pos + 1);\n";
+      out << "  }\n";
+    }
+
+    // Emit raw accessor for a fixed-width string field (unstripped).
+    // Returns the full-width string_view including padding.
+    inline void
+    emit_raw_string_accessor(std::ostringstream& out, const std::string& name,
+                             unsigned offset_bytes, unsigned width_bytes) {
+      out << "  auto raw_" << name << "() const -> std::string_view {\n";
       out << "    return std::string_view("
           << "reinterpret_cast<const char*>(buf_.data() + " << offset_bytes
           << "), " << width_bytes << ");\n";
@@ -351,8 +373,22 @@ namespace xb::wire {
                   // String field?
                   if (field_is_string(v) && rf.offset_bits.has_value() &&
                       *rf.offset_bits % 8 == 0 && rf.width_bits % 8 == 0) {
+                    // Determine padding character from defaults
+                    char pad = ' '; // default: space
+                    if constexpr (requires { defaults.string_padding; }) {
+                      if (defaults.string_padding.has_value()) {
+                        using pt =
+                            std::decay_t<decltype(*defaults.string_padding)>;
+                        if constexpr (requires(pt p) { to_string(p); }) {
+                          auto s = to_string(*defaults.string_padding);
+                          if (s == "null" || s == "zero") pad = '\0';
+                        }
+                      }
+                    }
                     emit_string_accessor(out, rf.name, *rf.offset_bits / 8,
-                                         rf.width_bits / 8);
+                                         rf.width_bits / 8, pad);
+                    emit_raw_string_accessor(out, rf.name, *rf.offset_bits / 8,
+                                             rf.width_bits / 8);
                     return true;
                   }
 

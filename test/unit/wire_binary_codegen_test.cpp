@@ -378,3 +378,59 @@ TEST_CASE("binary_codegen: empty message", "[wire][binary_codegen]") {
   CHECK_THAT(code, ContainsSubstring("class empty_view"));
   CHECK_THAT(code, ContainsSubstring("wire_size = 0"));
 }
+
+// ---------------------------------------------------------------------------
+// String padding trimming (UX-4)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("binary_codegen: string accessor trims trailing spaces by default",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+  // Default string_padding is space (or absent → space)
+
+  message_type msg;
+  msg.name = "WithString";
+  msg.choice.push_back(
+      make_field("symbol", 64, primitive_encoding_type::ascii));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("str_view", msg, layout, defaults);
+
+  // Trimmed accessor should scan from the right
+  CHECK_THAT(code, ContainsSubstring("symbol()"));
+  CHECK_THAT(code, ContainsSubstring("find_last_not_of"));
+}
+
+TEST_CASE("binary_codegen: string accessor trims trailing nulls",
+          "[wire][binary_codegen]") {
+  defaults_type defaults;
+  defaults.byte_order = byte_order_type::big_endian;
+  defaults.string_padding = padding_type::null;
+
+  message_type msg;
+  msg.name = "NullPadded";
+  msg.choice.push_back(make_field("name", 80, primitive_encoding_type::ascii));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("null_view", msg, layout, defaults);
+
+  CHECK_THAT(code, ContainsSubstring("name()"));
+  CHECK_THAT(code, ContainsSubstring("\\0"));
+}
+
+TEST_CASE("binary_codegen: raw_ accessor returns full-width unstripped view",
+          "[wire][binary_codegen]") {
+  auto defaults = make_defaults(byte_order_type::big_endian);
+
+  message_type msg;
+  msg.name = "RawString";
+  msg.choice.push_back(
+      make_field("ticker", 64, primitive_encoding_type::ascii));
+
+  auto layout = compute_layout(msg, defaults);
+  auto code = generate_view_class("raw_str_view", msg, layout, defaults);
+
+  // Should have both trimmed and raw accessors
+  CHECK_THAT(code, ContainsSubstring("ticker()"));
+  CHECK_THAT(code, ContainsSubstring("raw_ticker()"));
+}

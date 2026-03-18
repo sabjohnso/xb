@@ -22,6 +22,6 @@ TEST_CASE("BES global namespace: SimpleOrder round-trip", "[bes_global_ns]") {
   SimpleOrder_view view(order.buffer());
   CHECK(view.stock_locate() == 42);
   CHECK(view.shares() == 100);
-  CHECK(view.stock() == std::string_view("AAPL    "));
+  CHECK(view.stock() == std::string_view("AAPL"));
   CHECK(view.price() == 15025);
 }
