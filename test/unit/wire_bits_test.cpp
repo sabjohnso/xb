@@ -192,3 +192,45 @@ TEST_CASE("extract_bits is constexpr", "[wire][bits]") {
   constexpr auto val = xb::wire::extract_bits<0, 8>(std::span{buf});
   static_assert(val == 0xAB);
 }
+
+// ---------------------------------------------------------------------------
+// Wide fields (> 32 bits) — insert_bits must not truncate to unsigned
+// ---------------------------------------------------------------------------
+
+TEST_CASE("insert_bits/extract_bits: 48-bit round-trip (MSB)", "[wire][bits]") {
+  std::array<std::byte, 12> buf{};
+  buf[11] = B(0xAA); // canary
+
+  std::uint64_t value = 1234567890ULL;
+  xb::wire::insert_bits<40, 48>(as_mut_span(buf), value);
+  auto result = xb::wire::extract_bits<40, 48>(as_span(buf));
+
+  CHECK(result == value);
+  CHECK(buf[11] == B(0xAA)); // canary preserved
+}
+
+TEST_CASE("insert_bits/extract_bits: 48-bit large value (MSB)",
+          "[wire][bits]") {
+  std::array<std::byte, 8> buf{};
+
+  std::uint64_t value = 281474976710655ULL; // 2^48 - 1
+  xb::wire::insert_bits<0, 48>(as_mut_span(buf), value);
+  auto result = xb::wire::extract_bits<0, 48>(as_span(buf));
+
+  CHECK(result == value);
+  // Bytes 6-7 should be untouched
+  CHECK(buf[6] == B(0x00));
+  CHECK(buf[7] == B(0x00));
+}
+
+TEST_CASE("insert_bits/extract_bits: 48-bit round-trip (LSB)", "[wire][bits]") {
+  std::array<std::byte, 8> buf{};
+
+  std::uint64_t value = 1234567890ULL;
+  xb::wire::insert_bits<0, 48, xb::wire::bit_order::lsb_first>(as_mut_span(buf),
+                                                               value);
+  auto result = xb::wire::extract_bits<0, 48, xb::wire::bit_order::lsb_first>(
+      as_span(buf));
+
+  CHECK(result == value);
+}

@@ -110,8 +110,10 @@ namespace xb::wire {
         unsigned chunk_width = hi - lo;
         bits_remaining -= chunk_width;
 
-        unsigned chunk = (static_cast<unsigned>(value) >> bits_remaining) &
-                         ((1u << chunk_width) - 1u);
+        unsigned chunk =
+            static_cast<unsigned>(
+                (static_cast<std::uint64_t>(value) >> bits_remaining)) &
+            ((1u << chunk_width) - 1u);
         unsigned mask = ((1u << chunk_width) - 1u) << (8 - hi);
         auto byte_val = static_cast<unsigned>(buf[i]);
         byte_val = (byte_val & ~mask) | (chunk << (8 - hi));
@@ -135,8 +137,10 @@ namespace xb::wire {
             (i + 1 == end_byte && end_bit % 8 != 0) ? (end_bit % 8) : 8;
         unsigned chunk_width = hi - lo;
 
-        unsigned chunk = (static_cast<unsigned>(value) >> bits_consumed) &
-                         ((1u << chunk_width) - 1u);
+        unsigned chunk =
+            static_cast<unsigned>(
+                (static_cast<std::uint64_t>(value) >> bits_consumed)) &
+            ((1u << chunk_width) - 1u);
         unsigned mask = ((1u << chunk_width) - 1u) << lo;
         auto byte_val = static_cast<unsigned>(buf[i]);
         byte_val = (byte_val & ~mask) | (chunk << lo);
