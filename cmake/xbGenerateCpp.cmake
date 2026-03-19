@@ -291,7 +291,7 @@ function(xb_generate_cpp)
     add_custom_command(
       OUTPUT ${gen_headers} ${gen_sources}
       COMMAND ${xb_cmd}
-      DEPENDS ${xb_deps} "$<TARGET_FILE:${xb_exe}>"
+      DEPENDS ${xb_deps}
       COMMENT "Generating C++ from XSD schemas for ${XB_GEN_TARGET}"
       VERBATIM)
 
@@ -304,17 +304,30 @@ function(xb_generate_cpp)
     endif()
   else()
     # --- In-tree build or header-only: stamp-file approach ---
+    #
+    # With Ninja Multi-Config the stamp must be config-independent so
+    # the custom command is not re-triggered needlessly when a
+    # different config's binary happens to be newer.  The generated
+    # C++ source is deterministic regardless of build config, so we
+    # depend only on the input files (schemas, type map, encoding),
+    # not on the binary itself.  A build-order dependency on the
+    # generator target is added separately.
     set(stamp "${XB_GEN_OUTPUT_DIR}/.xb_generate.stamp")
 
     add_custom_command(
       OUTPUT "${stamp}"
       COMMAND ${xb_cmd}
       COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
-      DEPENDS ${xb_deps} "$<TARGET_FILE:${xb_exe}>"
+      DEPENDS ${xb_deps}
       COMMENT "Generating C++ from XSD schemas for ${XB_GEN_TARGET}"
       VERBATIM)
 
     add_custom_target(${XB_GEN_TARGET}_generate DEPENDS "${stamp}")
+
+    # Build-order dependency: ensure the generator binary is built
+    # before the custom command runs (but don't re-trigger on binary
+    # timestamp changes across configs).
+    add_dependencies(${XB_GEN_TARGET}_generate ${xb_exe})
 
     add_library(${XB_GEN_TARGET} INTERFACE)
     target_include_directories(${XB_GEN_TARGET} INTERFACE "${XB_GEN_OUTPUT_DIR}")

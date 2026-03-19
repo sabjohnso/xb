@@ -22,11 +22,12 @@ add_custom_command(
     -n "http://xb.dev/encoding=xb::bes"
     -o "${xb_ENCODING_GEN_DIR}"
     "${xb_ENCODING_XSD}"
-  DEPENDS xb_bootstrap "${xb_ENCODING_XSD}" "${xb_ENCODING_TYPEMAP}"
+  DEPENDS "${xb_ENCODING_XSD}" "${xb_ENCODING_TYPEMAP}"
   COMMENT "Generating BES encoding types from xb-encoding.xsd (bootstrap)"
   VERBATIM)
 
 add_custom_target(xb_bootstrap_generate DEPENDS "${xb_ENCODING_HPP}")
+add_dependencies(xb_bootstrap_generate xb_bootstrap)
 
 # ---------------------------------------------------------------------------
 # Stage 3: Full CLI (depends on generated encoding types)
