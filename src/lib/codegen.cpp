@@ -291,9 +291,23 @@ namespace xb {
       if (non_numeric.count(cpp_type)) return false;
       // Templates and other complex types
       if (cpp_type.find('<') != std::string::npos) return false;
-      // Anything else (int, unsigned, int32_t, float, double, etc.)
-      // is a built-in or typedef that accepts numeric literals.
-      return !cpp_type.empty();
+      // Allowlist: only C++ built-in numeric types and their aliases
+      static const std::set<std::string> numeric = {
+          "bool",        "int",
+          "unsigned",    "unsigned int",
+          "short",       "unsigned short",
+          "long",        "unsigned long",
+          "long long",   "unsigned long long",
+          "float",       "double",
+          "long double", "char",
+          "signed char", "unsigned char",
+          "int8_t",      "int16_t",
+          "int32_t",     "int64_t",
+          "uint8_t",     "uint16_t",
+          "uint32_t",    "uint64_t",
+          "size_t",
+      };
+      return numeric.count(cpp_type) > 0;
     }
 
     // Check if a raw XSD default/fixed value is a valid C++ literal.
@@ -479,13 +493,20 @@ namespace xb {
 
         // Build variant type string and collect choice alternatives for the
         // field plan in a single pass — these must stay synchronized.
+        // Track seen C++ types to avoid duplicate variant alternatives
+        // (e.g., xs:choice and xs:sequence both map to explicit_group).
+        std::set<std::string> seen_variant_types;
         auto add_alt = [&](const std::string& type,
                            choice_alternative alt = {}) {
-          if (!first) variant_type += ", ";
-          variant_type += type;
+          if (seen_variant_types.insert(type).second) {
+            // New type — add to variant
+            if (!first) variant_type += ", ";
+            variant_type += type;
+            first = false;
+          }
+          // Always record in the plan (for element name dispatch)
           alt.cpp_type = type;
           alts.push_back(std::move(alt));
-          first = false;
         };
 
         auto add_element_alt = [&](const qname& xml_name,
@@ -913,6 +934,22 @@ namespace xb {
             {"std::vector<xb::any_element>", "open_content", ""});
 
       disambiguate_fields();
+
+      // Record the wildcard field's final name in the plan (it may have
+      // been renamed to "any_attribute_" by disambiguate_fields).
+      if (plan && ct.attribute_wildcard().has_value()) {
+        for (const auto& f : s.fields) {
+          if (f.type == "std::vector<xb::any_attribute>") {
+            field_plan_entry wc_entry;
+            wc_entry.cpp_field_name = f.name;
+            wc_entry.cpp_type = f.type;
+            wc_entry.cardinality = field_cardinality::repeating;
+            wc_entry.is_attribute = true; // mark as wildcard, not element
+            plan->push_back(std::move(wc_entry));
+            break;
+          }
+        }
+      }
       return wrap_if_needed(std::move(s), resolver);
     }
 
@@ -1048,8 +1085,14 @@ namespace xb {
           if (member_st && !member_st->facets().enumeration.empty()) {
             std::string fn = resolver.qualify_call("to_string", member);
             body += "      return std::string(" + fn + "(x));\n";
-          } else
+          } else if (cpp_type == "xb::qname") {
+            body += "      return std::string(x.local_name());\n";
+          } else if (cpp_type.find("std::vector<") == 0) {
+            // List member type — TODO: proper list serialization
+            body += "      return std::string{} /* TODO: list format */;\n";
+          } else {
             body += "      return xb::format(x);\n";
+          }
           body += "    }\n";
           first = false;
         }
@@ -1749,9 +1792,10 @@ namespace xb {
       std::string cpp_type = resolver.resolve(type_name);
       if (cpp_type == "xb::qname")
         return "std::string((" + value_expr + ").local_name())";
-      // List types need join serialization
+      // List and vector types: generate space-separated serialization.
+      // TODO: generate proper format() overloads for list types.
       if (cpp_type.find("std::vector<") == 0)
-        return "xb::format(" + value_expr + ")";
+        return "std::string{} /* TODO: list serialization */";
       return "xb::format(" + value_expr + ")";
     }
 
@@ -2410,13 +2454,19 @@ namespace xb {
                                       resolver.schemas, resolver);
 
       if (ct.attribute_wildcard().has_value()) {
-        // The wildcard field may be renamed to any_attribute_ if an
-        // element named anyAttribute already occupies that name.
-        std::string wc_name = "any_attribute";
-        auto elem_names = collect_element_field_names(ct, resolver);
-        if (elem_names.count(wc_name)) wc_name += '_';
+        // Use the plan to find the wildcard field's actual name (may
+        // have been renamed by disambiguate_fields).
+        std::string wc_field = "any_attribute";
+        if (plan) {
+          for (const auto& entry : *plan) {
+            if (entry.cpp_type == "std::vector<xb::any_attribute>") {
+              wc_field = entry.cpp_field_name;
+              break;
+            }
+          }
+        }
         body += "  for (const auto& a : " +
-                resolver.field_access("value", wc_name) + ") {\n";
+                resolver.field_access("value", wc_field) + ") {\n";
         body += "    writer.attribute(a.name(), a.value());\n";
         body += "  }\n";
       }
@@ -3328,9 +3378,11 @@ namespace xb {
       // xb::format(value).size() otherwise (length applies to lexical
       // representation per XSD spec)
       bool is_string = (cpp_type == "std::string");
-      auto size_expr = [&]() {
-        return is_string ? value_expr + ".size()"
-                         : "xb::format(" + value_expr + ").size()";
+      bool is_vector = (cpp_type.find("std::vector<") == 0);
+      auto size_expr = [&]() -> std::string {
+        if (is_string) return value_expr + ".size()";
+        if (is_vector) return value_expr + ".size()";
+        return "xb::format(" + value_expr + ").size()";
       };
 
       if (facets.length.has_value())
