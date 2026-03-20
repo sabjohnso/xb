@@ -354,7 +354,8 @@ namespace xb {
     void
     translate_particle_term(const particle& p, std::vector<cpp_field>& fields,
                             const type_resolver& resolver,
-                            const qname& containing_type_name) {
+                            const qname& containing_type_name,
+                            field_plan* plan = nullptr) {
       std::visit(
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
@@ -447,14 +448,15 @@ namespace xb {
               if (group_def) {
                 translate_particles(group_def->group().particles(),
                                     group_def->group().compositor(), fields,
-                                    resolver, containing_type_name, p.occurs);
+                                    resolver, containing_type_name, p.occurs,
+                                    plan);
               }
             } else if constexpr (std::is_same_v<T,
                                                 std::unique_ptr<model_group>>) {
               if (term) {
                 translate_particles(term->particles(), term->compositor(),
                                     fields, resolver, containing_type_name,
-                                    p.occurs);
+                                    p.occurs, plan);
               }
             } else if constexpr (std::is_same_v<T, wildcard>) {
               fields.push_back({"std::vector<xb::any_element>", "any", ""});
@@ -592,7 +594,8 @@ namespace xb {
       }
 
       for (const auto& p : particles)
-        translate_particle_term(p, fields, resolver, containing_type_name);
+        translate_particle_term(p, fields, resolver, containing_type_name,
+                                plan);
     }
 
     std::string
@@ -667,7 +670,8 @@ namespace xb {
     collect_base_fields(const schema_set& schemas, const qname& base_name,
                         std::vector<cpp_field>& fields,
                         const type_resolver& resolver,
-                        const qname& containing_type_name) {
+                        const qname& containing_type_name,
+                        field_plan* plan = nullptr) {
       auto* base_ct = schemas.find_complex_type(base_name);
       if (!base_ct) return;
 
@@ -680,13 +684,13 @@ namespace xb {
               !cc->base_type_name.local_name().empty()) {
             if (cc->derivation == derivation_method::extension)
               collect_base_fields(schemas, cc->base_type_name, fields, resolver,
-                                  containing_type_name);
+                                  containing_type_name, plan);
           }
 
           if (cc->content_model.has_value()) {
             translate_particles(cc->content_model->particles(),
                                 cc->content_model->compositor(), fields,
-                                resolver, containing_type_name);
+                                resolver, containing_type_name, {}, plan);
           }
         }
       }
@@ -884,7 +888,7 @@ namespace xb {
               (!cc->base_type_name.namespace_uri().empty() ||
                !cc->base_type_name.local_name().empty())) {
             collect_base_fields(resolver.schemas, cc->base_type_name, s.fields,
-                                resolver, ct.name());
+                                resolver, ct.name(), plan);
           }
 
           if (cc->content_model.has_value()) {
@@ -2349,8 +2353,13 @@ namespace xb {
                                       resolver.schemas, resolver);
 
       if (ct.attribute_wildcard().has_value()) {
+        // The wildcard field may be renamed to any_attribute_ if an
+        // element named anyAttribute already occupies that name.
+        std::string wc_name = "any_attribute";
+        auto elem_names = collect_element_field_names(ct, resolver);
+        if (elem_names.count(wc_name)) wc_name += '_';
         body += "  for (const auto& a : " +
-                resolver.field_access("value", "any_attribute") + ") {\n";
+                resolver.field_access("value", wc_name) + ") {\n";
         body += "    writer.attribute(a.name(), a.value());\n";
         body += "  }\n";
       }
@@ -2985,8 +2994,9 @@ namespace xb {
     void
     emit_read_base_fields(std::string& body, const schema_set& schemas,
                           const qname& base_name, const type_resolver& resolver,
-                          const qname& containing_type_name,
-                          bool& first_branch) {
+                          const qname& containing_type_name, bool& first_branch,
+                          const field_plan* plan = nullptr,
+                          int* choice_index_ptr = nullptr) {
       auto* base_ct = schemas.find_complex_type(base_name);
       if (!base_ct) return;
 
@@ -2998,12 +3008,13 @@ namespace xb {
               !cc->base_type_name.local_name().empty()) {
             if (cc->derivation == derivation_method::extension)
               emit_read_base_fields(body, schemas, cc->base_type_name, resolver,
-                                    containing_type_name, first_branch);
+                                    containing_type_name, first_branch, plan,
+                                    choice_index_ptr);
           }
           if (cc->content_model.has_value()) {
             for (const auto& p : cc->content_model->particles())
               emit_read_particle_match(body, p, resolver, containing_type_name,
-                                       first_branch);
+                                       first_branch, plan, choice_index_ptr);
           }
         }
       }
@@ -3172,17 +3183,19 @@ namespace xb {
           bool first_branch = true;
 
           // Extension: read base fields first
+          int type_choice_idx = 0;
           if (cc->derivation == derivation_method::extension &&
               (!cc->base_type_name.namespace_uri().empty() ||
                !cc->base_type_name.local_name().empty())) {
             emit_read_base_fields(body, resolver.schemas, cc->base_type_name,
-                                  resolver, ct.name(), first_branch);
+                                  resolver, ct.name(), first_branch, plan,
+                                  &type_choice_idx);
           }
 
           if (cc->content_model.has_value()) {
             emit_read_particles(body, cc->content_model->particles(),
                                 cc->content_model->compositor(), resolver,
-                                ct.name(), has_oc, {}, plan);
+                                ct.name(), has_oc, {}, plan, type_choice_idx);
           } else if (!first_branch) {
             if (has_oc) {
               body += "    else {\n";
