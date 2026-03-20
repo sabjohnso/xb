@@ -7,8 +7,54 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace xb {
+
+  // Field plan: the single source of truth for how schema content maps
+  // to C++ struct fields.  Computed once during type generation and
+  // consumed by read/write function generators.
+  //
+  // This exists to prevent the type generator and serialization generators
+  // from making independent (and potentially divergent) naming and
+  // cardinality decisions.
+
+  enum class field_cardinality { required, optional, repeating };
+
+  // One alternative within a choice field.
+  struct choice_alternative {
+    qname xml_name;       // element name that selects this alternative
+    qname type_name;      // XSD type of this alternative
+    std::string cpp_type; // resolved C++ type (may include unique_ptr)
+    bool is_complex = false;
+    bool is_cycle_type = false;
+    bool is_element_ref = false;
+    bool is_abstract = false;
+    // For abstract elements expanded into substitution group members:
+    std::vector<choice_alternative> sub_members;
+  };
+
+  // One entry in a field plan — maps to one field in the generated struct.
+  struct field_plan_entry {
+    std::string cpp_field_name; // "choice", "annotation", "name", etc.
+    std::string cpp_type;       // full C++ type including wrappers
+    field_cardinality cardinality;
+
+    // For element fields (non-choice sequence members):
+    qname xml_name;      // element name
+    qname xsd_type_name; // XSD type
+    bool is_complex = false;
+    bool is_cycle_type = false;
+
+    // For choice fields:
+    std::vector<choice_alternative> alternatives;
+
+    // For attribute fields:
+    bool is_attribute = false;
+    bool is_required = false;
+  };
+
+  using field_plan = std::vector<field_plan_entry>;
 
   struct type_resolver {
     const schema_set& schemas;

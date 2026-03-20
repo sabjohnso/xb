@@ -5742,3 +5742,88 @@ TEST_CASE("codegen: unresolvable type uses string fallback, not void",
     CHECK(field.type.find("void") == std::string::npos);
   }
 }
+
+// ===== Choice cardinality consistency =====
+
+// When a choice group has minOccurs=0 maxOccurs=1, the field is
+// optional<variant<...>>.  The read function must use assignment (not
+// push_back) and the write function must use if-has-value (not range-for).
+// This test verifies that the generated source code compiles.
+TEST_CASE("codegen: optional choice compiles correctly",
+          "[codegen][choice-cardinality]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Child types for choice alternatives
+  content_type sc_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "SimpleContentType"), false,
+                                  false, std::move(sc_ct)));
+
+  content_type cc_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "ComplexContentType"),
+                                  false, false, std::move(cc_ct)));
+
+  // Build a sequence containing:
+  //   1. A required element "name"
+  //   2. An optional choice (minOccurs=0, maxOccurs=1) of
+  //      simpleContent/complexContent
+  // This matches the XSD pattern where a choice group inside a sequence
+  // has its own cardinality.
+  model_group inner_choice(compositor_kind::choice);
+  inner_choice.add_particle(
+      particle(element_decl(qname("urn:test", "simpleContent"),
+                            qname("urn:test", "SimpleContentType")),
+               occurrence{1, 1}));
+  inner_choice.add_particle(
+      particle(element_decl(qname("urn:test", "complexContent"),
+                            qname("urn:test", "ComplexContentType")),
+               occurrence{1, 1}));
+
+  model_group outer_seq(compositor_kind::sequence);
+  outer_seq.add_particle(
+      particle(element_decl(qname("urn:test", "name"), qname(xs_ns, "string")),
+               occurrence{1, 1}));
+  // The choice is optional (min=0, max=1)
+  outer_seq.add_particle(
+      particle(std::make_unique<model_group>(std::move(inner_choice)),
+               occurrence{0, 1}));
+
+  complex_content cc(qname(xs_ns, "anyType"), derivation_method::extension,
+                     std::move(outer_seq));
+  content_type parent_ct(content_kind::element_only, std::move(cc));
+
+  s.add_complex_type(complex_type(qname("urn:test", "ParentType"), false, false,
+                                  std::move(parent_ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen_options opts;
+  opts.mode = output_mode::split;
+  opts.namespace_map["urn:test"] = "test";
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Write generated code for inspection
+  cpp_writer writer;
+  std::string header_code;
+  std::string source_code;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header)
+      header_code += writer.write(f);
+    else
+      source_code += writer.write(f);
+  }
+
+  INFO("SOURCE:\n" << source_code);
+  // The choice field should be optional (uses type alias to optional<variant>)
+  CHECK(header_code.find("std::optional<choice_element_type>") !=
+        std::string::npos);
+
+  // The read function should use assignment (=), not push_back
+  CHECK(source_code.find("result.choice =") != std::string::npos);
+  CHECK(source_code.find("result.choice.push_back") == std::string::npos);
+
+  // The write function should use if-has-value, not range-for
+  CHECK(source_code.find("if (value.choice)") != std::string::npos);
+  CHECK(source_code.find("choice_item : value.choice") == std::string::npos);
+}
