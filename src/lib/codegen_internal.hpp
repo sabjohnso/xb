@@ -20,6 +20,7 @@ namespace xb {
     const std::set<qname>* cycle_types = nullptr;
     const std::set<std::string>* all_namespaces = nullptr;
     const std::set<std::string>* schema_type_names = nullptr;
+    const std::map<std::string, std::string>* type_rename_map = nullptr;
 
     bool
     is_cycle_type(const qname& type_name) const {
@@ -28,6 +29,11 @@ namespace xb {
 
     std::string
     type_name(const std::string& xml_local_name) const {
+      // Check if this type was renamed to avoid C++ name collisions
+      if (type_rename_map) {
+        auto it = type_rename_map->find(xml_local_name);
+        if (it != type_rename_map->end()) return it->second;
+      }
       return apply_naming(xml_local_name, naming_category::type_,
                           options.naming);
     }
@@ -111,7 +117,7 @@ namespace xb {
     std::string
     resolve(const qname& type_name) const {
       if (type_name.namespace_uri().empty() && type_name.local_name().empty())
-        return "void";
+        return "std::string";
 
       if (type_name.namespace_uri() == "http://www.w3.org/2001/XMLSchema") {
         if (auto* mapping = types.find(type_name.local_name()))

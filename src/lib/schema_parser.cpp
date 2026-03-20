@@ -228,11 +228,31 @@ namespace xb {
       std::vector<assertion> assertions;
     };
 
-    // Parse the children of an xs:restriction element for a simple type
+    // Forward declaration — parse_restriction and parse_simple_type are
+    // mutually recursive (a restriction can have an inline base simple type,
+    // and a simple type can contain a restriction).
+    simple_type
+    parse_simple_type(xml_reader& reader, const std::string& tns,
+                      const std::string& name,
+                      std::vector<simple_type>& anon_simple_types);
+
+    // Register an anonymous simple type with deduplication.
+    qname
+    register_anon_simple_type(simple_type st,
+                              std::vector<simple_type>& anon_simple_types);
+
+    // Parse the children of an xs:restriction element for a simple type.
+    // When the 'base' attribute is absent, the base type is defined as an
+    // inline <xs:simpleType> child (Bug 3).
     restriction_result
-    parse_restriction(xml_reader& reader) {
-      auto base_str = req_attr(reader, "base");
-      qname base_type = resolve_qname(reader, base_str);
+    parse_restriction(xml_reader& reader, const std::string& tns,
+                      const std::string& parent_name,
+                      std::vector<simple_type>& anon_simple_types) {
+      auto base_str = opt_attr(reader, "base");
+      qname base_type;
+      if (base_str.has_value()) {
+        base_type = resolve_qname(reader, base_str.value());
+      }
       facet_set facets;
       std::vector<assertion> assertions;
 
@@ -244,7 +264,14 @@ namespace xb {
         }
         if (reader.node_type() == xml_node_type::start_element &&
             reader.name().namespace_uri() == xs_ns) {
-          if (reader.name().local_name() == "assertion") {
+          if (reader.name().local_name() == "simpleType" &&
+              base_type.local_name().empty()) {
+            // Inline base type (Bug 3)
+            std::string synth = parent_name + "_base";
+            auto st = parse_simple_type(reader, tns, synth, anon_simple_types);
+            base_type =
+                register_anon_simple_type(std::move(st), anon_simple_types);
+          } else if (reader.name().local_name() == "assertion") {
             auto test = req_attr(reader, "test");
             assertions.push_back({std::move(test)});
             skip_element(reader);
@@ -258,10 +285,14 @@ namespace xb {
       return {std::move(base_type), std::move(facets), std::move(assertions)};
     }
 
-    // Parse xs:simpleType
+    // Parse xs:simpleType.
+    // anon_simple_types collects any synthesized anonymous types that arise
+    // from inline children (list item types, union member types, restriction
+    // base types).
     simple_type
     parse_simple_type(xml_reader& reader, const std::string& tns,
-                      const std::string& name) {
+                      const std::string& name,
+                      std::vector<simple_type>& anon_simple_types) {
       std::size_t depth = reader.depth();
 
       simple_type_variety variety = simple_type_variety::atomic;
@@ -289,7 +320,7 @@ namespace xb {
           ann = parse_annotation(reader);
         } else if (local == "restriction") {
           variety = simple_type_variety::atomic;
-          auto result = parse_restriction(reader);
+          auto result = parse_restriction(reader, tns, name, anon_simple_types);
           base_type = std::move(result.base_type);
           facets = std::move(result.facets);
           assertions = std::move(result.assertions);
@@ -298,8 +329,27 @@ namespace xb {
           auto item_str = opt_attr(reader, "itemType");
           if (item_str.has_value()) {
             item_type = resolve_qname(reader, item_str.value());
+            skip_element(reader);
+          } else {
+            // Bug 1: parse inline item type child
+            std::size_t list_depth = reader.depth();
+            while (read_skip_ws(reader)) {
+              if (reader.node_type() == xml_node_type::end_element &&
+                  reader.depth() == list_depth)
+                break;
+              if (reader.node_type() != xml_node_type::start_element) continue;
+              if (reader.name().namespace_uri() == xs_ns &&
+                  reader.name().local_name() == "simpleType") {
+                std::string synth = name + "_item";
+                auto st =
+                    parse_simple_type(reader, tns, synth, anon_simple_types);
+                item_type =
+                    register_anon_simple_type(std::move(st), anon_simple_types);
+              } else {
+                skip_element(reader);
+              }
+            }
           }
-          skip_element(reader);
         } else if (local == "union") {
           variety = simple_type_variety::union_type;
           auto members_str = opt_attr(reader, "memberTypes");
@@ -310,7 +360,27 @@ namespace xb {
               member_types.push_back(resolve_qname(reader, token));
             }
           }
-          skip_element(reader);
+          // Bug 2: parse inline member type children (may coexist with
+          // memberTypes attribute)
+          std::size_t union_depth = reader.depth();
+          unsigned member_idx = 0;
+          while (read_skip_ws(reader)) {
+            if (reader.node_type() == xml_node_type::end_element &&
+                reader.depth() == union_depth)
+              break;
+            if (reader.node_type() != xml_node_type::start_element) continue;
+            if (reader.name().namespace_uri() == xs_ns &&
+                reader.name().local_name() == "simpleType") {
+              std::string synth =
+                  name + "_member_" + std::to_string(member_idx++);
+              auto st =
+                  parse_simple_type(reader, tns, synth, anon_simple_types);
+              member_types.push_back(
+                  register_anon_simple_type(std::move(st), anon_simple_types));
+            } else {
+              skip_element(reader);
+            }
+          }
         } else {
           skip_element(reader);
         }
@@ -323,14 +393,124 @@ namespace xb {
       return st;
     }
 
+    // Register an anonymous simple type, deduplicating by structural
+    // identity.  Returns the qname of the (possibly reused) type.
+    qname
+    register_anon_simple_type(simple_type st,
+                              std::vector<simple_type>& anon_simple_types) {
+      auto tns = st.name().namespace_uri();
+      auto base_name = st.name().local_name();
+
+      for (const auto& existing : anon_simple_types) {
+        if (existing.name() != st.name()) continue;
+        // Name collision — check structural identity
+        if (existing.variety() == st.variety() &&
+            existing.base_type_name() == st.base_type_name() &&
+            existing.facets() == st.facets() &&
+            existing.item_type_name() == st.item_type_name() &&
+            existing.member_type_names() == st.member_type_names()) {
+          return existing.name(); // reuse
+        }
+        // Different structure — find a unique name
+        unsigned suffix = 2;
+        while (std::any_of(anon_simple_types.begin(), anon_simple_types.end(),
+                           [&](const auto& s) {
+                             return s.name() ==
+                                    qname(tns, base_name + "_" +
+                                                   std::to_string(suffix));
+                           }))
+          ++suffix;
+        auto unique_name = qname(tns, base_name + "_" + std::to_string(suffix));
+        st = simple_type(unique_name, st.variety(), st.base_type_name(),
+                         st.facets(), st.item_type_name(),
+                         st.member_type_names(), {});
+        anon_simple_types.push_back(std::move(st));
+        return unique_name;
+      }
+      auto name = st.name();
+      anon_simple_types.push_back(std::move(st));
+      return name;
+    }
+
+    // Parse an <xs:attribute> element that appears inside a complex type,
+    // content derivation, or attribute group.  Handles three cases:
+    //   1. ref="..." — attribute reference
+    //   2. name="..." type="..." — named attribute with type reference
+    //   3. name="..." with inline <xs:simpleType> child (Bug 5)
+    attribute_use
+    parse_attribute_use(xml_reader& reader, const std::string& tns,
+                        std::vector<simple_type>& anon_simple_types) {
+      auto ref_str = opt_attr(reader, "ref");
+      if (ref_str.has_value()) {
+        auto ref_name = resolve_qname(reader, ref_str.value());
+        auto use = opt_attr(reader, "use");
+        bool req = use.has_value() && use.value() == "required";
+        auto def = opt_attr(reader, "default");
+        auto fix = opt_attr(reader, "fixed");
+        skip_element(reader);
+        return attribute_use{ref_name, qname{}, req, def, fix};
+      }
+
+      auto aname = req_attr(reader, "name");
+      auto atype_str = opt_attr(reader, "type");
+      qname atype;
+      if (atype_str.has_value()) {
+        atype = resolve_qname(reader, atype_str.value());
+      }
+      auto use = opt_attr(reader, "use");
+      bool req = use.has_value() && use.value() == "required";
+      auto def = opt_attr(reader, "default");
+      auto fix = opt_attr(reader, "fixed");
+
+      if (!atype_str.has_value()) {
+        // Bug 5: look for inline <xs:simpleType> child
+        std::size_t attr_depth = reader.depth();
+        while (read_skip_ws(reader)) {
+          if (reader.node_type() == xml_node_type::end_element &&
+              reader.depth() == attr_depth)
+            break;
+          if (reader.node_type() != xml_node_type::start_element) continue;
+          if (reader.name().namespace_uri() == xs_ns &&
+              reader.name().local_name() == "simpleType") {
+            std::string synth = aname + "_type";
+            auto st = parse_simple_type(reader, tns, synth, anon_simple_types);
+            atype = register_anon_simple_type(std::move(st), anon_simple_types);
+          } else {
+            skip_element(reader);
+          }
+        }
+      } else {
+        skip_element(reader);
+      }
+
+      return attribute_use{qname("", aname), atype, req, def, fix};
+    }
+
+    // Forward declarations for parse_complex_type_body (needed by
+    // parse_alternatives for inline complex type alternatives).
+    void
+    parse_complex_type_body(
+        xml_reader& reader, const std::string& tns, content_type& content,
+        std::vector<attribute_use>& attributes,
+        std::vector<attribute_group_ref>& attr_group_refs,
+        std::optional<wildcard>& attr_wildcard, bool& is_mixed,
+        std::vector<simple_type>& anon_simple_types,
+        std::vector<complex_type>& anon_complex_types,
+        std::optional<open_content>& oc, std::vector<assertion>& assertions,
+        std::optional<annotation>* out_annotation = nullptr);
+
     // Parse xs:alternative children of an element declaration.
     // The reader must be positioned on the xs:element start tag.
     // Reads children and returns any xs:alternative elements found.
     // Optionally captures annotation if present.
     std::vector<type_alternative>
     parse_alternatives(xml_reader& reader, std::size_t elem_depth,
+                       const std::string& tns, const std::string& elem_name,
+                       std::vector<simple_type>& anon_simple_types,
+                       std::vector<complex_type>& anon_complex_types,
                        std::optional<annotation>* out_annotation = nullptr) {
       std::vector<type_alternative> alts;
+      unsigned alt_idx = 0;
       while (read_skip_ws(reader)) {
         if (reader.node_type() == xml_node_type::end_element &&
             reader.depth() == elem_depth) {
@@ -346,10 +526,56 @@ namespace xb {
           if (ann && out_annotation) *out_annotation = std::move(*ann);
         } else if (reader.name().local_name() == "alternative") {
           auto test = opt_attr(reader, "test");
-          auto type_str = req_attr(reader, "type");
-          qname type_name = resolve_qname(reader, type_str);
-          skip_element(reader);
-          alts.push_back({test, type_name});
+          auto type_str = opt_attr(reader, "type");
+          if (type_str.has_value()) {
+            qname type_name = resolve_qname(reader, type_str.value());
+            skip_element(reader);
+            alts.push_back({test, type_name});
+          } else {
+            // Bug 4: inline type inside xs:alternative
+            std::string synth = elem_name + "_alt_" + std::to_string(alt_idx);
+            qname synth_qn(tns, synth);
+            std::size_t alt_depth = reader.depth();
+            bool found_type = false;
+            while (read_skip_ws(reader)) {
+              if (reader.node_type() == xml_node_type::end_element &&
+                  reader.depth() == alt_depth)
+                break;
+              if (reader.node_type() != xml_node_type::start_element) continue;
+              if (reader.name().namespace_uri() != xs_ns) {
+                skip_element(reader);
+                continue;
+              }
+              if (reader.name().local_name() == "simpleType") {
+                auto st =
+                    parse_simple_type(reader, tns, synth, anon_simple_types);
+                anon_simple_types.push_back(std::move(st));
+                found_type = true;
+              } else if (reader.name().local_name() == "complexType") {
+                bool mixed = opt_attr(reader, "mixed").value_or("") == "true";
+                content_type ct_content;
+                std::vector<attribute_use> ct_attrs;
+                std::vector<attribute_group_ref> ct_agrefs;
+                std::optional<wildcard> ct_awild;
+                std::optional<open_content> ct_oc;
+                std::vector<assertion> ct_asserts;
+                parse_complex_type_body(reader, tns, ct_content, ct_attrs,
+                                        ct_agrefs, ct_awild, mixed,
+                                        anon_simple_types, anon_complex_types,
+                                        ct_oc, ct_asserts);
+                anon_complex_types.push_back(
+                    complex_type(synth_qn, false, mixed, std::move(ct_content),
+                                 std::move(ct_attrs), std::move(ct_agrefs),
+                                 std::move(ct_awild), std::move(ct_oc),
+                                 std::move(ct_asserts)));
+                found_type = true;
+              } else {
+                skip_element(reader);
+              }
+            }
+            if (found_type) alts.push_back({test, synth_qn});
+          }
+          ++alt_idx;
         } else {
           skip_element(reader);
         }
@@ -391,18 +617,6 @@ namespace xb {
       return mg;
     }
 
-    // Forward declare for mutual recursion with parse_complex_type_body
-    void
-    parse_complex_type_body(
-        xml_reader& reader, const std::string& tns, content_type& content,
-        std::vector<attribute_use>& attributes,
-        std::vector<attribute_group_ref>& attr_group_refs,
-        std::optional<wildcard>& attr_wildcard, bool& is_mixed,
-        std::vector<simple_type>& anon_simple_types,
-        std::vector<complex_type>& anon_complex_types,
-        std::optional<open_content>& oc, std::vector<assertion>& assertions,
-        std::optional<annotation>* out_annotation = nullptr);
-
     particle
     parse_particle(xml_reader& reader, const std::string& tns,
                    std::vector<simple_type>& anon_simple_types,
@@ -427,7 +641,8 @@ namespace xb {
 
         if (type_str.has_value()) {
           type_name = resolve_qname(reader, type_str.value());
-          alts = parse_alternatives(reader, reader.depth());
+          alts = parse_alternatives(reader, reader.depth(), tns, elem_name,
+                                    anon_simple_types, anon_complex_types);
         } else {
           // May have anonymous type child
           std::string synth_base = elem_name + "_type";
@@ -446,7 +661,8 @@ namespace xb {
             }
 
             if (reader.name().local_name() == "simpleType") {
-              auto st = parse_simple_type(reader, tns, synth_base);
+              auto st =
+                  parse_simple_type(reader, tns, synth_base, anon_simple_types);
 
               // Deduplicate: check for existing type with same name
               std::string final_name = synth_base;
@@ -662,31 +878,8 @@ namespace xb {
                 continue;
               }
               if (reader.name().local_name() == "attribute") {
-                auto ref_str = opt_attr(reader, "ref");
-                if (ref_str.has_value()) {
-                  auto ref_name = resolve_qname(reader, ref_str.value());
-                  auto use = opt_attr(reader, "use");
-                  bool req = use.has_value() && use.value() == "required";
-                  auto def = opt_attr(reader, "default");
-                  auto fix = opt_attr(reader, "fixed");
-                  attributes.push_back(
-                      attribute_use{ref_name, qname{}, req, def, fix});
-                } else {
-                  auto aname = req_attr(reader, "name");
-                  auto atype_str = opt_attr(reader, "type");
-                  qname atype;
-                  if (atype_str.has_value()) {
-                    atype = resolve_qname(reader, atype_str.value());
-                  }
-                  auto use = opt_attr(reader, "use");
-                  bool req = use.has_value() && use.value() == "required";
-                  auto def = opt_attr(reader, "default");
-                  auto fix = opt_attr(reader, "fixed");
-
-                  attributes.push_back(
-                      attribute_use{qname("", aname), atype, req, def, fix});
-                }
-                skip_element(reader);
+                attributes.push_back(
+                    parse_attribute_use(reader, tns, anon_simple_types));
               } else if (reader.name().local_name() == "attributeGroup") {
                 auto ref_str = req_attr(reader, "ref");
                 attr_group_refs.push_back(
@@ -751,30 +944,8 @@ namespace xb {
                 mg = parse_compositor(reader, ck, tns, anon_simple_types,
                                       anon_complex_types);
               } else if (dl == "attribute") {
-                auto ref_str = opt_attr(reader, "ref");
-                if (ref_str.has_value()) {
-                  auto ref_name = resolve_qname(reader, ref_str.value());
-                  auto use = opt_attr(reader, "use");
-                  bool req = use.has_value() && use.value() == "required";
-                  auto def = opt_attr(reader, "default");
-                  auto fix = opt_attr(reader, "fixed");
-                  attributes.push_back(
-                      attribute_use{ref_name, qname{}, req, def, fix});
-                } else {
-                  auto aname = req_attr(reader, "name");
-                  auto atype_str = opt_attr(reader, "type");
-                  qname atype;
-                  if (atype_str.has_value()) {
-                    atype = resolve_qname(reader, atype_str.value());
-                  }
-                  auto use = opt_attr(reader, "use");
-                  bool req = use.has_value() && use.value() == "required";
-                  auto def = opt_attr(reader, "default");
-                  auto fix = opt_attr(reader, "fixed");
-                  attributes.push_back(
-                      attribute_use{qname("", aname), atype, req, def, fix});
-                }
-                skip_element(reader);
+                attributes.push_back(
+                    parse_attribute_use(reader, tns, anon_simple_types));
               } else if (dl == "attributeGroup") {
                 auto ref_str = req_attr(reader, "ref");
                 attr_group_refs.push_back(
@@ -794,30 +965,8 @@ namespace xb {
                 ckind, complex_content(base_name, dm, std::move(mg)));
           }
         } else if (local == "attribute") {
-          auto ref_str = opt_attr(reader, "ref");
-          if (ref_str.has_value()) {
-            auto ref_name = resolve_qname(reader, ref_str.value());
-            auto use = opt_attr(reader, "use");
-            bool req = use.has_value() && use.value() == "required";
-            auto def = opt_attr(reader, "default");
-            auto fix = opt_attr(reader, "fixed");
-            attributes.push_back(
-                attribute_use{ref_name, qname{}, req, def, fix});
-          } else {
-            auto aname = req_attr(reader, "name");
-            auto atype_str = opt_attr(reader, "type");
-            qname atype;
-            if (atype_str.has_value()) {
-              atype = resolve_qname(reader, atype_str.value());
-            }
-            auto use = opt_attr(reader, "use");
-            bool req = use.has_value() && use.value() == "required";
-            auto def = opt_attr(reader, "default");
-            auto fix = opt_attr(reader, "fixed");
-            attributes.push_back(
-                attribute_use{qname("", aname), atype, req, def, fix});
-          }
-          skip_element(reader);
+          attributes.push_back(
+              parse_attribute_use(reader, tns, anon_simple_types));
         } else if (local == "attributeGroup") {
           auto ref_str = req_attr(reader, "ref");
           attr_group_refs.push_back(
@@ -925,7 +1074,9 @@ namespace xb {
 
         if (type_str.has_value()) {
           type_name = resolve_qname(reader, type_str.value());
-          alts = parse_alternatives(reader, reader.depth(), &elem_ann);
+          alts = parse_alternatives(reader, reader.depth(), target_ns, name,
+                                    anon_simple_types, anon_complex_types,
+                                    &elem_ann);
         } else {
           // Look for anonymous type child
           std::string synth_name = name + "_type";
@@ -947,7 +1098,8 @@ namespace xb {
               auto ann = parse_annotation(reader);
               if (ann) elem_ann = std::move(*ann);
             } else if (reader.name().local_name() == "simpleType") {
-              auto st = parse_simple_type(reader, target_ns, synth_name);
+              auto st = parse_simple_type(reader, target_ns, synth_name,
+                                          anon_simple_types);
               anon_simple_types.push_back(std::move(st));
               has_anon_type = true;
             } else if (reader.name().local_name() == "complexType") {
@@ -992,19 +1144,37 @@ namespace xb {
       } else if (local == "attribute") {
         auto name = req_attr(reader, "name");
         auto type_str = opt_attr(reader, "type");
+        auto default_val = opt_attr(reader, "default");
+        auto fixed_val = opt_attr(reader, "fixed");
         qname type_name;
         if (type_str.has_value()) {
           type_name = resolve_qname(reader, type_str.value());
+          skip_element(reader);
+        } else {
+          // Bug 5: inline <xs:simpleType> child
+          std::size_t attr_depth = reader.depth();
+          while (read_skip_ws(reader)) {
+            if (reader.node_type() == xml_node_type::end_element &&
+                reader.depth() == attr_depth)
+              break;
+            if (reader.node_type() != xml_node_type::start_element) continue;
+            if (reader.name().namespace_uri() == xs_ns &&
+                reader.name().local_name() == "simpleType") {
+              std::string synth = name + "_type";
+              auto st = parse_simple_type(reader, target_ns, synth,
+                                          anon_simple_types);
+              type_name =
+                  register_anon_simple_type(std::move(st), anon_simple_types);
+            } else {
+              skip_element(reader);
+            }
+          }
         }
-        auto default_val = opt_attr(reader, "default");
-        auto fixed_val = opt_attr(reader, "fixed");
-
         result.add_attribute(
             attribute_decl(qname("", name), type_name, default_val, fixed_val));
-        skip_element(reader);
       } else if (local == "simpleType") {
         auto name = req_attr(reader, "name");
-        auto st = parse_simple_type(reader, target_ns, name);
+        auto st = parse_simple_type(reader, target_ns, name, anon_simple_types);
         result.add_simple_type(std::move(st));
       } else if (local == "complexType") {
         auto name = req_attr(reader, "name");
@@ -1079,29 +1249,8 @@ namespace xb {
             continue;
           }
           if (reader.name().local_name() == "attribute") {
-            auto ref_str = opt_attr(reader, "ref");
-            if (ref_str.has_value()) {
-              auto ref_name = resolve_qname(reader, ref_str.value());
-              auto use = opt_attr(reader, "use");
-              bool req = use.has_value() && use.value() == "required";
-              auto def = opt_attr(reader, "default");
-              auto fix = opt_attr(reader, "fixed");
-              attrs.push_back(attribute_use{ref_name, qname{}, req, def, fix});
-            } else {
-              auto aname = req_attr(reader, "name");
-              auto atype_str = opt_attr(reader, "type");
-              qname atype;
-              if (atype_str.has_value()) {
-                atype = resolve_qname(reader, atype_str.value());
-              }
-              auto use = opt_attr(reader, "use");
-              bool req = use.has_value() && use.value() == "required";
-              auto def = opt_attr(reader, "default");
-              auto fix = opt_attr(reader, "fixed");
-              attrs.push_back(
-                  attribute_use{qname("", aname), atype, req, def, fix});
-            }
-            skip_element(reader);
+            attrs.push_back(
+                parse_attribute_use(reader, target_ns, anon_simple_types));
           } else if (reader.name().local_name() == "attributeGroup") {
             auto ref_str = req_attr(reader, "ref");
             agrefs.push_back(

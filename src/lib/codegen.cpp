@@ -272,6 +272,26 @@ namespace xb {
       return base_type;
     }
 
+    // Check if a resolved C++ type can accept a numeric literal default.
+    // Rejects class types (xb::integer, xb::decimal, std::string, etc.)
+    // where a bare numeric literal would require multiple implicit
+    // conversions through std::optional.
+    bool
+    is_numeric_cpp_type(const std::string& cpp_type) {
+      // Class types and templates cannot accept bare numeric literals
+      // through std::optional (two implicit conversions needed).
+      static const std::set<std::string> non_numeric = {
+          "std::string", "xb::integer", "xb::decimal",   "xb::qname",
+          "xb::date",    "xb::time",    "xb::date_time", "xb::duration",
+      };
+      if (non_numeric.count(cpp_type)) return false;
+      // Templates and other complex types
+      if (cpp_type.find('<') != std::string::npos) return false;
+      // Anything else (int, unsigned, int32_t, float, double, etc.)
+      // is a built-in or typedef that accepts numeric literals.
+      return !cpp_type.empty();
+    }
+
     // Check if a raw XSD default/fixed value is a valid C++ literal.
     // Rejects dates ("2010-11-16"), durations, etc. that would be
     // misinterpreted as arithmetic expressions.
@@ -551,19 +571,28 @@ namespace xb {
                            const type_resolver& resolver) {
       if (attr.fixed_value.has_value()) {
         std::string cpp_type = resolver.resolve(attr.type_name);
-        // String types need quoting
         if (cpp_type == "std::string")
           return "\"" + attr.fixed_value.value() + "\"";
-        if (is_safe_cpp_literal(attr.fixed_value.value()))
+        if (is_safe_cpp_literal(attr.fixed_value.value()) &&
+            is_numeric_cpp_type(cpp_type))
           return attr.fixed_value.value();
+        if (cpp_type == "bool") {
+          if (attr.fixed_value.value() == "true") return "true";
+          if (attr.fixed_value.value() == "false") return "false";
+        }
         return "";
       }
       if (attr.default_value.has_value()) {
         std::string cpp_type = resolver.resolve(attr.type_name);
         if (cpp_type == "std::string")
           return "\"" + attr.default_value.value() + "\"";
-        if (is_safe_cpp_literal(attr.default_value.value()))
+        if (is_safe_cpp_literal(attr.default_value.value()) &&
+            is_numeric_cpp_type(cpp_type))
           return attr.default_value.value();
+        if (cpp_type == "bool") {
+          if (attr.default_value.value() == "true") return "true";
+          if (attr.default_value.value() == "false") return "false";
+        }
       }
       return "";
     }
@@ -573,6 +602,11 @@ namespace xb {
                          std::vector<cpp_field>& fields,
                          const type_resolver& resolver) {
       for (const auto& attr : attrs) {
+        // Skip prohibited attributes (empty type, not required)
+        if (attr.type_name.local_name().empty() &&
+            attr.type_name.namespace_uri().empty() && !attr.required)
+          continue;
+
         std::string base_type = resolver.resolve(attr.type_name);
         std::string name = resolver.field_name(attr.name.local_name());
         std::string default_val = default_value_for_attr(attr, resolver);
@@ -876,7 +910,7 @@ namespace xb {
       }
 
       if (st.variety() == simple_type_variety::list) {
-        std::string item_type = "void";
+        std::string item_type = "std::string";
         if (st.item_type_name().has_value())
           item_type = resolver.resolve(st.item_type_name().value());
         return cpp_type_alias{resolver.type_name(st.name().local_name()),
@@ -3685,13 +3719,28 @@ namespace xb {
 
       // Collect all type names (C++ identifiers) in this schema so that
       // field names that would shadow a sibling type can be disambiguated.
+      // Also detect and rename C++ name collisions between types whose XML
+      // names differ but whose C++ names (after naming style conversion)
+      // are identical (e.g. "anyType" and "any_type" both → "any_type").
       std::set<std::string> schema_type_names;
+      std::map<std::string, std::string> type_rename;
+      auto register_type_name = [&](const std::string& xml_local) {
+        std::string cpp =
+            apply_naming(xml_local, naming_category::type_, options_.naming);
+        if (!schema_type_names.insert(cpp).second) {
+          // Collision — rename the later one
+          unsigned suffix = 2;
+          while (schema_type_names.count(cpp + "_" + std::to_string(suffix)))
+            ++suffix;
+          std::string renamed = cpp + "_" + std::to_string(suffix);
+          schema_type_names.insert(renamed);
+          type_rename[xml_local] = renamed;
+        }
+      };
       for (const auto& st : s.simple_types())
-        schema_type_names.insert(apply_naming(
-            st.name().local_name(), naming_category::type_, options_.naming));
+        register_type_name(st.name().local_name());
       for (const auto& ct : s.complex_types())
-        schema_type_names.insert(apply_naming(
-            ct.name().local_name(), naming_category::type_, options_.naming));
+        register_type_name(ct.name().local_name());
 
       type_resolver resolver{schemas_,
                              types_,
@@ -3701,7 +3750,8 @@ namespace xb {
                              &union_variant_map,
                              &cycle_types,
                              &all_namespaces,
-                             &schema_type_names};
+                             &schema_type_names,
+                             &type_rename};
 
       std::vector<cpp_decl> declarations;
       std::set<std::string> seen_variant_types;

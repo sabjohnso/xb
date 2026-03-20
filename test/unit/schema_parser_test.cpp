@@ -950,17 +950,20 @@ TEST_CASE("schema_parser: element without alternatives has empty vector",
   CHECK(s.elements()[0].type_alternatives().empty());
 }
 
-TEST_CASE("schema_parser: xs:alternative missing type attribute throws",
-          "[schema_parser][cta]") {
-  CHECK_THROWS_AS(parse_xsd(R"(
+TEST_CASE(
+    "schema_parser: xs:alternative without type or inline child is skipped",
+    "[schema_parser][cta]") {
+  auto s = parse_xsd(R"(
     <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
                targetNamespace="urn:test" xmlns:tns="urn:test">
       <xs:element name="vehicle" type="tns:vehicleType">
         <xs:alternative test="@kind = 'car'"/>
       </xs:element>
     </xs:schema>
-  )"),
-                  std::runtime_error);
+  )");
+  REQUIRE(s.elements().size() == 1);
+  // No type attribute and no inline type child — alternative is not recorded
+  CHECK(s.elements()[0].type_alternatives().empty());
 }
 
 // ===== XSD 1.1: Assertions =====
@@ -1265,4 +1268,236 @@ TEST_CASE("schema_parser: different anonymous types with same element name "
   xb::schema_set ss;
   ss.add(std::move(s));
   CHECK_NOTHROW(ss.resolve());
+}
+
+// ===== Inline anonymous type bugs (XSD bootstrap) =====
+
+// Bug 1: xs:list with inline item type
+TEST_CASE("schema_parser: list with inline item type",
+          "[schema_parser][inline-anon]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:simpleType name="DerivationList">
+        <xs:list>
+          <xs:simpleType>
+            <xs:restriction base="xs:NMTOKEN">
+              <xs:enumeration value="extension"/>
+              <xs:enumeration value="restriction"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:list>
+      </xs:simpleType>
+    </xs:schema>
+  )");
+
+  REQUIRE(s.simple_types().size() >= 1);
+
+  // Find the list type
+  const simple_type* list_st = nullptr;
+  for (const auto& st : s.simple_types()) {
+    if (st.name().local_name() == "DerivationList") {
+      list_st = &st;
+      break;
+    }
+  }
+  REQUIRE(list_st != nullptr);
+  CHECK(list_st->variety() == simple_type_variety::list);
+  REQUIRE(list_st->item_type_name().has_value());
+
+  // The inline item type should have been synthesized as an anonymous type
+  auto item_name = list_st->item_type_name().value();
+  CHECK(!item_name.local_name().empty());
+
+  // The synthesized type should exist as a registered simple type
+  bool found_item = false;
+  for (const auto& st : s.simple_types()) {
+    if (st.name() == item_name) {
+      found_item = true;
+      CHECK(st.variety() == simple_type_variety::atomic);
+      CHECK(st.facets().enumeration.size() == 2);
+      CHECK(st.facets().enumeration[0] == "extension");
+      CHECK(st.facets().enumeration[1] == "restriction");
+      break;
+    }
+  }
+  CHECK(found_item);
+}
+
+// Bug 2: xs:union with inline member types
+TEST_CASE("schema_parser: union with inline member types",
+          "[schema_parser][inline-anon]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:simpleType name="DerivationSet">
+        <xs:union>
+          <xs:simpleType>
+            <xs:restriction base="xs:token">
+              <xs:enumeration value="#all"/>
+            </xs:restriction>
+          </xs:simpleType>
+          <xs:simpleType>
+            <xs:restriction base="xs:NMTOKEN">
+              <xs:enumeration value="extension"/>
+              <xs:enumeration value="restriction"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:union>
+      </xs:simpleType>
+    </xs:schema>
+  )");
+
+  REQUIRE(s.simple_types().size() >= 1);
+
+  const simple_type* union_st = nullptr;
+  for (const auto& st : s.simple_types()) {
+    if (st.name().local_name() == "DerivationSet") {
+      union_st = &st;
+      break;
+    }
+  }
+  REQUIRE(union_st != nullptr);
+  CHECK(union_st->variety() == simple_type_variety::union_type);
+  REQUIRE(union_st->member_type_names().size() == 2);
+}
+
+// Bug 2b: xs:union with mixed memberTypes attribute and inline children
+TEST_CASE("schema_parser: union with mixed attribute and inline members",
+          "[schema_parser][inline-anon]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:simpleType name="MixedUnion">
+        <xs:union memberTypes="xs:string">
+          <xs:simpleType>
+            <xs:restriction base="xs:int">
+              <xs:minInclusive value="0"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:union>
+      </xs:simpleType>
+    </xs:schema>
+  )");
+
+  REQUIRE(s.simple_types().size() >= 1);
+
+  const simple_type* union_st = nullptr;
+  for (const auto& st : s.simple_types()) {
+    if (st.name().local_name() == "MixedUnion") {
+      union_st = &st;
+      break;
+    }
+  }
+  REQUIRE(union_st != nullptr);
+  CHECK(union_st->variety() == simple_type_variety::union_type);
+  // Should have 2 members: xs:string from attribute + inline anonymous type
+  REQUIRE(union_st->member_type_names().size() == 2);
+  CHECK(union_st->member_type_names()[0] == qname(xs_ns, "string"));
+}
+
+// Bug 3: xs:restriction with inline base type
+TEST_CASE("schema_parser: restriction with inline base type",
+          "[schema_parser][inline-anon]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:simpleType name="QNameList1">
+        <xs:restriction>
+          <xs:simpleType>
+            <xs:list itemType="xs:QName"/>
+          </xs:simpleType>
+          <xs:minLength value="1"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:schema>
+  )");
+
+  REQUIRE(s.simple_types().size() >= 1);
+
+  const simple_type* restr_st = nullptr;
+  for (const auto& st : s.simple_types()) {
+    if (st.name().local_name() == "QNameList1") {
+      restr_st = &st;
+      break;
+    }
+  }
+  REQUIRE(restr_st != nullptr);
+  CHECK(restr_st->variety() == simple_type_variety::atomic);
+  // Base type should reference the synthesized anonymous list type
+  CHECK(!restr_st->base_type_name().local_name().empty());
+  CHECK(restr_st->facets().min_length.has_value());
+  CHECK(restr_st->facets().min_length.value() == 1);
+}
+
+// Bug 4: xs:alternative with inline type
+TEST_CASE("schema_parser: alternative with inline type",
+          "[schema_parser][inline-anon]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:tns="urn:test">
+      <xs:complexType name="BasePayment">
+        <xs:sequence>
+          <xs:element name="amount" type="xs:decimal"/>
+        </xs:sequence>
+      </xs:complexType>
+      <xs:element name="payment" type="tns:BasePayment">
+        <xs:alternative test="@currency = 'EUR'">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="amount" type="xs:decimal"/>
+              <xs:element name="iban" type="xs:string"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:alternative>
+      </xs:element>
+    </xs:schema>
+  )");
+
+  REQUIRE(s.elements().size() == 1);
+  const auto& elem = s.elements()[0];
+  REQUIRE(elem.type_alternatives().size() == 1);
+  // The inline type should have a synthesized name
+  CHECK(!elem.type_alternatives()[0].type_name.local_name().empty());
+}
+
+// Bug 5: xs:attribute with inline simple type
+TEST_CASE("schema_parser: attribute with inline simple type in complex type",
+          "[schema_parser][inline-anon]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test">
+      <xs:complexType name="StyledElement">
+        <xs:sequence>
+          <xs:element name="content" type="xs:string"/>
+        </xs:sequence>
+        <xs:attribute name="align">
+          <xs:simpleType>
+            <xs:restriction base="xs:NMTOKEN">
+              <xs:enumeration value="left"/>
+              <xs:enumeration value="center"/>
+              <xs:enumeration value="right"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:attribute>
+      </xs:complexType>
+    </xs:schema>
+  )");
+
+  REQUIRE(s.complex_types().size() == 1);
+  const auto& ct = s.complex_types()[0];
+  REQUIRE(ct.attributes().size() == 1);
+  // The attribute should have a type, not an empty qname
+  CHECK(!ct.attributes()[0].type_name.local_name().empty());
+
+  // The synthesized type should exist
+  bool found = false;
+  for (const auto& st : s.simple_types()) {
+    if (st.name() == ct.attributes()[0].type_name) {
+      found = true;
+      CHECK(st.facets().enumeration.size() == 3);
+      break;
+    }
+  }
+  CHECK(found);
 }

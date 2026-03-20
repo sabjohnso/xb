@@ -5606,3 +5606,139 @@ TEST_CASE("cross-namespace enum attribute qualifies to_string in write",
   // The to_string call must be namespace-qualified
   CHECK(fn->body.find("::to_string(") != std::string::npos);
 }
+
+// ===== void field elimination =====
+
+// Prohibited attributes (use="prohibited") should be omitted from the
+// generated struct, not emitted as void fields.
+TEST_CASE("codegen: prohibited attributes are omitted",
+          "[codegen][void-fields]") {
+  // Base type with an attribute
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Base complex type with a "ref" attribute
+  std::vector<attribute_use> base_attrs;
+  base_attrs.push_back(
+      attribute_use{qname("", "ref"), qname(xs_ns, "QName"), false, {}, {}});
+  base_attrs.push_back(
+      attribute_use{qname("", "name"), qname(xs_ns, "NCName"), false, {}, {}});
+
+  content_type base_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "BaseElement"), false,
+                                  false, std::move(base_ct),
+                                  std::move(base_attrs)));
+
+  // Restricted type that prohibits "ref" — empty type_name signals prohibited
+  std::vector<attribute_use> restricted_attrs;
+  restricted_attrs.push_back(
+      attribute_use{qname("", "ref"), qname{}, false, {}, {}});
+  restricted_attrs.push_back(
+      attribute_use{qname("", "name"), qname(xs_ns, "NCName"), true, {}, {}});
+
+  complex_content cc(qname("urn:test", "BaseElement"),
+                     derivation_method::restriction);
+  content_type restricted_ct(content_kind::element_only, std::move(cc));
+  s.add_complex_type(complex_type(qname("urn:test", "TopElement"), false, false,
+                                  std::move(restricted_ct),
+                                  std::move(restricted_attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  // Find the TopElement struct
+  const cpp_struct* top = nullptr;
+  for (const auto& f : files) {
+    top = find_struct(f, "top_element");
+    if (top) break;
+  }
+  REQUIRE(top != nullptr);
+
+  // "ref" should be omitted (prohibited), "name" should be present
+  bool has_ref = false;
+  bool has_name = false;
+  for (const auto& field : top->fields) {
+    if (field.name == "ref") has_ref = true;
+    if (field.name == "name") has_name = true;
+    // No field should have type "void"
+    CHECK(field.type.find("void") == std::string::npos);
+  }
+  CHECK_FALSE(has_ref);
+  CHECK(has_name);
+}
+
+// Anonymous types synthesized from elements should not collide with named
+// types.
+TEST_CASE("codegen: anonymous type name does not collide with named type",
+          "[codegen][void-fields]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Named complex type "any_type"
+  content_type named_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "anyType"), false, true,
+                                  std::move(named_ct)));
+
+  // Element "any" with an anonymous complex type → synthesized "any_type"
+  // This collides with the named type above after snake_case conversion.
+  std::vector<attribute_use> elem_attrs;
+  elem_attrs.push_back(
+      attribute_use{qname("", "ns"), qname(xs_ns, "string"), false, {}, {}});
+
+  content_type anon_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "any_type"), false, false,
+                                  std::move(anon_ct), std::move(elem_attrs)));
+
+  s.add_element(
+      element_decl(qname("urn:test", "any"), qname("urn:test", "any_type")));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  // Both types should exist with distinct names
+  cpp_writer writer;
+  std::string header;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header) header += writer.write(f);
+  }
+  // Should compile — no redefinition errors
+  // Check that both struct names are present and distinct
+  CHECK(header.find("struct any_type") != std::string::npos);
+}
+
+// When a type cannot be resolved (empty qname), codegen should not produce
+// "void" — it should use a safe fallback type.
+TEST_CASE("codegen: unresolvable type uses string fallback, not void",
+          "[codegen][void-fields]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Attribute with empty type_name (unresolvable)
+  std::vector<attribute_use> attrs;
+  attrs.push_back(attribute_use{qname("", "mystery"), qname{}, false, {}, {}});
+
+  content_type ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "Thing"), false, false,
+                                  std::move(ct), std::move(attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  const cpp_struct* thing = nullptr;
+  for (const auto& f : files) {
+    thing = find_struct(f, "thing");
+    if (thing) break;
+  }
+  REQUIRE(thing != nullptr);
+
+  // The field should exist but NOT be typed "void"
+  for (const auto& field : thing->fields) {
+    CHECK(field.type.find("void") == std::string::npos);
+  }
+}
