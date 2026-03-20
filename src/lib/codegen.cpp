@@ -1857,17 +1857,18 @@ namespace xb {
 
     // Forward declare
     void
-    emit_write_particles(std::string& body,
-                         const std::vector<particle>& particles,
-                         compositor_kind compositor,
-                         const type_resolver& resolver,
-                         const qname& containing_type_name,
-                         occurrence outer_occurs = {});
+    emit_write_particles(
+        std::string& body, const std::vector<particle>& particles,
+        compositor_kind compositor, const type_resolver& resolver,
+        const qname& containing_type_name, occurrence outer_occurs = {},
+        const field_plan* plan = nullptr, int choice_index = 0);
 
     void
     emit_write_particle_term(std::string& body, const particle& p,
                              const type_resolver& resolver,
-                             const qname& containing_type_name) {
+                             const qname& containing_type_name,
+                             const field_plan* plan = nullptr,
+                             int* choice_index_ptr = nullptr) {
       std::visit(
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
@@ -2000,16 +2001,26 @@ namespace xb {
                   resolver.schemas, resolver);
             } else if constexpr (std::is_same_v<T, group_ref>) {
               auto* group_def = resolver.schemas.find_model_group_def(term.ref);
-              if (group_def)
+              if (group_def) {
+                int ci = choice_index_ptr ? *choice_index_ptr : 0;
                 emit_write_particles(body, group_def->group().particles(),
                                      group_def->group().compositor(), resolver,
-                                     containing_type_name, p.occurs);
+                                     containing_type_name, p.occurs, plan, ci);
+                if (choice_index_ptr &&
+                    group_def->group().compositor() == compositor_kind::choice)
+                  ++(*choice_index_ptr);
+              }
             } else if constexpr (std::is_same_v<T,
                                                 std::unique_ptr<model_group>>) {
-              if (term)
+              if (term) {
+                int ci = choice_index_ptr ? *choice_index_ptr : 0;
                 emit_write_particles(body, term->particles(),
                                      term->compositor(), resolver,
-                                     containing_type_name, p.occurs);
+                                     containing_type_name, p.occurs, plan, ci);
+                if (choice_index_ptr &&
+                    term->compositor() == compositor_kind::choice)
+                  ++(*choice_index_ptr);
+              }
             } else if constexpr (std::is_same_v<T, wildcard>) {
               body += "  " + resolver.sequence_for_begin("value", "any", "e");
               body += "    e.write(writer);\n";
@@ -2025,17 +2036,35 @@ namespace xb {
                          compositor_kind compositor,
                          const type_resolver& resolver,
                          const qname& containing_type_name,
-                         occurrence outer_occurs) {
+                         occurrence outer_occurs, const field_plan* plan,
+                         int choice_index) {
       if (compositor == compositor_kind::choice) {
-        std::string field = resolver.field_access("value", "choice");
+        // Use field plan for name and cardinality if available.
+        std::string choice_field_name = "choice";
         bool is_repeating =
             outer_occurs.is_unbounded() || outer_occurs.max_occurs > 1;
         bool is_optional = !is_repeating && outer_occurs.min_occurs == 0 &&
                            outer_occurs.max_occurs <= 1;
+        if (plan) {
+          int ci = 0;
+          for (const auto& entry : *plan) {
+            if (!entry.alternatives.empty()) {
+              if (ci == choice_index) {
+                choice_field_name = entry.cpp_field_name;
+                is_repeating =
+                    entry.cardinality == field_cardinality::repeating;
+                is_optional = entry.cardinality == field_cardinality::optional;
+                break;
+              }
+              ++ci;
+            }
+          }
+        }
+        std::string field = resolver.field_access("value", choice_field_name);
 
         if (is_repeating) {
-          body += "  " +
-                  resolver.sequence_for_begin("value", "choice", "choice_item");
+          body += "  " + resolver.sequence_for_begin("value", choice_field_name,
+                                                     "choice_item");
         } else if (is_optional) {
           body += "  if (" + field + ") {\n";
         }
@@ -2160,8 +2189,10 @@ namespace xb {
       }
 
       // Sequence, all, or interleave: write each particle in order
+      int seq_choice_idx = choice_index;
       for (const auto& p : particles)
-        emit_write_particle_term(body, p, resolver, containing_type_name);
+        emit_write_particle_term(body, p, resolver, containing_type_name, plan,
+                                 &seq_choice_idx);
     }
 
     // Collect field names occupied by element particles in a complex type.
@@ -2257,7 +2288,9 @@ namespace xb {
     emit_write_base_fields(std::string& body, const schema_set& schemas,
                            const qname& base_name,
                            const type_resolver& resolver,
-                           const qname& containing_type_name) {
+                           const qname& containing_type_name,
+                           const field_plan* plan = nullptr,
+                           int* choice_index_ptr = nullptr) {
       auto* base_ct = schemas.find_complex_type(base_name);
       if (!base_ct) return;
 
@@ -2269,12 +2302,36 @@ namespace xb {
               !cc->base_type_name.local_name().empty()) {
             if (cc->derivation == derivation_method::extension)
               emit_write_base_fields(body, schemas, cc->base_type_name,
-                                     resolver, containing_type_name);
+                                     resolver, containing_type_name, plan,
+                                     choice_index_ptr);
           }
-          if (cc->content_model.has_value())
+          if (cc->content_model.has_value()) {
+            int ci = choice_index_ptr ? *choice_index_ptr : 0;
             emit_write_particles(body, cc->content_model->particles(),
                                  cc->content_model->compositor(), resolver,
-                                 containing_type_name);
+                                 containing_type_name, {}, plan, ci);
+            // Count choice groups in this content model
+            if (choice_index_ptr && plan) {
+              for (const auto& p : cc->content_model->particles()) {
+                std::visit(
+                    [&](const auto& t) {
+                      using PT = std::decay_t<decltype(t)>;
+                      if constexpr (std::is_same_v<PT, group_ref>) {
+                        auto* gd = schemas.find_model_group_def(t.ref);
+                        if (gd &&
+                            gd->group().compositor() == compositor_kind::choice)
+                          ++(*choice_index_ptr);
+                      } else if constexpr (std::is_same_v<
+                                               PT,
+                                               std::unique_ptr<model_group>>) {
+                        if (t && t->compositor() == compositor_kind::choice)
+                          ++(*choice_index_ptr);
+                      }
+                    },
+                    p.term);
+              }
+            }
+          }
         }
       }
 
@@ -2414,17 +2471,18 @@ namespace xb {
       if (ct.content().kind == content_kind::element_only) {
         if (auto* cc = std::get_if<complex_content>(&ct.content().detail)) {
           // Extension: write base fields first
+          int wr_choice_idx = 0;
           if (cc->derivation == derivation_method::extension &&
               (!cc->base_type_name.namespace_uri().empty() ||
                !cc->base_type_name.local_name().empty())) {
             emit_write_base_fields(body, resolver.schemas, cc->base_type_name,
-                                   resolver, ct.name());
+                                   resolver, ct.name(), plan, &wr_choice_idx);
           }
 
           if (cc->content_model.has_value()) {
             emit_write_particles(body, cc->content_model->particles(),
                                  cc->content_model->compositor(), resolver,
-                                 ct.name());
+                                 ct.name(), {}, plan, wr_choice_idx);
           }
         }
       }
