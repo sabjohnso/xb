@@ -78,8 +78,13 @@ namespace xb {
       std::string local = prefixed_name.substr(colon + 1);
       auto uri = reader.namespace_uri_for_prefix(prefix);
       if (uri.empty()) {
-        throw std::runtime_error("schema_parser: unknown namespace prefix '" +
-                                 prefix + "'");
+        // The 'xml' prefix is always bound per the XML Namespaces spec
+        if (prefix == "xml") {
+          uri = "http://www.w3.org/XML/1998/namespace";
+        } else {
+          throw std::runtime_error("schema_parser: unknown namespace prefix '" +
+                                   prefix + "'");
+        }
       }
       return qname(std::string(uri), local);
     }
@@ -657,19 +662,30 @@ namespace xb {
                 continue;
               }
               if (reader.name().local_name() == "attribute") {
-                auto aname = req_attr(reader, "name");
-                auto atype_str = opt_attr(reader, "type");
-                qname atype;
-                if (atype_str.has_value()) {
-                  atype = resolve_qname(reader, atype_str.value());
-                }
-                auto use = opt_attr(reader, "use");
-                bool req = use.has_value() && use.value() == "required";
-                auto def = opt_attr(reader, "default");
-                auto fix = opt_attr(reader, "fixed");
+                auto ref_str = opt_attr(reader, "ref");
+                if (ref_str.has_value()) {
+                  auto ref_name = resolve_qname(reader, ref_str.value());
+                  auto use = opt_attr(reader, "use");
+                  bool req = use.has_value() && use.value() == "required";
+                  auto def = opt_attr(reader, "default");
+                  auto fix = opt_attr(reader, "fixed");
+                  attributes.push_back(
+                      attribute_use{ref_name, qname{}, req, def, fix});
+                } else {
+                  auto aname = req_attr(reader, "name");
+                  auto atype_str = opt_attr(reader, "type");
+                  qname atype;
+                  if (atype_str.has_value()) {
+                    atype = resolve_qname(reader, atype_str.value());
+                  }
+                  auto use = opt_attr(reader, "use");
+                  bool req = use.has_value() && use.value() == "required";
+                  auto def = opt_attr(reader, "default");
+                  auto fix = opt_attr(reader, "fixed");
 
-                attributes.push_back(
-                    attribute_use{qname("", aname), atype, req, def, fix});
+                  attributes.push_back(
+                      attribute_use{qname("", aname), atype, req, def, fix});
+                }
                 skip_element(reader);
               } else if (reader.name().local_name() == "attributeGroup") {
                 auto ref_str = req_attr(reader, "ref");
@@ -735,18 +751,29 @@ namespace xb {
                 mg = parse_compositor(reader, ck, tns, anon_simple_types,
                                       anon_complex_types);
               } else if (dl == "attribute") {
-                auto aname = req_attr(reader, "name");
-                auto atype_str = opt_attr(reader, "type");
-                qname atype;
-                if (atype_str.has_value()) {
-                  atype = resolve_qname(reader, atype_str.value());
+                auto ref_str = opt_attr(reader, "ref");
+                if (ref_str.has_value()) {
+                  auto ref_name = resolve_qname(reader, ref_str.value());
+                  auto use = opt_attr(reader, "use");
+                  bool req = use.has_value() && use.value() == "required";
+                  auto def = opt_attr(reader, "default");
+                  auto fix = opt_attr(reader, "fixed");
+                  attributes.push_back(
+                      attribute_use{ref_name, qname{}, req, def, fix});
+                } else {
+                  auto aname = req_attr(reader, "name");
+                  auto atype_str = opt_attr(reader, "type");
+                  qname atype;
+                  if (atype_str.has_value()) {
+                    atype = resolve_qname(reader, atype_str.value());
+                  }
+                  auto use = opt_attr(reader, "use");
+                  bool req = use.has_value() && use.value() == "required";
+                  auto def = opt_attr(reader, "default");
+                  auto fix = opt_attr(reader, "fixed");
+                  attributes.push_back(
+                      attribute_use{qname("", aname), atype, req, def, fix});
                 }
-                auto use = opt_attr(reader, "use");
-                bool req = use.has_value() && use.value() == "required";
-                auto def = opt_attr(reader, "default");
-                auto fix = opt_attr(reader, "fixed");
-                attributes.push_back(
-                    attribute_use{qname("", aname), atype, req, def, fix});
                 skip_element(reader);
               } else if (dl == "attributeGroup") {
                 auto ref_str = req_attr(reader, "ref");
@@ -767,18 +794,29 @@ namespace xb {
                 ckind, complex_content(base_name, dm, std::move(mg)));
           }
         } else if (local == "attribute") {
-          auto aname = req_attr(reader, "name");
-          auto atype_str = opt_attr(reader, "type");
-          qname atype;
-          if (atype_str.has_value()) {
-            atype = resolve_qname(reader, atype_str.value());
+          auto ref_str = opt_attr(reader, "ref");
+          if (ref_str.has_value()) {
+            auto ref_name = resolve_qname(reader, ref_str.value());
+            auto use = opt_attr(reader, "use");
+            bool req = use.has_value() && use.value() == "required";
+            auto def = opt_attr(reader, "default");
+            auto fix = opt_attr(reader, "fixed");
+            attributes.push_back(
+                attribute_use{ref_name, qname{}, req, def, fix});
+          } else {
+            auto aname = req_attr(reader, "name");
+            auto atype_str = opt_attr(reader, "type");
+            qname atype;
+            if (atype_str.has_value()) {
+              atype = resolve_qname(reader, atype_str.value());
+            }
+            auto use = opt_attr(reader, "use");
+            bool req = use.has_value() && use.value() == "required";
+            auto def = opt_attr(reader, "default");
+            auto fix = opt_attr(reader, "fixed");
+            attributes.push_back(
+                attribute_use{qname("", aname), atype, req, def, fix});
           }
-          auto use = opt_attr(reader, "use");
-          bool req = use.has_value() && use.value() == "required";
-          auto def = opt_attr(reader, "default");
-          auto fix = opt_attr(reader, "fixed");
-          attributes.push_back(
-              attribute_use{qname("", aname), atype, req, def, fix});
           skip_element(reader);
         } else if (local == "attributeGroup") {
           auto ref_str = req_attr(reader, "ref");
@@ -1041,18 +1079,28 @@ namespace xb {
             continue;
           }
           if (reader.name().local_name() == "attribute") {
-            auto aname = req_attr(reader, "name");
-            auto atype_str = opt_attr(reader, "type");
-            qname atype;
-            if (atype_str.has_value()) {
-              atype = resolve_qname(reader, atype_str.value());
+            auto ref_str = opt_attr(reader, "ref");
+            if (ref_str.has_value()) {
+              auto ref_name = resolve_qname(reader, ref_str.value());
+              auto use = opt_attr(reader, "use");
+              bool req = use.has_value() && use.value() == "required";
+              auto def = opt_attr(reader, "default");
+              auto fix = opt_attr(reader, "fixed");
+              attrs.push_back(attribute_use{ref_name, qname{}, req, def, fix});
+            } else {
+              auto aname = req_attr(reader, "name");
+              auto atype_str = opt_attr(reader, "type");
+              qname atype;
+              if (atype_str.has_value()) {
+                atype = resolve_qname(reader, atype_str.value());
+              }
+              auto use = opt_attr(reader, "use");
+              bool req = use.has_value() && use.value() == "required";
+              auto def = opt_attr(reader, "default");
+              auto fix = opt_attr(reader, "fixed");
+              attrs.push_back(
+                  attribute_use{qname("", aname), atype, req, def, fix});
             }
-            auto use = opt_attr(reader, "use");
-            bool req = use.has_value() && use.value() == "required";
-            auto def = opt_attr(reader, "default");
-            auto fix = opt_attr(reader, "fixed");
-            attrs.push_back(
-                attribute_use{qname("", aname), atype, req, def, fix});
             skip_element(reader);
           } else if (reader.name().local_name() == "attributeGroup") {
             auto ref_str = req_attr(reader, "ref");
