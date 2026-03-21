@@ -659,6 +659,46 @@ namespace xb {
       return "";
     }
 
+    // Collect attributes inherited by a restriction-derived type.
+    // Returns base attributes that aren't explicitly overridden or prohibited
+    // by the restriction's own attribute list.
+    std::vector<attribute_use>
+    collect_restriction_inherited_attrs(const schema_set& schemas,
+                                        const complex_type& ct) {
+      auto* cc = std::get_if<complex_content>(&ct.content().detail);
+      if (!cc || cc->derivation != derivation_method::restriction) return {};
+      if (cc->base_type_name.local_name().empty() &&
+          cc->base_type_name.namespace_uri().empty())
+        return {};
+
+      std::set<std::string> existing;
+      for (const auto& attr : ct.attributes())
+        existing.insert(attr.name.local_name());
+
+      std::vector<attribute_use> inherited;
+      auto* base_ct = schemas.find_complex_type(cc->base_type_name);
+      while (base_ct) {
+        for (const auto& attr : base_ct->attributes()) {
+          if (existing.count(attr.name.local_name())) continue;
+          if (attr.type_name.local_name().empty() &&
+              attr.type_name.namespace_uri().empty() && !attr.required)
+            continue;
+          inherited.push_back(attr);
+          existing.insert(attr.name.local_name());
+        }
+        if (auto* bcc =
+                std::get_if<complex_content>(&base_ct->content().detail)) {
+          if (!bcc->base_type_name.local_name().empty())
+            base_ct = schemas.find_complex_type(bcc->base_type_name);
+          else
+            base_ct = nullptr;
+        } else {
+          base_ct = nullptr;
+        }
+      }
+      return inherited;
+    }
+
     void
     translate_attributes(const std::vector<attribute_use>& attrs,
                          std::vector<cpp_field>& fields,
@@ -933,6 +973,13 @@ namespace xb {
       translate_attributes(ct.attributes(), s.fields, resolver);
       translate_attribute_group_refs(ct.attribute_group_refs(), s.fields,
                                      resolver);
+
+      // For restriction-derived types, inherit base attributes that aren't
+      // overridden or prohibited by the restriction.
+      auto inherited =
+          collect_restriction_inherited_attrs(resolver.schemas, ct);
+      if (!inherited.empty())
+        translate_attributes(inherited, s.fields, resolver);
 
       if (ct.attribute_wildcard().has_value())
         s.fields.push_back(
@@ -2462,6 +2509,14 @@ namespace xb {
       emit_write_attribute_group_refs(body, ct.attribute_group_refs(),
                                       resolver.schemas, resolver);
 
+      // For restrictions, write inherited base attributes
+      {
+        auto inherited =
+            collect_restriction_inherited_attrs(resolver.schemas, ct);
+        if (!inherited.empty())
+          emit_write_attributes(body, inherited, resolver.schemas, resolver);
+      }
+
       if (ct.attribute_wildcard().has_value()) {
         // Use the plan to find the wildcard field's actual name (may
         // have been renamed by disambiguate_fields).
@@ -3274,6 +3329,14 @@ namespace xb {
                            occupied_read);
       emit_read_attribute_group_refs(body, ct.attribute_group_refs(),
                                      resolver.schemas, resolver);
+
+      // For restrictions, read inherited base attributes
+      {
+        auto inherited =
+            collect_restriction_inherited_attrs(resolver.schemas, ct);
+        if (!inherited.empty())
+          emit_read_attributes(body, inherited, resolver.schemas, resolver);
+      }
 
       // Compute effective open content
       auto eff_oc = effective_open_content(ct, current_schema);

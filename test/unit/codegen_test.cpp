@@ -5827,3 +5827,66 @@ TEST_CASE("codegen: optional choice compiles correctly",
   CHECK(source_code.find("if (value.choice)") != std::string::npos);
   CHECK(source_code.find("choice_item : value.choice") == std::string::npos);
 }
+
+// ===== Restriction attribute inheritance =====
+
+// When a complex type restricts a base type, non-prohibited attributes
+// from the base should be inherited.
+TEST_CASE("codegen: restriction inherits non-prohibited base attributes",
+          "[codegen][restriction]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Base type with several attributes
+  std::vector<attribute_use> base_attrs;
+  base_attrs.push_back(
+      {qname("", "name"), qname(xs_ns, "NCName"), false, {}, {}});
+  base_attrs.push_back(
+      {qname("", "type"), qname(xs_ns, "QName"), false, {}, {}});
+  base_attrs.push_back(
+      {qname("", "ref"), qname(xs_ns, "QName"), false, {}, {}});
+  base_attrs.push_back(
+      {qname("", "nillable"), qname(xs_ns, "boolean"), false, {}, {}});
+
+  content_type base_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "BaseElement"), false,
+                                  false, std::move(base_ct),
+                                  std::move(base_attrs)));
+
+  // Restricted type: prohibits "ref", requires "name", inherits the rest
+  std::vector<attribute_use> restr_attrs;
+  // "ref" prohibited (empty type, not required)
+  restr_attrs.push_back({qname("", "ref"), qname{}, false, {}, {}});
+  // "name" made required
+  restr_attrs.push_back(
+      {qname("", "name"), qname(xs_ns, "NCName"), true, {}, {}});
+
+  complex_content cc(qname("urn:test", "BaseElement"),
+                     derivation_method::restriction);
+  content_type restr_ct(content_kind::element_only, std::move(cc));
+  s.add_complex_type(complex_type(qname("urn:test", "TopElement"), false, false,
+                                  std::move(restr_ct), std::move(restr_attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  const cpp_struct* top = nullptr;
+  for (const auto& f : files) {
+    top = find_struct(f, "top_element");
+    if (top) break;
+  }
+  REQUIRE(top != nullptr);
+
+  // "name" should be present (explicitly listed, required)
+  CHECK(find_field(*top, "name") != nullptr);
+
+  // "type" and "nillable" should be inherited from the base
+  // (not mentioned in the restriction, so inherited as-is)
+  CHECK(find_field(*top, "type") != nullptr);
+  CHECK(find_field(*top, "nillable") != nullptr);
+
+  // "ref" should be absent (prohibited)
+  CHECK(find_field(*top, "ref") == nullptr);
+}
