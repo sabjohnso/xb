@@ -15,8 +15,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 
 // Include the generated XSD types
@@ -44,6 +46,70 @@ translate_include(const xs::include_type& inc) {
   return {inc.schema_location};
 }
 
+// Translate xs::top_level_element → xb::element_decl
+static element_decl
+translate_element(const xs::top_level_element& elem, const std::string& tns) {
+  qname type_name;
+  if (elem.choice.has_value()) {
+    // Inline type — not yet handled, use anyType placeholder
+    type_name = qname(xs_ns, "anyType");
+  }
+  // TODO: handle inline types, substitution groups, type alternatives
+  return element_decl(qname(tns, elem.name), type_name);
+}
+
+// Translate xs::top_level_complex_type → xb::complex_type
+static complex_type
+translate_complex_type_decl(const xs::top_level_complex_type& ct,
+                            const std::string& tns) {
+  content_type content;
+  // TODO: translate content model (simpleContent, complexContent, etc.)
+  return complex_type(qname(tns, ct.name), false, false, std::move(content));
+}
+
+// Translate xs::top_level_simple_type → xb::simple_type
+static simple_type
+translate_simple_type_decl(const xs::top_level_simple_type& st,
+                           const std::string& tns) {
+  // Determine variety from the choice: restriction, list, or union
+  simple_type_variety variety = simple_type_variety::atomic;
+  qname base_type;
+
+  std::visit(
+      [&](const auto& v) {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, xs::restriction_type>) {
+          variety = simple_type_variety::atomic;
+          if (v.base.has_value()) base_type = v.base.value();
+        } else if constexpr (std::is_same_v<T,
+                                            std::unique_ptr<xs::list_type>>) {
+          variety = simple_type_variety::list;
+        } else if constexpr (std::is_same_v<T,
+                                            std::unique_ptr<xs::union_type>>) {
+          variety = simple_type_variety::union_type;
+        }
+      },
+      st.choice);
+
+  return simple_type(qname(tns, st.name), variety, std::move(base_type));
+}
+
+// Translate xs::named_group → xb::model_group_def
+static model_group_def
+translate_group(const xs::named_group& grp, const std::string& tns) {
+  // TODO: translate the choice of all/choice/sequence
+  model_group mg(compositor_kind::sequence);
+  return model_group_def(qname(tns, grp.name), std::move(mg));
+}
+
+// Translate xs::named_attribute_group → xb::attribute_group_def
+static attribute_group_def
+translate_attribute_group(const xs::named_attribute_group& ag,
+                          const std::string& tns) {
+  // TODO: translate attributes and attribute group refs
+  return attribute_group_def(qname(tns, ag.name));
+}
+
 // Translate an xs::schema_type to an xb::schema.
 // This is the core translation function — it converts the generated
 // syntax-tree types into the semantic model.
@@ -54,6 +120,7 @@ translate_schema(const xs::schema_type& src) {
   // Target namespace
   if (src.target_namespace.has_value())
     result.set_target_namespace(src.target_namespace.value());
+  std::string tns = result.target_namespace();
 
   // Process the composition group (imports, includes, annotations, etc.)
   for (const auto& item : src.choice) {
@@ -66,6 +133,27 @@ translate_schema(const xs::schema_type& src) {
             result.add_include(translate_include(v));
           }
           // redefine_type, override_type, annotation_type — skipped for now
+        },
+        item);
+  }
+
+  // Process schemaTop elements (types, elements, groups, etc.)
+  for (const auto& item : src.choice_2) {
+    std::visit(
+        [&](const auto& v) {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<T, xs::top_level_simple_type>) {
+            result.add_simple_type(translate_simple_type_decl(v, tns));
+          } else if constexpr (std::is_same_v<T, xs::top_level_complex_type>) {
+            result.add_complex_type(translate_complex_type_decl(v, tns));
+          } else if constexpr (std::is_same_v<T, xs::top_level_element>) {
+            result.add_element(translate_element(v, tns));
+          } else if constexpr (std::is_same_v<T, xs::named_group>) {
+            result.add_model_group_def(translate_group(v, tns));
+          } else if constexpr (std::is_same_v<T, xs::named_attribute_group>) {
+            result.add_attribute_group_def(translate_attribute_group(v, tns));
+          }
+          // top_level_attribute, notation_type — skipped for now
         },
         item);
   }
@@ -172,4 +260,76 @@ TEST_CASE("XSD translate: schema_type → xb::schema preserves imports",
 
   // Compare includes
   CHECK(translated.includes().size() == expected.includes().size());
+}
+
+TEST_CASE("XSD translate: schema_type → xb::schema preserves type counts",
+          "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto expected = parse_with_schema_parser(xs_xsd);
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Compare simple type counts
+  INFO("Expected simple types: " << expected.simple_types().size());
+  INFO("Translated simple types: " << translated.simple_types().size());
+  CHECK(translated.simple_types().size() == expected.simple_types().size());
+
+  // Compare complex type counts
+  INFO("Expected complex types: " << expected.complex_types().size());
+  INFO("Translated complex types: " << translated.complex_types().size());
+  CHECK(translated.complex_types().size() == expected.complex_types().size());
+
+  // Compare element counts
+  INFO("Expected elements: " << expected.elements().size());
+  INFO("Translated elements: " << translated.elements().size());
+  CHECK(translated.elements().size() == expected.elements().size());
+
+  // Compare model group def counts
+  INFO("Expected model groups: " << expected.model_group_defs().size());
+  INFO("Translated model groups: " << translated.model_group_defs().size());
+  CHECK(translated.model_group_defs().size() ==
+        expected.model_group_defs().size());
+
+  // Compare attribute group def counts
+  INFO("Expected attr groups: " << expected.attribute_group_defs().size());
+  INFO("Translated attr groups: " << translated.attribute_group_defs().size());
+  CHECK(translated.attribute_group_defs().size() ==
+        expected.attribute_group_defs().size());
+}
+
+TEST_CASE("XSD translate: schema_type → xb::schema preserves type names",
+          "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto expected = parse_with_schema_parser(xs_xsd);
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Compare named complex type names
+  for (size_t i = 0; i < std::min(translated.complex_types().size(),
+                                  expected.complex_types().size());
+       ++i) {
+    CHECK(translated.complex_types()[i].name() ==
+          expected.complex_types()[i].name());
+  }
+
+  // Compare named simple type names (skip anonymous types that may differ)
+  // Only check named types (those in the top-level simpleType declarations)
+  std::set<std::string> expected_simple_names;
+  for (const auto& st : expected.simple_types())
+    expected_simple_names.insert(st.name().local_name());
+
+  for (const auto& st : translated.simple_types()) {
+    CHECK(expected_simple_names.count(st.name().local_name()) > 0);
+  }
+
+  // Compare element names
+  for (size_t i = 0;
+       i < std::min(translated.elements().size(), expected.elements().size());
+       ++i) {
+    CHECK(translated.elements()[i].name() == expected.elements()[i].name());
+  }
 }

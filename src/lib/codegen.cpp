@@ -369,7 +369,16 @@ namespace xb {
     translate_particle_term(const particle& p, std::vector<cpp_field>& fields,
                             const type_resolver& resolver,
                             const qname& containing_type_name,
-                            field_plan* plan = nullptr) {
+                            field_plan* plan = nullptr,
+                            occurrence seq_outer_occurs = {1, 1}) {
+      // Compute effective occurrence: if the enclosing sequence repeats,
+      // inner particles inherit the repeating cardinality.
+      occurrence eff_occurs = p.occurs;
+      if (seq_outer_occurs.is_unbounded() || seq_outer_occurs.max_occurs > 1) {
+        eff_occurs.max_occurs = xb::unbounded;
+        eff_occurs.min_occurs = 0;
+      }
+
       std::visit(
           [&](const auto& term) {
             using T = std::decay_t<decltype(term)>;
@@ -390,9 +399,9 @@ namespace xb {
                 variant += ">";
 
                 std::string type = variant;
-                if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                if (eff_occurs.is_unbounded() || eff_occurs.max_occurs > 1)
                   type = "std::vector<" + type + ">";
-                else if (p.occurs.min_occurs == 0)
+                else if (eff_occurs.min_occurs == 0)
                   type = "std::optional<" + type + ">";
 
                 fields.push_back(
@@ -402,9 +411,9 @@ namespace xb {
               } else if (deduped.size() == 1) {
                 // Single unique CTA type — use it directly
                 std::string type = deduped[0].cpp_type;
-                if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                if (eff_occurs.is_unbounded() || eff_occurs.max_occurs > 1)
                   type = "std::vector<" + type + ">";
-                else if (p.occurs.min_occurs == 0)
+                else if (eff_occurs.min_occurs == 0)
                   type = "std::optional<" + type + ">";
                 fields.push_back(
                     {type,
@@ -413,7 +422,7 @@ namespace xb {
               } else {
                 // No alternatives — use normal field type
                 fields.push_back(
-                    {field_type_for_element(term, p.occurs, resolver,
+                    {field_type_for_element(term, eff_occurs, resolver,
                                             containing_type_name),
                      resolver.field_name(term.name().local_name(), enc_type),
                      default_value_for_element(term)});
@@ -439,9 +448,9 @@ namespace xb {
                   variant += ">";
 
                   std::string type = variant;
-                  if (p.occurs.is_unbounded() || p.occurs.max_occurs > 1)
+                  if (eff_occurs.is_unbounded() || eff_occurs.max_occurs > 1)
                     type = "std::vector<" + type + ">";
-                  else if (p.occurs.min_occurs == 0)
+                  else if (eff_occurs.min_occurs == 0)
                     type = "std::optional<" + type + ">";
 
                   fields.push_back(
@@ -453,7 +462,7 @@ namespace xb {
               }
 
               fields.push_back(
-                  {field_type_for_element(*elem, p.occurs, resolver,
+                  {field_type_for_element(*elem, eff_occurs, resolver,
                                           containing_type_name),
                    resolver.field_name(elem->name().local_name(), enc_type),
                    default_value_for_element(*elem)});
@@ -462,7 +471,7 @@ namespace xb {
               if (group_def) {
                 translate_particles(group_def->group().particles(),
                                     group_def->group().compositor(), fields,
-                                    resolver, containing_type_name, p.occurs,
+                                    resolver, containing_type_name, eff_occurs,
                                     plan);
               }
             } else if constexpr (std::is_same_v<T,
@@ -470,7 +479,7 @@ namespace xb {
               if (term) {
                 translate_particles(term->particles(), term->compositor(),
                                     fields, resolver, containing_type_name,
-                                    p.occurs, plan);
+                                    eff_occurs, plan);
               }
             } else if constexpr (std::is_same_v<T, wildcard>) {
               fields.push_back({"std::vector<xb::any_element>", "any", ""});
@@ -615,8 +624,8 @@ namespace xb {
       }
 
       for (const auto& p : particles)
-        translate_particle_term(p, fields, resolver, containing_type_name,
-                                plan);
+        translate_particle_term(p, fields, resolver, containing_type_name, plan,
+                                outer_occurs);
     }
 
     std::string
@@ -3019,6 +3028,75 @@ namespace xb {
                     }
                     body += "    }\n";
                     first_branch = false;
+                  }
+                } else if constexpr (std::is_same_v<T, group_ref>) {
+                  // Group ref inside a choice: expand the group's elements
+                  // into this choice's dispatch chain.
+                  auto* group_def =
+                      resolver.schemas.find_model_group_def(term.ref);
+                  if (group_def && group_def->group().compositor() ==
+                                       compositor_kind::choice) {
+                    // Recursively emit choice dispatch for the group's
+                    // particles
+                    for (const auto& gp : group_def->group().particles()) {
+                      std::visit(
+                          [&](const auto& gt) {
+                            using GT = std::decay_t<decltype(gt)>;
+                            if constexpr (std::is_same_v<GT, element_decl>) {
+                              std::string gqn =
+                                  "xb::qname{\"" + gt.name().namespace_uri() +
+                                  "\", \"" + gt.name().local_name() + "\"}";
+                              std::string kw = first_branch ? "if" : "else if";
+                              body +=
+                                  "    " + kw + " (name == " + gqn + ") {\n";
+                              std::string cpp_type =
+                                  resolver.resolve(gt.type_name());
+                              bool gc = is_complex_type(resolver.schemas,
+                                                        gt.type_name());
+                              if (gc) {
+                                std::string rfn = resolver.qualify_fn(
+                                    "read_", gt.type_name());
+                                if (resolver.is_cycle_type(gt.type_name()))
+                                  emit_choice_assign("std::make_unique<" +
+                                                     cpp_type + ">(" + rfn +
+                                                     "(reader))");
+                                else
+                                  emit_choice_assign(rfn + "(reader)");
+                              } else {
+                                emit_choice_assign("xb::read_simple<" +
+                                                   cpp_type + ">(reader)");
+                              }
+                              body += "    }\n";
+                              first_branch = false;
+                            } else if constexpr (std::is_same_v<GT,
+                                                                element_ref>) {
+                              auto* elem =
+                                  resolver.schemas.find_element(gt.ref);
+                              if (!elem) return;
+                              std::string gqn =
+                                  "xb::qname{\"" +
+                                  elem->name().namespace_uri() + "\", \"" +
+                                  elem->name().local_name() + "\"}";
+                              std::string kw = first_branch ? "if" : "else if";
+                              body +=
+                                  "    " + kw + " (name == " + gqn + ") {\n";
+                              std::string rfn = resolver.qualify_fn(
+                                  "read_", elem->type_name());
+                              if (resolver.is_cycle_type(elem->type_name())) {
+                                std::string cpp_type =
+                                    resolver.resolve(elem->type_name());
+                                emit_choice_assign("std::make_unique<" +
+                                                   cpp_type + ">(" + rfn +
+                                                   "(reader))");
+                              } else {
+                                emit_choice_assign(rfn + "(reader)");
+                              }
+                              body += "    }\n";
+                              first_branch = false;
+                            }
+                          },
+                          gp.term);
+                    }
                   }
                 }
               },
