@@ -18,6 +18,12 @@ namespace xb {
   template <>
   qname
   parse<qname>(std::string_view text) {
+    // Split prefix:local — we don't have namespace context here,
+    // so store the prefix as-is in the namespace URI slot.
+    auto colon = text.find(':');
+    if (colon != std::string_view::npos)
+      return qname(std::string(text.substr(0, colon)),
+                   std::string(text.substr(colon + 1)));
     return qname("", std::string(text));
   }
 

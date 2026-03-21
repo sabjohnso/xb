@@ -47,58 +47,170 @@ translate_include(const xs::include_type& inc) {
 }
 
 // Translate xs::top_level_element → xb::element_decl
+// Note: top_level_element is a restriction of element that drops many
+// attributes (type, nillable, abstract, etc.).  Only name and inline
+// type choice are available.
 static element_decl
 translate_element(const xs::top_level_element& elem, const std::string& tns) {
   qname type_name;
   if (elem.choice.has_value()) {
-    // Inline type — not yet handled, use anyType placeholder
+    // Inline type — synthesize a name
+    type_name = qname(tns, elem.name + "_type");
+  } else {
+    // No type attribute available in the restricted struct.
+    // Elements without inline types must have a type= attribute,
+    // but top_level_element's restriction drops it.  Fall back to anyType.
     type_name = qname(xs_ns, "anyType");
   }
-  // TODO: handle inline types, substitution groups, type alternatives
   return element_decl(qname(tns, elem.name), type_name);
+}
+
+// Translate xs::extension_type → xb::complex_content
+static complex_content
+translate_extension(const xs::extension_type& ext) {
+  return complex_content(ext.base, derivation_method::extension);
+}
+
+// Translate xs::complex_restriction_type → xb::complex_content
+static complex_content
+translate_complex_restriction(
+    [[maybe_unused]] const xs::complex_restriction_type& restr) {
+  // Complex restrictions define their own content model.
+  // The base type qname is not directly available in the restricted struct.
+  return complex_content(qname{}, derivation_method::restriction);
 }
 
 // Translate xs::top_level_complex_type → xb::complex_type
 static complex_type
 translate_complex_type_decl(const xs::top_level_complex_type& ct,
                             const std::string& tns) {
+  bool is_mixed = false;
   content_type content;
-  // TODO: translate content model (simpleContent, complexContent, etc.)
-  return complex_type(qname(tns, ct.name), false, false, std::move(content));
+
+  std::visit(
+      [&](const auto& v) {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<
+                          T, std::unique_ptr<xs::simple_content_type>>) {
+          if (v) {
+            // simpleContent — determine derivation from the choice
+            std::visit(
+                [&](const auto& sc) {
+                  using SC = std::decay_t<decltype(sc)>;
+                  if constexpr (std::is_same_v<
+                                    SC, std::unique_ptr<
+                                            xs::simple_restriction_type>>) {
+                    if (sc) {
+                      simple_content scont;
+                      scont.derivation = derivation_method::restriction;
+                      content =
+                          content_type(content_kind::simple, std::move(scont));
+                    }
+                  } else if constexpr (std::is_same_v<
+                                           SC,
+                                           std::unique_ptr<
+                                               xs::simple_extension_type>>) {
+                    if (sc) {
+                      simple_content scont;
+                      scont.derivation = derivation_method::extension;
+                      content =
+                          content_type(content_kind::simple, std::move(scont));
+                    }
+                  }
+                },
+                v->choice);
+          }
+        } else if constexpr (std::is_same_v<T, std::unique_ptr<
+                                                   xs::complex_content_type>>) {
+          if (v) {
+            if (v->mixed.has_value() && v->mixed.value()) is_mixed = true;
+            // Determine derivation from the choice
+            std::visit(
+                [&](const auto& cc) {
+                  using CC = std::decay_t<decltype(cc)>;
+                  if constexpr (std::is_same_v<
+                                    CC, std::unique_ptr<
+                                            xs::complex_restriction_type>>) {
+                    if (cc) {
+                      content =
+                          content_type(is_mixed ? content_kind::mixed
+                                                : content_kind::element_only,
+                                       translate_complex_restriction(*cc));
+                    }
+                  } else if constexpr (std::is_same_v<
+                                           CC, std::unique_ptr<
+                                                   xs::extension_type>>) {
+                    if (cc) {
+                      content =
+                          content_type(is_mixed ? content_kind::mixed
+                                                : content_kind::element_only,
+                                       translate_extension(*cc));
+                    }
+                  }
+                },
+                v->choice);
+          }
+        }
+      },
+      ct.choice);
+
+  return complex_type(qname(tns, ct.name), false, is_mixed, std::move(content));
 }
 
 // Translate xs::top_level_simple_type → xb::simple_type
 static simple_type
 translate_simple_type_decl(const xs::top_level_simple_type& st,
                            const std::string& tns) {
-  // Determine variety from the choice: restriction, list, or union
   simple_type_variety variety = simple_type_variety::atomic;
   qname base_type;
+  std::optional<qname> item_type;
+  std::vector<qname> member_types;
 
   std::visit(
       [&](const auto& v) {
         using T = std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<T, xs::restriction_type>) {
+        if constexpr (std::is_same_v<T, xs::restriction_type_2>) {
           variety = simple_type_variety::atomic;
           if (v.base.has_value()) base_type = v.base.value();
         } else if constexpr (std::is_same_v<T,
                                             std::unique_ptr<xs::list_type>>) {
           variety = simple_type_variety::list;
+          if (v && v->item_type.has_value()) item_type = v->item_type.value();
         } else if constexpr (std::is_same_v<T,
                                             std::unique_ptr<xs::union_type>>) {
           variety = simple_type_variety::union_type;
+          if (v && v->member_types.has_value())
+            member_types = v->member_types.value();
         }
       },
       st.choice);
 
-  return simple_type(qname(tns, st.name), variety, std::move(base_type));
+  return simple_type(qname(tns, st.name), variety, std::move(base_type), {},
+                     std::move(item_type), std::move(member_types));
 }
 
 // Translate xs::named_group → xb::model_group_def
 static model_group_def
 translate_group(const xs::named_group& grp, const std::string& tns) {
-  // TODO: translate the choice of all/choice/sequence
-  model_group mg(compositor_kind::sequence);
+  // Determine compositor from the choice of all/choice/sequence
+  compositor_kind ck = compositor_kind::sequence;
+  std::visit(
+      [&](const auto& v) {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, xs::all_type>)
+          ck = compositor_kind::all;
+        else if constexpr (std::is_same_v<T, xs::simple_explicit_group>) {
+          // The variant has two simple_explicit_group alternatives
+          // (choice and sequence).  We can't distinguish them from the type
+          // alone — both are simple_explicit_group.  Default to sequence.
+          // TODO: use the field plan or element names to distinguish
+          ck = compositor_kind::sequence;
+        }
+      },
+      grp.choice);
+
+  model_group mg(ck);
+  // TODO: translate particles inside the group
   return model_group_def(qname(tns, grp.name), std::move(mg));
 }
 
@@ -106,8 +218,38 @@ translate_group(const xs::named_group& grp, const std::string& tns) {
 static attribute_group_def
 translate_attribute_group(const xs::named_attribute_group& ag,
                           const std::string& tns) {
-  // TODO: translate attributes and attribute group refs
-  return attribute_group_def(qname(tns, ag.name));
+  std::vector<attribute_use> attrs;
+  std::vector<attribute_group_ref> refs;
+
+  for (const auto& item : ag.choice) {
+    std::visit(
+        [&](const auto& v) {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<T, xs::attribute>) {
+            if (v.name.has_value() && v.type.has_value()) {
+              bool req =
+                  false; // use attribute not available in restricted form
+              attrs.push_back(
+                  {qname("", v.name.value()), v.type.value(), req, {}, {}});
+            } else if (v.ref.has_value()) {
+              // Attribute ref — store as attribute_use with ref qname
+              attrs.push_back({v.ref.value(), qname{}, false, {}, {}});
+            }
+          } else if constexpr (std::is_same_v<T, xs::attribute_group_ref>) {
+            refs.push_back({v.ref});
+          }
+        },
+        item);
+  }
+
+  std::optional<wildcard> wc;
+  if (ag.any_attribute.has_value()) {
+    wc = wildcard{};
+    // TODO: translate namespace constraint, processContents
+  }
+
+  return attribute_group_def(qname(tns, ag.name), std::move(attrs),
+                             std::move(refs), std::move(wc));
 }
 
 // Translate an xs::schema_type to an xb::schema.
@@ -337,4 +479,86 @@ TEST_CASE("XSD translate: schema_type → xb::schema preserves type names",
   for (const auto& e : translated.elements()) {
     CHECK(expected_element_names.count(e.name().local_name()) > 0);
   }
+}
+
+TEST_CASE("XSD translate: simple type details", "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Find formChoice — atomic restriction of xs:NMTOKEN
+  const simple_type* form_choice = nullptr;
+  for (const auto& st : translated.simple_types()) {
+    if (st.name().local_name() == "formChoice") {
+      form_choice = &st;
+      break;
+    }
+  }
+  REQUIRE(form_choice != nullptr);
+  CHECK(form_choice->variety() == simple_type_variety::atomic);
+  // Note: base_type_name uses the prefixed form (xs:NMTOKEN) because
+  // the stub xb::parse<qname> doesn't resolve namespace prefixes.
+  // The local_name portion is correct.
+  CHECK(form_choice->base_type_name().local_name() == "NMTOKEN");
+
+  // Find derivationSet — union type with inline anonymous members.
+  // The memberTypes attribute is not set (members are inline), so
+  // member_type_names is empty.  The generated reader captures this
+  // correctly — the inline members are in the union_type's simpleType_
+  // vector, not the memberTypes attribute.
+  const simple_type* deriv_set = nullptr;
+  for (const auto& st : translated.simple_types()) {
+    if (st.name().local_name() == "derivationSet") {
+      deriv_set = &st;
+      break;
+    }
+  }
+  REQUIRE(deriv_set != nullptr);
+  CHECK(deriv_set->variety() == simple_type_variety::union_type);
+}
+
+TEST_CASE("XSD translate: complex type content details", "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Find extensionType — complexContent/extension with base="xs:annotated"
+  const complex_type* ext_type = nullptr;
+  for (const auto& ct : translated.complex_types()) {
+    if (ct.name().local_name() == "extensionType") {
+      ext_type = &ct;
+      break;
+    }
+  }
+  REQUIRE(ext_type != nullptr);
+  CHECK(ext_type->content().kind == content_kind::element_only);
+  auto* cc = std::get_if<complex_content>(&ext_type->content().detail);
+  REQUIRE(cc != nullptr);
+  CHECK(cc->derivation == derivation_method::extension);
+  // Base type name local part is correct; namespace is prefixed form
+  // (xs:annotated) because the stub parse<qname> doesn't resolve prefixes.
+  CHECK(cc->base_type_name.local_name() == "annotated");
+}
+
+TEST_CASE("XSD translate: attribute group details", "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Find "occurs" attribute group — should have minOccurs and maxOccurs
+  const attribute_group_def* occurs = nullptr;
+  for (const auto& ag : translated.attribute_group_defs()) {
+    if (ag.name().local_name() == "occurs") {
+      occurs = &ag;
+      break;
+    }
+  }
+  REQUIRE(occurs != nullptr);
+  CHECK(occurs->attributes().size() >= 2);
 }
