@@ -2660,14 +2660,12 @@ namespace xb {
 
     // Forward declare
     void
-    emit_read_particles(std::string& body,
-                        const std::vector<particle>& particles,
-                        compositor_kind compositor,
-                        const type_resolver& resolver,
-                        const qname& containing_type_name,
-                        bool has_open_content = false,
-                        occurrence outer_occurs = {},
-                        const field_plan* plan = nullptr, int choice_index = 0);
+    emit_read_particles(
+        std::string& body, const std::vector<particle>& particles,
+        compositor_kind compositor, const type_resolver& resolver,
+        const qname& containing_type_name, bool has_open_content = false,
+        occurrence outer_occurs = {}, const field_plan* plan = nullptr,
+        int choice_index = 0, bool* outer_first_branch = nullptr);
 
     void
     emit_read_particle_match(std::string& body, const particle& p,
@@ -2834,9 +2832,8 @@ namespace xb {
                   emit_read_particles(body, group_def->group().particles(),
                                       compositor_kind::choice, resolver,
                                       containing_type_name, false, p.occurs,
-                                      plan, ci);
+                                      plan, ci, &first_branch);
                   if (choice_index_ptr) ++(*choice_index_ptr);
-                  first_branch = false;
                 } else {
                   // Non-choice group: expand particles inline
                   for (const auto& gp : group_def->group().particles())
@@ -2860,11 +2857,8 @@ namespace xb {
                   emit_read_particles(body, term->particles(),
                                       compositor_kind::choice, resolver,
                                       containing_type_name, false, p.occurs,
-                                      plan, ci);
+                                      plan, ci, &first_branch);
                   if (choice_index_ptr) ++(*choice_index_ptr);
-                  // Mark all elements as handled so we don't duplicate
-                  // if/else if branches
-                  first_branch = false;
                 } else {
                   for (const auto& sp : term->particles())
                     emit_read_particle_match(body, sp, resolver,
@@ -2891,7 +2885,8 @@ namespace xb {
                         const type_resolver& resolver,
                         const qname& containing_type_name,
                         bool has_open_content, occurrence outer_occurs,
-                        const field_plan* plan, int choice_index) {
+                        const field_plan* plan, int choice_index,
+                        bool* outer_first_branch) {
       if (compositor == compositor_kind::choice) {
         // Use field plan for name and cardinality if available —
         // this is the single source of truth computed by translate_particles.
@@ -2922,8 +2917,13 @@ namespace xb {
             body += "      result." + choice_field + " = " + read_expr + ";\n";
         };
 
-        // Choice: element name selects variant alternative
-        bool first_branch = true;
+        // Choice: element name selects variant alternative.
+        // When called from a sequence context, outer_first_branch carries
+        // the chain state so we generate else-if continuations instead of
+        // starting a new if chain.
+        bool local_first = true;
+        bool& first_branch =
+            outer_first_branch ? *outer_first_branch : local_first;
         for (const auto& p : particles) {
           std::visit(
               [&](const auto& term) {
@@ -3303,7 +3303,8 @@ namespace xb {
           if (cc->content_model.has_value()) {
             emit_read_particles(body, cc->content_model->particles(),
                                 cc->content_model->compositor(), resolver,
-                                ct.name(), has_oc, {}, plan, type_choice_idx);
+                                ct.name(), has_oc, {}, plan, type_choice_idx,
+                                &first_branch);
           } else if (!first_branch) {
             if (has_oc) {
               body += "    else {\n";
