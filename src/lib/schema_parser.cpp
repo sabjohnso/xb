@@ -844,6 +844,22 @@ namespace xb {
           content = content_type(
               ckind, complex_content(qname(), derivation_method::restriction,
                                      std::move(mg)));
+        } else if (local == "group") {
+          // Group ref as direct content model (shorthand for restriction
+          // base="anyType" with the group's content)
+          auto ref_str = opt_attr(reader, "ref");
+          if (ref_str.has_value()) {
+            auto ref_name = resolve_qname(reader, ref_str.value());
+            auto occurs = parse_occurrence(reader);
+            model_group mg(compositor_kind::sequence);
+            mg.add_particle(particle(group_ref{ref_name}, occurs));
+            content_kind ckind =
+                is_mixed ? content_kind::mixed : content_kind::element_only;
+            content = content_type(
+                ckind, complex_content(qname(), derivation_method::restriction,
+                                       std::move(mg)));
+          }
+          skip_element(reader);
         } else if (local == "simpleContent") {
           std::size_t sc_depth = reader.depth();
           while (read_skip_ws(reader)) {
@@ -943,6 +959,17 @@ namespace xb {
                 if (dl == "all") ck = compositor_kind::all;
                 mg = parse_compositor(reader, ck, tns, anon_simple_types,
                                       anon_complex_types);
+              } else if (dl == "group") {
+                // Group ref inside extension/restriction — wraps the
+                // group's content in a sequence model group.
+                auto ref_str = opt_attr(reader, "ref");
+                if (ref_str.has_value()) {
+                  auto ref_name = resolve_qname(reader, ref_str.value());
+                  auto occurs = parse_occurrence(reader);
+                  mg = model_group(compositor_kind::sequence);
+                  mg->add_particle(particle(group_ref{ref_name}, occurs));
+                }
+                skip_element(reader);
               } else if (dl == "attribute") {
                 attributes.push_back(
                     parse_attribute_use(reader, tns, anon_simple_types));

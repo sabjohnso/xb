@@ -5890,3 +5890,78 @@ TEST_CASE("codegen: restriction inherits non-prohibited base attributes",
   // "ref" should be absent (prohibited)
   CHECK(find_field(*top, "ref") == nullptr);
 }
+
+// ===== Abstract element substitution group expansion in content models =====
+
+// When a content model contains a choice with an abstract element ref,
+// the generated variant should include the substitution group members.
+TEST_CASE("codegen: abstract element ref expands substitution group in choice",
+          "[codegen][subst-group]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // Abstract base element "facet" with type "facetType"
+  content_type facet_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "facetType"), false, false,
+                                  std::move(facet_ct)));
+
+  s.add_element(element_decl(qname("urn:test", "facet"),
+                             qname("urn:test", "facetType"), false,
+                             true)); // abstract=true
+
+  // Substitution group members
+  content_type enum_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "enumType"), false, false,
+                                  std::move(enum_ct)));
+  s.add_element(element_decl(qname("urn:test", "enumeration"),
+                             qname("urn:test", "enumType"), false, false, {},
+                             {}, qname("urn:test", "facet")));
+
+  content_type pat_ct(content_kind::empty, std::monostate{});
+  s.add_complex_type(complex_type(qname("urn:test", "patternType"), false,
+                                  false, std::move(pat_ct)));
+  s.add_element(element_decl(qname("urn:test", "pattern"),
+                             qname("urn:test", "patternType"), false, false, {},
+                             {}, qname("urn:test", "facet")));
+
+  // A type with a content model that references the abstract "facet" element
+  model_group choice(compositor_kind::choice);
+  choice.add_particle(
+      particle(element_ref{qname("urn:test", "facet")}, occurrence{1, 1}));
+
+  model_group seq(compositor_kind::sequence);
+  seq.add_particle(particle(std::make_unique<model_group>(std::move(choice)),
+                            occurrence{0, xb::unbounded}));
+
+  complex_content cc(qname(xs_ns, "anyType"), derivation_method::extension,
+                     std::move(seq));
+  content_type parent_ct(content_kind::element_only, std::move(cc));
+  s.add_complex_type(complex_type(qname("urn:test", "RestrictionType"), false,
+                                  false, std::move(parent_ct)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  // Find the RestrictionType struct
+  const cpp_struct* restr = nullptr;
+  for (const auto& f : files) {
+    restr = find_struct(f, "restriction_type");
+    if (restr) break;
+  }
+  REQUIRE(restr != nullptr);
+
+  // The struct should have a choice field (the facet substitution group
+  // expanded to enumType and patternType alternatives)
+  const cpp_field* choice_field = find_field(*restr, "choice");
+  REQUIRE(choice_field != nullptr);
+
+  // The choice type should be a vector (repeating) of variant
+  CHECK(choice_field->type.find("std::vector<") != std::string::npos);
+  CHECK(choice_field->type.find("std::variant<") != std::string::npos);
+
+  // Both substitution group members should be in the variant
+  CHECK(choice_field->type.find("enum_type") != std::string::npos);
+  CHECK(choice_field->type.find("pattern_type") != std::string::npos);
+}

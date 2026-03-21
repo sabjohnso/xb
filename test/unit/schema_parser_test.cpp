@@ -1501,3 +1501,54 @@ TEST_CASE("schema_parser: attribute with inline simple type in complex type",
   }
   CHECK(found);
 }
+
+// ===== Group ref inside complexContent extension =====
+
+TEST_CASE("schema_parser: group ref inside complexContent extension",
+          "[schema_parser][group-ref]") {
+  auto s = parse_xsd(R"(
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+               targetNamespace="urn:test" xmlns:tns="urn:test">
+      <xs:group name="MyGroup">
+        <xs:sequence>
+          <xs:element name="x" type="xs:string"/>
+          <xs:element name="y" type="xs:int"/>
+        </xs:sequence>
+      </xs:group>
+      <xs:complexType name="BaseType">
+        <xs:sequence>
+          <xs:element name="id" type="xs:string"/>
+        </xs:sequence>
+      </xs:complexType>
+      <xs:complexType name="DerivedType">
+        <xs:complexContent>
+          <xs:extension base="tns:BaseType">
+            <xs:group ref="tns:MyGroup"/>
+            <xs:attribute name="version" type="xs:string"/>
+          </xs:extension>
+        </xs:complexContent>
+      </xs:complexType>
+    </xs:schema>
+  )");
+
+  // DerivedType should have a content model with the group ref
+  const complex_type* derived = nullptr;
+  for (const auto& ct : s.complex_types()) {
+    if (ct.name().local_name() == "DerivedType") {
+      derived = &ct;
+      break;
+    }
+  }
+  REQUIRE(derived != nullptr);
+  CHECK(derived->content().kind == content_kind::element_only);
+
+  auto* cc = std::get_if<complex_content>(&derived->content().detail);
+  REQUIRE(cc != nullptr);
+  CHECK(cc->derivation == derivation_method::extension);
+  CHECK(cc->base_type_name == qname("urn:test", "BaseType"));
+
+  // The content model should exist (from the group ref)
+  REQUIRE(cc->content_model.has_value());
+  // The group ref should produce particles
+  CHECK(!cc->content_model->particles().empty());
+}
