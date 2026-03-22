@@ -3867,10 +3867,11 @@ namespace xb {
     // Pre-compute types in dependency cycles for unique_ptr cycle-breaking
     auto cycle_types = find_cycle_types(schemas_);
 
-    // Convert cycle qnames to C++ identifier names for order_declarations
-    std::set<std::string> cycle_type_cpp_names;
+    // Convert cycle qnames to C++ identifier names (base naming — without
+    // per-schema rename).  Used by merge_same_name_files after the loop.
+    std::set<std::string> cycle_type_cpp_names_base;
     for (const auto& ct : cycle_types)
-      cycle_type_cpp_names.insert(apply_naming(
+      cycle_type_cpp_names_base.insert(apply_naming(
           ct.local_name(), naming_category::type_, options_.naming));
 
     // Collect all namespace URIs for default_namespace_for() disambiguation
@@ -3917,6 +3918,13 @@ namespace xb {
                              &all_namespaces,
                              &schema_type_names,
                              &type_rename};
+
+      // Convert cycle qnames to C++ names using the rename map
+      std::set<std::string> cycle_type_cpp_names;
+      for (const auto& ct : cycle_types) {
+        std::string cpp = resolver.type_name(ct.local_name());
+        cycle_type_cpp_names.insert(cpp);
+      }
 
       std::vector<cpp_decl> declarations;
       std::set<std::string> seen_variant_types;
@@ -4426,7 +4434,8 @@ namespace xb {
       }
     }
 
-    auto result = merge_same_name_files(std::move(files), cycle_type_cpp_names);
+    auto result =
+        merge_same_name_files(std::move(files), cycle_type_cpp_names_base);
 
     // When separate_fwd_header is enabled, strip any forward declarations
     // that merge_same_name_files may have re-introduced via order_declarations.

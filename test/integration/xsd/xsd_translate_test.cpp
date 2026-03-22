@@ -169,9 +169,10 @@ translate_simple_type_decl(const xs::top_level_simple_type& st,
   std::visit(
       [&](const auto& v) {
         using T = std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<T, xs::restriction_type_2>) {
+        if constexpr (std::is_same_v<T,
+                                     std::unique_ptr<xs::restriction_type_2>>) {
           variety = simple_type_variety::atomic;
-          if (v.base.has_value()) base_type = v.base.value();
+          if (v && v->base.has_value()) base_type = v->base.value();
         } else if constexpr (std::is_same_v<T,
                                             std::unique_ptr<xs::list_type>>) {
           variety = simple_type_variety::list;
