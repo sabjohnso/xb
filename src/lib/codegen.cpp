@@ -2173,9 +2173,35 @@ namespace xb {
                                    : is_optional ? ("*" + field)
                                                  : field;
 
+        // Check if there are particles that produce visit branches.
+        // Group refs that contain choices are expanded inline and may
+        // also produce branches.
+        bool has_visit_branches = false;
+        for (const auto& p : particles) {
+          std::visit(
+              [&](const auto& term) {
+                using PT = std::decay_t<decltype(term)>;
+                if constexpr (std::is_same_v<PT, element_decl> ||
+                              std::is_same_v<PT, element_ref>)
+                  has_visit_branches = true;
+                else if constexpr (std::is_same_v<PT, group_ref>) {
+                  auto* gd = resolver.schemas.find_model_group_def(term.ref);
+                  if (gd) {
+                    for (const auto& gp : gd->group().particles()) {
+                      if (std::holds_alternative<element_decl>(gp.term) ||
+                          std::holds_alternative<element_ref>(gp.term))
+                        has_visit_branches = true;
+                    }
+                  }
+                }
+              },
+              p.term);
+        }
         // std::visit dispatch
-        body += "  std::visit([&](const auto& v) {\n";
-        body += "    using T = std::decay_t<decltype(v)>;\n";
+        if (has_visit_branches) {
+          body += "  std::visit([&](const auto& v) {\n";
+          body += "    using T = std::decay_t<decltype(v)>;\n";
+        }
 
         bool first = true;
         for (const auto& p : particles) {
@@ -2282,7 +2308,7 @@ namespace xb {
               p.term);
         }
 
-        body += "  }, " + visit_target + ");\n";
+        if (has_visit_branches) body += "  }, " + visit_target + ");\n";
 
         if (is_repeating || is_optional) { body += "  }\n"; }
         return;
@@ -3382,7 +3408,15 @@ namespace xb {
             body += "    }\n";
             body += "    if (reader.node_type() != "
                     "xb::xml_node_type::start_element) continue;\n";
-            body += "    auto& name = reader.name();\n";
+            // Only declare name variable if there are element particles
+            bool has_elem_particles = false;
+            for (const auto& p : cc->content_model->particles()) {
+              if (std::holds_alternative<element_decl>(p.term)) {
+                has_elem_particles = true;
+                break;
+              }
+            }
+            if (has_elem_particles) body += "    auto& name = reader.name();\n";
             bool first = true;
             for (const auto& p : cc->content_model->particles()) {
               std::visit(
