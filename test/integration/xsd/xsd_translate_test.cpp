@@ -499,10 +499,8 @@ TEST_CASE("XSD translate: simple type details", "[xsd][translate]") {
   }
   REQUIRE(form_choice != nullptr);
   CHECK(form_choice->variety() == simple_type_variety::atomic);
-  // Note: base_type_name uses the prefixed form (xs:NMTOKEN) because
-  // the stub xb::parse<qname> doesn't resolve namespace prefixes.
-  // The local_name portion is correct.
-  CHECK(form_choice->base_type_name().local_name() == "NMTOKEN");
+  // QName is now fully resolved via parse_qname(text, reader)
+  CHECK(form_choice->base_type_name() == qname(xs_ns, "NMTOKEN"));
 
   // Find derivationSet — union type with inline anonymous members.
   // The memberTypes attribute is not set (members are inline), so
@@ -540,9 +538,8 @@ TEST_CASE("XSD translate: complex type content details", "[xsd][translate]") {
   auto* cc = std::get_if<complex_content>(&ext_type->content().detail);
   REQUIRE(cc != nullptr);
   CHECK(cc->derivation == derivation_method::extension);
-  // Base type name local part is correct; namespace is prefixed form
-  // (xs:annotated) because the stub parse<qname> doesn't resolve prefixes.
-  CHECK(cc->base_type_name.local_name() == "annotated");
+  // QName is now fully resolved via parse_qname(text, reader)
+  CHECK(cc->base_type_name == qname(xs_ns, "annotated"));
 }
 
 TEST_CASE("XSD translate: attribute group details", "[xsd][translate]") {

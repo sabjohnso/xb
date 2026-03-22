@@ -2672,6 +2672,8 @@ namespace xb {
         return "parse_" + union_name + "(" + text_expr + ")";
       }
       std::string cpp_type = resolver.resolve(type_name);
+      if (cpp_type == "xb::qname")
+        return "xb::parse_qname(" + text_expr + ", reader)";
       return "xb::parse<" + cpp_type + ">(" + text_expr + ")";
     }
 

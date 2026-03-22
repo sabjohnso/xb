@@ -9,6 +9,9 @@
 #include <xb/time.hpp>
 #include <xb/year_month_duration.hpp>
 
+#include <xb/qname.hpp>
+#include <xb/xml_reader.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -77,6 +80,14 @@ namespace xb {
 
   std::string
   apply_whitespace(std::string_view text, whitespace_mode mode);
+
+  // Parse a QName attribute value with namespace prefix resolution.
+  // Splits "prefix:local" and resolves the prefix via the reader's
+  // namespace bindings.  Unprefixed names are in no namespace (per
+  // XML Namespaces spec, QName attribute values don't use the default
+  // namespace).
+  qname
+  parse_qname(std::string_view text, const xml_reader& reader);
 
   // Hex binary parse/format
   std::vector<std::byte>

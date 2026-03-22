@@ -1,3 +1,4 @@
+#include <xb/expat_reader.hpp>
 #include <xb/xml_value.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -274,4 +275,42 @@ TEST_CASE("parse base64 binary no padding", "[xml_value]") {
   REQUIRE(bytes.size() == 2);
   CHECK(static_cast<unsigned char>(bytes[0]) == 'M');
   CHECK(static_cast<unsigned char>(bytes[1]) == 'a');
+}
+
+// ===== QName parsing with namespace resolution =====
+
+TEST_CASE("parse_qname resolves prefixed name", "[xml_value][qname]") {
+  std::string xml = R"(<root xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                             type="xs:string"/>)";
+  xb::expat_reader reader(xml);
+  reader.read(); // advance to <root>
+
+  auto result =
+      xb::parse_qname(reader.attribute_value(xb::qname{"", "type"}), reader);
+  CHECK(result.namespace_uri() == "http://www.w3.org/2001/XMLSchema");
+  CHECK(result.local_name() == "string");
+}
+
+TEST_CASE("parse_qname handles unprefixed name", "[xml_value][qname]") {
+  std::string xml = R"(<root xmlns="urn:default" name="foo"/>)";
+  xb::expat_reader reader(xml);
+  reader.read();
+
+  auto result =
+      xb::parse_qname(reader.attribute_value(xb::qname{"", "name"}), reader);
+  // Unprefixed QName attribute values do NOT use the default namespace
+  // per XML Namespaces spec — they are in no namespace.
+  CHECK(result.namespace_uri().empty());
+  CHECK(result.local_name() == "foo");
+}
+
+TEST_CASE("parse_qname handles xml prefix", "[xml_value][qname]") {
+  std::string xml = R"(<root lang="xml:lang"/>)";
+  xb::expat_reader reader(xml);
+  reader.read();
+
+  auto result =
+      xb::parse_qname(reader.attribute_value(xb::qname{"", "lang"}), reader);
+  CHECK(result.namespace_uri() == "http://www.w3.org/XML/1998/namespace");
+  CHECK(result.local_name() == "lang");
 }

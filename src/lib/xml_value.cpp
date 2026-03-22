@@ -522,4 +522,19 @@ namespace xb {
     return result;
   }
 
+  qname
+  parse_qname(std::string_view text, const xml_reader& reader) {
+    auto colon = text.find(':');
+    if (colon != std::string_view::npos) {
+      auto prefix = text.substr(0, colon);
+      auto local = text.substr(colon + 1);
+      auto uri = reader.namespace_uri_for_prefix(prefix);
+      if (uri.empty() && prefix == "xml")
+        uri = "http://www.w3.org/XML/1998/namespace";
+      return qname(std::string(uri), std::string(local));
+    }
+    // Unprefixed QName attribute values are in no namespace
+    return qname("", std::string(text));
+  }
+
 } // namespace xb
