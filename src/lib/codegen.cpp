@@ -1018,8 +1018,11 @@ namespace xb {
         e.name = resolver.type_name(st.name().local_name());
         if (resolver.options.generate_docs && st.doc_annotation().has_value())
           e.doc_comment = st.doc_annotation()->documentation;
-        for (const auto& val : st.facets().enumeration)
-          e.values.push_back({resolver.enum_value_name(val), val});
+        for (const auto& val : st.facets().enumeration) {
+          std::string name = resolver.enum_value_name(val);
+          if (name.empty()) name = "empty_";
+          e.values.push_back({name, val});
+        }
 
         // Disambiguate case-only collisions (e.g. "A" and "a" both map
         // to "a"). Append "_upper" to the uppercase variant.

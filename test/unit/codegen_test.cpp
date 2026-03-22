@@ -5965,3 +5965,48 @@ TEST_CASE("codegen: abstract element ref expands substitution group in choice",
   CHECK(choice_field->type.find("enum_type") != std::string::npos);
   CHECK(choice_field->type.find("pattern_type") != std::string::npos);
 }
+
+// ===== Empty string enumeration values =====
+
+TEST_CASE("codegen: empty string enumeration value gets valid identifier",
+          "[codegen][empty-enum]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // A simple type with an enumeration that includes the empty string
+  facet_set facets;
+  facets.enumeration = {"", "preserve", "default"};
+  s.add_simple_type(simple_type(qname("urn:test", "SpaceType"),
+                                simple_type_variety::atomic,
+                                qname(xs_ns, "string"), std::move(facets)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  const cpp_enum* space_enum = nullptr;
+  for (const auto& f : files) {
+    space_enum = find_enum(f, "space_type");
+    if (space_enum) break;
+  }
+  REQUIRE(space_enum != nullptr);
+  REQUIRE(space_enum->values.size() == 3);
+
+  // The empty string value should have a non-empty C++ identifier
+  CHECK(!space_enum->values[0].name.empty());
+  // The XML value should still be the empty string
+  CHECK(space_enum->values[0].xml_value.empty());
+  // Other values should be normal
+  CHECK(space_enum->values[1].name == "preserve");
+  CHECK(space_enum->values[2].name == "default_");
+
+  // The generated code should compile — verify via cpp_writer
+  cpp_writer writer;
+  std::string code;
+  for (const auto& f : files) {
+    if (f.kind == file_kind::header) code += writer.write(f);
+  }
+  // Should not contain empty enum identifier pattern
+  CHECK(code.find("{\n  ,") == std::string::npos);
+}
