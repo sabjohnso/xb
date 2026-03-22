@@ -50,10 +50,6 @@ add_library(xb_xsd_generated_lib STATIC ${XSD_GEN_CPP} xsd_parse_stubs.cpp)
 target_include_directories(xb_xsd_generated_lib PUBLIC ${XSD_GEN_DIR})
 target_link_libraries(xb_xsd_generated_lib PUBLIC xb::xb)
 target_compile_features(xb_xsd_generated_lib PUBLIC cxx_std_${xb_CXX_STANDARD})
-# TODO: Fix codegen to not emit empty std::visit bodies for choice
-# groups that contain only group_ref/model_group particles (no direct
-# element dispatches).  Remove this once fixed.
-target_compile_options(xb_xsd_generated_lib PRIVATE -Wno-unused-local-typedef -Wno-unused-variable)
 
 add_executable(xb_xsd_translate_test xsd_translate_test.cpp)
 target_link_libraries(xb_xsd_translate_test

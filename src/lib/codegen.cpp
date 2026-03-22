@@ -2102,24 +2102,61 @@ namespace xb {
             } else if constexpr (std::is_same_v<T, group_ref>) {
               auto* group_def = resolver.schemas.find_model_group_def(term.ref);
               if (group_def) {
-                int ci = choice_index_ptr ? *choice_index_ptr : 0;
-                emit_write_particles(body, group_def->group().particles(),
-                                     group_def->group().compositor(), resolver,
-                                     containing_type_name, p.occurs, plan, ci);
-                if (choice_index_ptr &&
-                    group_def->group().compositor() == compositor_kind::choice)
-                  ++(*choice_index_ptr);
+                bool is_choice =
+                    group_def->group().compositor() == compositor_kind::choice;
+                // Only count this choice if the type generator created a
+                // field for it (has a plan entry).  Choices with no variant
+                // alternatives produce no field and no plan entry.
+                bool plan_has_entry = true;
+                if (plan && is_choice && choice_index_ptr) {
+                  int ci = *choice_index_ptr;
+                  plan_has_entry = false;
+                  int pci = 0;
+                  for (const auto& e : *plan) {
+                    if (!e.alternatives.empty()) {
+                      if (pci == ci) {
+                        plan_has_entry = true;
+                        break;
+                      }
+                      ++pci;
+                    }
+                  }
+                }
+                if (plan_has_entry) {
+                  int ci = choice_index_ptr ? *choice_index_ptr : 0;
+                  emit_write_particles(body, group_def->group().particles(),
+                                       group_def->group().compositor(),
+                                       resolver, containing_type_name, p.occurs,
+                                       plan, ci);
+                  if (choice_index_ptr && is_choice) ++(*choice_index_ptr);
+                }
               }
             } else if constexpr (std::is_same_v<T,
                                                 std::unique_ptr<model_group>>) {
               if (term) {
-                int ci = choice_index_ptr ? *choice_index_ptr : 0;
-                emit_write_particles(body, term->particles(),
-                                     term->compositor(), resolver,
-                                     containing_type_name, p.occurs, plan, ci);
-                if (choice_index_ptr &&
-                    term->compositor() == compositor_kind::choice)
-                  ++(*choice_index_ptr);
+                if (term->compositor() == compositor_kind::choice) {
+                  // Only emit and count this choice if it has element
+                  // particles that produce variant alternatives.
+                  bool has_elems = false;
+                  body += "  // INLINE_CHOICE_CHECK\n";
+                  for (const auto& sp : term->particles()) {
+                    if (std::holds_alternative<element_decl>(sp.term) ||
+                        std::holds_alternative<element_ref>(sp.term))
+                      has_elems = true;
+                  }
+                  if (has_elems) {
+                    int ci = choice_index_ptr ? *choice_index_ptr : 0;
+                    emit_write_particles(
+                        body, term->particles(), term->compositor(), resolver,
+                        containing_type_name, p.occurs, plan, ci);
+                    if (choice_index_ptr) ++(*choice_index_ptr);
+                  }
+                } else {
+                  emit_write_particles(
+                      body, term->particles(), term->compositor(), resolver,
+                      containing_type_name, p.occurs, plan,
+                      choice_index_ptr ? *choice_index_ptr : 0);
+                }
               }
             } else if constexpr (std::is_same_v<T, wildcard>) {
               body += "  " + resolver.sequence_for_begin("value", "any", "e");
@@ -2145,6 +2182,7 @@ namespace xb {
             outer_occurs.is_unbounded() || outer_occurs.max_occurs > 1;
         bool is_optional = !is_repeating && outer_occurs.min_occurs == 0 &&
                            outer_occurs.max_occurs <= 1;
+        bool found_in_plan = false;
         if (plan) {
           int ci = 0;
           for (const auto& entry : *plan) {
@@ -2154,54 +2192,34 @@ namespace xb {
                 is_repeating =
                     entry.cardinality == field_cardinality::repeating;
                 is_optional = entry.cardinality == field_cardinality::optional;
+                found_in_plan = true;
                 break;
               }
               ++ci;
             }
           }
+          // If the plan exists but has no entry for this choice index,
+          // the type generator didn't create a field — skip entirely.
+          if (!found_in_plan) return;
         }
         std::string field = resolver.field_access("value", choice_field_name);
 
+        std::string visit_target = is_repeating  ? "choice_item"
+                                   : is_optional ? ("*" + field)
+                                                 : field;
+
+        // Generate visit body directly into body.  After the loop, check
+        // if any if-constexpr branches were generated (first == false).
+        // If not, remove the visit preamble.
+        auto body_before = body.size();
         if (is_repeating) {
           body += "  " + resolver.sequence_for_begin("value", choice_field_name,
                                                      "choice_item");
         } else if (is_optional) {
           body += "  if (" + field + ") {\n";
         }
-
-        std::string visit_target = is_repeating  ? "choice_item"
-                                   : is_optional ? ("*" + field)
-                                                 : field;
-
-        // Check if there are particles that produce visit branches.
-        // Group refs that contain choices are expanded inline and may
-        // also produce branches.
-        bool has_visit_branches = false;
-        for (const auto& p : particles) {
-          std::visit(
-              [&](const auto& term) {
-                using PT = std::decay_t<decltype(term)>;
-                if constexpr (std::is_same_v<PT, element_decl> ||
-                              std::is_same_v<PT, element_ref>)
-                  has_visit_branches = true;
-                else if constexpr (std::is_same_v<PT, group_ref>) {
-                  auto* gd = resolver.schemas.find_model_group_def(term.ref);
-                  if (gd) {
-                    for (const auto& gp : gd->group().particles()) {
-                      if (std::holds_alternative<element_decl>(gp.term) ||
-                          std::holds_alternative<element_ref>(gp.term))
-                        has_visit_branches = true;
-                    }
-                  }
-                }
-              },
-              p.term);
-        }
-        // std::visit dispatch
-        if (has_visit_branches) {
-          body += "  std::visit([&](const auto& v) {\n";
-          body += "    using T = std::decay_t<decltype(v)>;\n";
-        }
+        body += "  std::visit([&](const auto& v) {\n";
+        body += "    using T = std::decay_t<decltype(v)>;\n";
 
         bool first = true;
         for (const auto& p : particles) {
@@ -2308,9 +2326,13 @@ namespace xb {
               p.term);
         }
 
-        if (has_visit_branches) body += "  }, " + visit_target + ");\n";
-
-        if (is_repeating || is_optional) { body += "  }\n"; }
+        if (first) {
+          // No branches generated — roll back the preamble
+          body.resize(body_before);
+        } else {
+          body += "  }, " + visit_target + ");\n";
+          if (is_repeating || is_optional) { body += "  }\n"; }
+        }
         return;
       }
 
