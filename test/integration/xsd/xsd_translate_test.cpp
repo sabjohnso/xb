@@ -46,20 +46,79 @@ translate_include(const xs::include_type& inc) {
   return {inc.schema_location};
 }
 
+// Translate xs::local_element → xb::particle with element_decl.
+// Note: local_element's name comes from the attribute group defRef
+// which isn't inherited through the restriction — we don't have it.
+// The type attribute IS available.
+static particle
+translate_local_element_particle([[maybe_unused]] const xs::local_element& le,
+                                 [[maybe_unused]] const std::string& tns) {
+  qname type_name;
+  if (le.type.has_value())
+    type_name = le.type.value();
+  else
+    type_name = qname(xs_ns, "anyType");
+
+  bool nillable = le.nillable.value_or(false);
+  // Name is unavailable (not inherited through restriction).
+  // Use empty name — the element ref context provides it.
+  return particle(element_decl(qname{}, type_name, nillable), occurrence{1, 1});
+}
+
 // Translate xs::top_level_element → xb::element_decl
-// Note: top_level_element is a restriction of element that drops many
-// attributes (type, nillable, abstract, etc.).  Only name and inline
-// type choice are available.
+// Also synthesizes anonymous types into out_schema.
 static element_decl
-translate_element(const xs::top_level_element& elem, const std::string& tns) {
+translate_element(const xs::top_level_element& elem, const std::string& tns,
+                  schema& out_schema) {
   qname type_name;
   if (elem.choice.has_value()) {
-    // Inline type — synthesize a name
-    type_name = qname(tns, elem.name + "_type");
+    // Inline type — synthesize a name and create the type
+    std::string synth = elem.name + "_type";
+    type_name = qname(tns, synth);
+
+    std::visit(
+        [&](const auto& v) {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<
+                            T, std::unique_ptr<xs::local_simple_type>>) {
+            if (v) {
+              simple_type_variety variety = simple_type_variety::atomic;
+              qname base_type;
+              std::visit(
+                  [&](const auto& inner) {
+                    using IT = std::decay_t<decltype(inner)>;
+                    if constexpr (std::is_same_v<IT,
+                                                 std::unique_ptr<
+                                                     xs::restriction_type_2>>) {
+                      if (inner && inner->base.has_value())
+                        base_type = inner->base.value();
+                    } else if constexpr (std::is_same_v<
+                                             IT,
+                                             std::unique_ptr<xs::list_type>>) {
+                      variety = simple_type_variety::list;
+                    } else if constexpr (std::is_same_v<
+                                             IT,
+                                             std::unique_ptr<xs::union_type>>) {
+                      variety = simple_type_variety::union_type;
+                    }
+                  },
+                  v->choice);
+              out_schema.add_simple_type(
+                  simple_type(type_name, variety, std::move(base_type)));
+            }
+          } else if constexpr (std::is_same_v<T, std::unique_ptr<
+                                                     xs::local_complex_type>>) {
+            if (v) {
+              content_type ct;
+              // TODO: translate local complex type content model
+              out_schema.add_complex_type(
+                  complex_type(type_name, false, false, std::move(ct)));
+            }
+          }
+        },
+        elem.choice.value());
   } else {
     // No type attribute available in the restricted struct.
-    // Elements without inline types must have a type= attribute,
-    // but top_level_element's restriction drops it.  Fall back to anyType.
     type_name = qname(xs_ns, "anyType");
   }
   return element_decl(qname(tns, elem.name), type_name);
@@ -68,7 +127,33 @@ translate_element(const xs::top_level_element& elem, const std::string& tns) {
 // Translate xs::extension_type → xb::complex_content
 static complex_content
 translate_extension(const xs::extension_type& ext) {
-  return complex_content(ext.base, derivation_method::extension);
+  std::optional<model_group> mg;
+
+  // Translate typeDefParticle (choice of group/all/choice/sequence)
+  if (ext.choice.has_value()) {
+    std::visit(
+        [&](const auto& v) {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<T, std::unique_ptr<xs::group_ref>>) {
+            if (v) {
+              mg = model_group(compositor_kind::sequence);
+              mg->add_particle(particle(group_ref{v->ref}, occurrence{1, 1}));
+            }
+          } else if constexpr (std::is_same_v<T, std::unique_ptr<xs::all>>) {
+            if (v) mg = model_group(compositor_kind::all);
+          } else if constexpr (std::is_same_v<
+                                   T, std::unique_ptr<xs::explicit_group>>) {
+            if (v) {
+              // Can't distinguish choice from sequence by type alone.
+              // Default to sequence.
+              mg = model_group(compositor_kind::sequence);
+            }
+          }
+        },
+        ext.choice.value());
+  }
+
+  return complex_content(ext.base, derivation_method::extension, std::move(mg));
 }
 
 // Translate xs::complex_restriction_type → xb::complex_content
@@ -211,7 +296,43 @@ translate_group(const xs::named_group& grp, const std::string& tns) {
       grp.choice);
 
   model_group mg(ck);
-  // TODO: translate particles inside the group
+
+  // Translate particles from the group's content.
+  // simple_explicit_group.choice contains the child particles.
+  auto add_particles = [&](const xs::simple_explicit_group& seg) {
+    for (const auto& item : seg.choice) {
+      std::visit(
+          [&](const auto& v) {
+            using PT = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<PT,
+                                         std::unique_ptr<xs::local_element>>) {
+              if (v) {
+                mg.add_particle(translate_local_element_particle(*v, tns));
+              }
+            } else if constexpr (std::is_same_v<
+                                     PT, std::unique_ptr<xs::group_ref>>) {
+              if (v) {
+                mg.add_particle(particle(group_ref{v->ref}, occurrence{1, 1}));
+              }
+            } else if constexpr (std::is_same_v<
+                                     PT, std::unique_ptr<xs::explicit_group>>) {
+              // Nested compositor — recurse
+              // (simplified: not fully translated yet)
+            }
+          },
+          item);
+    }
+  };
+
+  std::visit(
+      [&](const auto& v) {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, xs::simple_explicit_group>) {
+          add_particles(v);
+        }
+      },
+      grp.choice);
+
   return model_group_def(qname(tns, grp.name), std::move(mg));
 }
 
@@ -290,7 +411,7 @@ translate_schema(const xs::schema_type& src) {
           } else if constexpr (std::is_same_v<T, xs::top_level_complex_type>) {
             result.add_complex_type(translate_complex_type_decl(v, tns));
           } else if constexpr (std::is_same_v<T, xs::top_level_element>) {
-            result.add_element(translate_element(v, tns));
+            result.add_element(translate_element(v, tns, result));
           } else if constexpr (std::is_same_v<T, xs::named_group>) {
             result.add_model_group_def(translate_group(v, tns));
           } else if constexpr (std::is_same_v<T, xs::named_attribute_group>) {
@@ -559,4 +680,73 @@ TEST_CASE("XSD translate: attribute group details", "[xsd][translate]") {
   }
   REQUIRE(occurs != nullptr);
   CHECK(occurs->attributes().size() >= 2);
+}
+
+TEST_CASE("XSD translate: anonymous types synthesized from elements",
+          "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Elements with inline types should have synthesized type entries.
+  // Count elements that reference a synthesized type name ending in _type.
+  int inline_type_count = 0;
+  for (const auto& e : translated.elements()) {
+    if (e.type_name().local_name().find("_type") != std::string::npos) {
+      // Check if the synthesized type was actually created
+      bool found = false;
+      for (const auto& st : translated.simple_types()) {
+        if (st.name() == e.type_name()) {
+          found = true;
+          break;
+        }
+      }
+      for (const auto& ct : translated.complex_types()) {
+        if (ct.name() == e.type_name()) {
+          found = true;
+          break;
+        }
+      }
+      if (found) ++inline_type_count;
+    }
+  }
+  // The XSD schema-for-schemas has many elements with inline types
+  CHECK(inline_type_count > 0);
+}
+
+TEST_CASE("XSD translate: model groups have particles", "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Find a named group and check it has particles
+  int groups_with_particles = 0;
+  for (const auto& gd : translated.model_group_defs()) {
+    if (!gd.group().particles().empty()) ++groups_with_particles;
+  }
+  CHECK(groups_with_particles > 0);
+}
+
+TEST_CASE("XSD translate: extension types have content models",
+          "[xsd][translate]") {
+  fs::path schema_dir = STRINGIFY(XB_XSD_SCHEMA_DIR);
+  fs::path xs_xsd = schema_dir / "XMLSchema.xsd";
+
+  auto generated = parse_with_generated_reader(xs_xsd);
+  auto translated = translate_schema(generated);
+
+  // Count extension types that have content models
+  int ext_with_content = 0;
+  for (const auto& ct : translated.complex_types()) {
+    auto* cc = std::get_if<complex_content>(&ct.content().detail);
+    if (cc && cc->derivation == derivation_method::extension &&
+        cc->content_model.has_value()) {
+      ++ext_with_content;
+    }
+  }
+  CHECK(ext_with_content > 0);
 }
