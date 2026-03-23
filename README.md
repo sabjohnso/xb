@@ -100,7 +100,59 @@ xb generate --encoding protocol.bes.xml --output-dir out/ --binary-only
 xb generate-xsd --encoding protocol.bes.xml --output protocol.xsd
 ```
 
-#### Example
+#### Quick Start
+
+1. Write a BES file (`heartbeat.bes.xml`):
+
+```xml
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/hello">
+  <defaults byte-order="big-endian"/>
+
+  <message name="Heartbeat" type="Heartbeat" discriminant-value="0x01">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="sequence"     bits="32"/>
+    <field name="timestamp_ns" bits="64" encoding="unsigned"/>
+  </message>
+</encoding>
+```
+
+2. Add a CMake target using `xb_add_library`:
+
+```cmake
+xb_add_library(
+  TARGET hello_types
+  ENCODING ${CMAKE_CURRENT_SOURCE_DIR}/heartbeat.bes.xml
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE hello_types)
+```
+
+3. Use the generated types in C++:
+
+```cpp
+#include <wire_types.hpp>
+
+using namespace hello;
+
+int main() {
+  // Aggregate constructor auto-sets the wire-field msg_type
+  Heartbeat_owned hb(42, 1'700'000'000'000'000'000ULL);
+
+  // Zero-copy read-only view over the buffer
+  Heartbeat_view view(hb.buffer());
+
+  view.msg_type();     // 0x01 (from discriminant-value)
+  view.sequence();     // 42
+  view.timestamp_ns(); // 1700000000000000000
+}
+```
+
+See `examples/bes-hello/` for the complete working example.
+
+#### Example: Generated Code
 
 Given a BES message definition:
 
@@ -141,6 +193,76 @@ public:
   constexpr auto price() const -> std::uint32_t;
 };
 ```
+
+#### Validation Levels
+
+View types accept a template parameter controlling how much validation is
+performed at construction time:
+
+```cpp
+// full (default): validates buffer size + discriminant + field constraints
+AddOrder_view<xb::wire::validation_level::full> view(buf);
+
+// structural: validates buffer size only (no discriminant check)
+AddOrder_view<xb::wire::validation_level::structural> view(buf);
+
+// discriminant: no validation — fastest, trust the caller
+AddOrder_view<xb::wire::validation_level::discriminant> view(buf);
+```
+
+Use `full` for untrusted input, `discriminant` for hot-path decoding when
+the buffer is known-good. See `examples/bes-market-data/` for a working
+example.
+
+#### CMake Integration
+
+xb provides two CMake functions for BES code generation:
+
+**`xb_add_library`** (recommended) — generates types and links the xb
+runtime in one call:
+
+```cmake
+xb_add_library(
+  TARGET my_types
+  ENCODING ${CMAKE_CURRENT_SOURCE_DIR}/my_protocol.bes.xml
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+# Just link — includes and runtime are propagated transitively
+target_link_libraries(my_app PRIVATE my_types)
+```
+
+**`xb_generate_cpp`** — lower-level, for when you need more control:
+
+```cmake
+xb_generate_cpp(
+  TARGET my_types
+  ENCODING ${CMAKE_CURRENT_SOURCE_DIR}/my_protocol.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/gen
+  MODE HEADER_ONLY
+  BINARY_ONLY
+  VALIDATION_LEVEL full
+  XSD_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/my_protocol.xsd)
+
+target_link_libraries(my_app PRIVATE my_types xb::header)
+```
+
+Both functions accept `ENCODING` + `BINARY_ONLY` for BES-only mode (no
+`SCHEMAS` required), or `SCHEMAS` + `ENCODING` together when the BES
+overlays an existing XSD schema.
+
+#### BES Examples
+
+Three progressive examples are provided in `examples/`:
+
+| Example | Demonstrates |
+|---------|-------------|
+| `examples/bes-hello/` | Minimal single-message BES — owned construction, view readback, wire_size |
+| `examples/bes-market-data/` | Multiple message types, discriminant dispatch, designated initializers, validation levels |
+| `examples/bes-protocol-stack/` | Multi-layer protocol headers (Ethernet/IPv4/UDP), zero-copy layer-by-layer parsing |
+
+Build them with `cmake -Dxb_BUILD_EXAMPLES=ON` (on by default for
+top-level builds).
 
 ### Built-in XSD Types
 
@@ -199,6 +321,7 @@ src/
 test/
   unit/          Unit tests
   feature/       Feature/integration tests
+examples/        BES and schema usage examples
 cmake/           CMake dependency configuration
 scripts/         Utility scripts
 ```

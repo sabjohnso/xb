@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal BES example: a single Heartbeat message. -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/hello">
+
+  <defaults byte-order="big-endian"/>
+
+  <message name="Heartbeat" type="Heartbeat" discriminant-value="0x01">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="sequence"     bits="32"/>
+    <field name="timestamp_ns" bits="64" encoding="unsigned"/>
+  </message>
+
+</encoding>

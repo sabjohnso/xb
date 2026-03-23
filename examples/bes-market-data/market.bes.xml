@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Market data feed: multiple message types with discriminant dispatch. -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/market">
+
+  <defaults byte-order="big-endian"/>
+
+  <message name="AddOrder" type="AddOrder" discriminant-value="0x41">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="order_id"  bits="64" encoding="unsigned"/>
+    <field name="side"      bits="8"  encoding="ascii"/>
+    <field name="quantity"  bits="32" encoding="unsigned"/>
+    <field name="symbol"    bits="64" encoding="ascii"/>
+    <field name="price"     bits="32" encoding="unsigned"/>
+  </message>
+
+  <message name="CancelOrder" type="CancelOrder" discriminant-value="0x58">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="order_id"  bits="64" encoding="unsigned"/>
+    <field name="quantity"  bits="32" encoding="unsigned"/>
+  </message>
+
+  <message name="Trade" type="Trade" discriminant-value="0x50">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="order_id"  bits="64" encoding="unsigned"/>
+    <field name="side"      bits="8"  encoding="ascii"/>
+    <field name="quantity"  bits="32" encoding="unsigned"/>
+    <field name="symbol"    bits="64" encoding="ascii"/>
+    <field name="price"     bits="32" encoding="unsigned"/>
+    <field name="match_id"  bits="64" encoding="unsigned"/>
+  </message>
+
+</encoding>
