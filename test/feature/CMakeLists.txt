@@ -194,6 +194,20 @@ target_link_libraries(xb_bes_add_library_test
 target_compile_features(xb_bes_add_library_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_bes_add_library_test TARGET xb_bes_add_library_test)
 
+# --- CBOR (RFC 8949) BES test ---
+xb_add_library(
+  TARGET xb_cbor_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/cbor/cbor.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_cbor_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_cbor_test cbor_test.cpp)
+target_link_libraries(xb_cbor_test
+  PRIVATE Catch2::Catch2WithMain xb_cbor_types)
+target_compile_features(xb_cbor_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_cbor_test TARGET xb_cbor_test)
+
 # --- FXT (Fuchsia Trace Format) BES test ---
 xb_add_library(
   TARGET xb_fxt_types

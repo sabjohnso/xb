@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CBOR (RFC 8949) binary encoding specification.
+     CBOR uses big-endian byte order with MSB-first bit packing.
+
+     Initial byte layout:
+       [0..2] major_type  (3 bits, MSB-first → high 3 bits of byte)
+       [3..7] additional  (5 bits, MSB-first → low 5 bits of byte)
+
+     The additional information field determines what follows:
+       0-23:  value is the additional info itself (no payload)
+       24:    1-byte unsigned integer follows
+       25:    2-byte unsigned integer follows
+       26:    4-byte unsigned integer follows
+       27:    8-byte unsigned integer follows
+
+     This BES models each distinct "head" shape as a separate message
+     type, enabling byte-exact CBOR encoding via generated views. -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/cbor">
+
+  <defaults byte-order="big-endian" bit-order="msb-first" alignment="1"/>
+
+  <!-- Initial byte only (for values 0-23 encoded inline) -->
+  <message name="Head0" type="Head0">
+    <field name="major_type" bits="3"/>
+    <field name="additional" bits="5"/>
+  </message>
+
+  <!-- Initial byte + 1-byte argument (additional=24) -->
+  <message name="Head8" type="Head8">
+    <field name="major_type" bits="3"/>
+    <field name="additional" bits="5"/>
+    <field name="argument"   bits="8"/>
+  </message>
+
+  <!-- Initial byte + 2-byte argument (additional=25) -->
+  <message name="Head16" type="Head16">
+    <field name="major_type" bits="3"/>
+    <field name="additional" bits="5"/>
+    <field name="argument"   bits="16"/>
+  </message>
+
+  <!-- Initial byte + 4-byte argument (additional=26) -->
+  <message name="Head32" type="Head32">
+    <field name="major_type" bits="3"/>
+    <field name="additional" bits="5"/>
+    <field name="argument"   bits="32"/>
+  </message>
+
+  <!-- Initial byte + 8-byte argument (additional=27) -->
+  <message name="Head64" type="Head64">
+    <field name="major_type" bits="3"/>
+    <field name="additional" bits="5"/>
+    <field name="argument"   bits="64"/>
+  </message>
+
+</encoding>
