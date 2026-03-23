@@ -260,6 +260,7 @@ Three progressive examples are provided in `examples/`:
 | `examples/bes-hello/` | Minimal single-message BES — owned construction, view readback, wire_size |
 | `examples/bes-market-data/` | Multiple message types, discriminant dispatch, designated initializers, validation levels |
 | `examples/bes-protocol-stack/` | Multi-layer protocol headers (Ethernet/IPv4/UDP), zero-copy layer-by-layer parsing |
+| `examples/bes-variable-length/` | Length-prefixed message stream with different-sized messages, stream parsing |
 
 Build them with `cmake -Dxb_BUILD_EXAMPLES=ON` (on by default for
 top-level builds).

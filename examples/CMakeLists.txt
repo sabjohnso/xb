@@ -6,3 +6,4 @@
 add_subdirectory(bes-hello)
 add_subdirectory(bes-market-data)
 add_subdirectory(bes-protocol-stack)
+add_subdirectory(bes-variable-length)

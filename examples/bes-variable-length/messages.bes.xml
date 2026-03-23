@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Variable-length message stream example.
+     Demonstrates length-prefixed messages of different types and sizes.
+
+     Wire format:
+       StreamHeader (4 bytes):
+         message_count : 16
+         stream_id     : 16
+
+       Per message:
+         MessageBlock (2 bytes):
+           message_length : 16    (length of the body that follows)
+         Body (message_length bytes):
+           msg_type : 8           (discriminant)
+           ... payload fields ... -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/varlen">
+
+  <defaults byte-order="big-endian"/>
+
+  <!-- Stream header: carries the count of messages that follow -->
+  <message name="StreamHeader" type="StreamHeader">
+    <field name="message_count" bits="16"/>
+    <field name="stream_id"     bits="16"/>
+  </message>
+
+  <!-- Per-message length prefix -->
+  <message name="MessageBlock" type="MessageBlock">
+    <field name="message_length" bits="16"/>
+  </message>
+
+  <!-- Application messages — different sizes -->
+
+  <message name="Heartbeat" type="Heartbeat" discriminant-value="0x01">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="sequence"      bits="32"/>
+  </message>
+
+  <message name="Quote" type="Quote" discriminant-value="0x51">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="symbol"   bits="64" encoding="ascii"/>
+    <field name="bid"      bits="32"/>
+    <field name="ask"      bits="32"/>
+    <field name="bid_size" bits="32"/>
+    <field name="ask_size" bits="32"/>
+  </message>
+
+  <message name="Trade" type="Trade" discriminant-value="0x54">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="symbol"   bits="64" encoding="ascii"/>
+    <field name="price"    bits="32"/>
+    <field name="quantity" bits="32"/>
+    <field name="match_id" bits="64"/>
+  </message>
+
+</encoding>
