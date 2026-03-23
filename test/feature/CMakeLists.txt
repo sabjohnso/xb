@@ -194,6 +194,20 @@ target_link_libraries(xb_bes_add_library_test
 target_compile_features(xb_bes_add_library_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_bes_add_library_test TARGET xb_bes_add_library_test)
 
+# --- FXT (Fuchsia Trace Format) BES test ---
+xb_add_library(
+  TARGET xb_fxt_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/fxt/fxt.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_fxt_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_fxt_test fxt_test.cpp)
+target_link_libraries(xb_fxt_test
+  PRIVATE Catch2::Catch2WithMain xb_fxt_types)
+target_compile_features(xb_fxt_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_fxt_test TARGET xb_fxt_test)
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})

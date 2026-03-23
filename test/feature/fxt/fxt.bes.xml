@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fuchsia Trace Format (FXT) binary encoding specification.
+     FXT uses 64-bit words, little-endian byte order, LSB-first bit packing.
+     All records begin with a 64-bit header word:
+       [0..3]   record type (4 bits)
+       [4..15]  record size in 8-byte words (12 bits)
+       [16..63] type-specific data (48 bits) -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/fxt">
+
+  <defaults byte-order="little-endian" bit-order="lsb-first" alignment="1"/>
+
+  <!-- Generic record header (first 8 bytes of every FXT record) -->
+  <message name="RecordHeader" type="RecordHeader">
+    <field name="record_type" bits="4"/>
+    <field name="record_size" bits="12"/>
+    <field name="type_specific" bits="16"/>
+    <field name="type_specific_hi" bits="32"/>
+  </message>
+
+  <!-- Initialization record (type 1): defines ticks-per-second.
+       Header word: type=1, size=2 (two 8-byte words)
+       Payload word: ticks_per_second (64 bits) -->
+  <message name="InitRecord" type="InitRecord">
+    <field name="record_type" bits="4"/>
+    <field name="record_size" bits="12"/>
+    <field name="reserved" bits="48"/>
+    <field name="ticks_per_second" bits="64"/>
+  </message>
+
+  <!-- String record (type 2): registers an indexed string.
+       Header word:
+         [0..3]   type = 2
+         [4..15]  size in words
+         [16..30] string index (15 bits)
+         [31]     reserved (1 bit)
+         [32..46] string length (15 bits)
+         [47..63] reserved (17 bits) -->
+  <message name="StringRecord" type="StringRecord">
+    <field name="record_type"   bits="4"/>
+    <field name="record_size"   bits="12"/>
+    <field name="string_index"  bits="15"/>
+    <field name="reserved1"     bits="1"/>
+    <field name="string_length" bits="15"/>
+    <field name="reserved2"     bits="17"/>
+  </message>
+
+  <!-- Thread record (type 3): registers a thread/process pair.
+       Header word:
+         [0..3]   type = 3
+         [4..15]  size = 3 (header + 2 payload words)
+         [16..23] thread index (8 bits)
+         [24..63] reserved (40 bits)
+       Payload: process_koid (64 bits), thread_koid (64 bits) -->
+  <message name="ThreadRecord" type="ThreadRecord">
+    <field name="record_type"  bits="4"/>
+    <field name="record_size"  bits="12"/>
+    <field name="thread_index" bits="8"/>
+    <field name="reserved"     bits="40"/>
+    <field name="process_koid" bits="64"/>
+    <field name="thread_koid"  bits="64"/>
+  </message>
+
+  <!-- Event record header (type 4): timestamped event.
+       Header word:
+         [0..3]   type = 4
+         [4..15]  size in words
+         [16..19] event type (4 bits)
+         [20..23] argument count (4 bits)
+         [24..31] thread ref (8 bits)
+         [32..47] category string ref (16 bits)
+         [48..63] name string ref (16 bits)
+       Payload: timestamp (64 bits), then type-specific data -->
+  <message name="EventRecord" type="EventRecord">
+    <field name="record_type"   bits="4"/>
+    <field name="record_size"   bits="12"/>
+    <field name="event_type"    bits="4"/>
+    <field name="argument_count" bits="4"/>
+    <field name="thread_ref"    bits="8"/>
+    <field name="category_ref"  bits="16"/>
+    <field name="name_ref"      bits="16"/>
+    <field name="timestamp"     bits="64"/>
+  </message>
+
+</encoding>

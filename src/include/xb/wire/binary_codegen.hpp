@@ -38,6 +38,10 @@ namespace xb::wire {
     template <typename T>
     concept has_byte_order = requires(T t) { t.byte_order; };
 
+    // Concept: has bit_order member
+    template <typename T>
+    concept has_bit_order = requires(T t) { t.bit_order; };
+
     // Concept: has null_value member (field_type with sentinel)
     template <typename T>
     concept has_null_value = requires(T t) { t.null_value; };
@@ -68,6 +72,26 @@ namespace xb::wire {
         if (s == "native") return "std::endian::native";
       }
       return "std::endian::big";
+    }
+
+    // Resolve bit order: per-field override, then defaults.
+    // Returns the C++ expression for the bit_order template argument,
+    // or empty string for the default (msb_first).
+    template <typename Field, typename Defaults>
+    std::string
+    resolve_bit_order(const Field& f, const Defaults& defaults) {
+      if constexpr (has_bit_order<Field>) {
+        if (f.bit_order.has_value()) {
+          auto s = to_string(*f.bit_order);
+          if (s == "lsb-first") return "xb::wire::bit_order::lsb_first";
+          return "";
+        }
+      }
+      if (defaults.bit_order.has_value()) {
+        auto s = to_string(*defaults.bit_order);
+        if (s == "lsb-first") return "xb::wire::bit_order::lsb_first";
+      }
+      return "";
     }
 
     // Determine if a field's encoding is a string type
@@ -158,12 +182,14 @@ namespace xb::wire {
     inline void
     emit_bitfield_accessor(std::ostringstream& out, const std::string& name,
                            const std::string& cpp_type, unsigned offset_bits,
-                           unsigned width_bits) {
+                           unsigned width_bits,
+                           const std::string& bit_order_str = "") {
       out << "  constexpr auto " << name << "() const -> " << cpp_type
           << " {\n";
       out << "    return static_cast<" << cpp_type
-          << ">(xb::wire::extract_bits<" << offset_bits << ", " << width_bits
-          << ">(buf_));\n";
+          << ">(xb::wire::extract_bits<" << offset_bits << ", " << width_bits;
+      if (!bit_order_str.empty()) out << ", " << bit_order_str;
+      out << ">(buf_));\n";
       out << "  }\n";
     }
 
@@ -242,12 +268,14 @@ namespace xb::wire {
                                     const std::string& name,
                                     const std::string& cpp_type,
                                     unsigned offset_bits, unsigned width_bits,
-                                    const std::string& null_val) {
+                                    const std::string& null_val,
+                                    const std::string& bit_order_str = "") {
       out << "  constexpr auto " << name << "() const -> std::optional<"
           << cpp_type << "> {\n";
       out << "    auto v = static_cast<" << cpp_type
-          << ">(xb::wire::extract_bits<" << offset_bits << ", " << width_bits
-          << ">(buf_));\n";
+          << ">(xb::wire::extract_bits<" << offset_bits << ", " << width_bits;
+      if (!bit_order_str.empty()) out << ", " << bit_order_str;
+      out << ">(buf_));\n";
       out << "    if (v == static_cast<" << cpp_type << ">(" << null_val
           << ")) return std::nullopt;\n";
       out << "    return v;\n";
@@ -286,10 +314,12 @@ namespace xb::wire {
     inline void
     emit_bitfield_mutator(std::ostringstream& out, const std::string& name,
                           const std::string& cpp_type, unsigned offset_bits,
-                          unsigned width_bits) {
+                          unsigned width_bits,
+                          const std::string& bit_order_str = "") {
       out << "  void set_" << name << "(" << cpp_type << " v) {\n";
-      out << "    xb::wire::insert_bits<" << offset_bits << ", " << width_bits
-          << ">(buf_, static_cast<xb::wire::detail::uint_for_width_t<"
+      out << "    xb::wire::insert_bits<" << offset_bits << ", " << width_bits;
+      if (!bit_order_str.empty()) out << ", " << bit_order_str;
+      out << ">(buf_, static_cast<xb::wire::detail::uint_for_width_t<"
           << width_bits << ">>(v));\n";
       out << "  }\n";
     }
@@ -403,6 +433,7 @@ namespace xb::wire {
                                       ? int_type_for_width(rf.width_bits)
                                       : uint_type_for_width(rf.width_bits);
                   auto endian = resolve_endian(v, defaults);
+                  auto bit_ord = resolve_bit_order(v, defaults);
                   bool has_null = field_has_null_value(v);
                   auto null_val = field_null_value(v);
 
@@ -412,9 +443,9 @@ namespace xb::wire {
                         out, rf.name, cpp_type, endian, *rf.offset_bits / 8,
                         rf.width_bits / 8, null_val);
                   } else if (has_null && rf.offset_bits.has_value()) {
-                    emit_optional_bitfield_accessor(out, rf.name, cpp_type,
-                                                    *rf.offset_bits,
-                                                    rf.width_bits, null_val);
+                    emit_optional_bitfield_accessor(
+                        out, rf.name, cpp_type, *rf.offset_bits, rf.width_bits,
+                        null_val, bit_ord);
                   } else if (rf.offset_bits.has_value() &&
                              is_byte_aligned(*rf.offset_bits, rf.width_bits)) {
                     emit_aligned_int_accessor(out, rf.name, cpp_type, endian,
@@ -422,7 +453,8 @@ namespace xb::wire {
                                               rf.width_bits / 8);
                   } else if (rf.offset_bits.has_value()) {
                     emit_bitfield_accessor(out, rf.name, cpp_type,
-                                           *rf.offset_bits, rf.width_bits);
+                                           *rf.offset_bits, rf.width_bits,
+                                           bit_ord);
                   }
                   return true;
                 }
@@ -473,6 +505,7 @@ namespace xb::wire {
                                       ? int_type_for_width(rf.width_bits)
                                       : uint_type_for_width(rf.width_bits);
                   auto endian = resolve_endian(v, defaults);
+                  auto bit_ord = resolve_bit_order(v, defaults);
 
                   if (rf.offset_bits.has_value() &&
                       is_byte_aligned(*rf.offset_bits, rf.width_bits)) {
@@ -481,7 +514,8 @@ namespace xb::wire {
                                              rf.width_bits / 8);
                   } else if (rf.offset_bits.has_value()) {
                     emit_bitfield_mutator(out, rf.name, cpp_type,
-                                          *rf.offset_bits, rf.width_bits);
+                                          *rf.offset_bits, rf.width_bits,
+                                          bit_ord);
                   }
                   return true;
                 }
