@@ -675,17 +675,38 @@ namespace xb {
       for (const auto& attr : ct.attributes())
         existing.insert(attr.name.local_name());
 
-      std::vector<attribute_use> inherited;
-      auto* base_ct = schemas.find_complex_type(cc->base_type_name);
-      while (base_ct) {
-        for (const auto& attr : base_ct->attributes()) {
+      // Collect attributes from an attribute_use vector, skipping
+      // those already present or prohibited.
+      auto collect_from = [&](const std::vector<attribute_use>& attrs,
+                              std::vector<attribute_use>& out) {
+        for (const auto& attr : attrs) {
           if (existing.count(attr.name.local_name())) continue;
           if (attr.type_name.local_name().empty() &&
               attr.type_name.namespace_uri().empty() && !attr.required)
             continue;
-          inherited.push_back(attr);
+          out.push_back(attr);
           existing.insert(attr.name.local_name());
         }
+      };
+
+      // Recursively expand attribute group refs.
+      std::function<void(const std::vector<attribute_group_ref>&,
+                         std::vector<attribute_use>&)>
+          expand_groups = [&](const std::vector<attribute_group_ref>& refs,
+                              std::vector<attribute_use>& out) {
+            for (const auto& ref : refs) {
+              auto* gd = schemas.find_attribute_group_def(ref.ref);
+              if (!gd) continue;
+              collect_from(gd->attributes(), out);
+              expand_groups(gd->attribute_group_refs(), out);
+            }
+          };
+
+      std::vector<attribute_use> inherited;
+      auto* base_ct = schemas.find_complex_type(cc->base_type_name);
+      while (base_ct) {
+        collect_from(base_ct->attributes(), inherited);
+        expand_groups(base_ct->attribute_group_refs(), inherited);
         if (auto* bcc =
                 std::get_if<complex_content>(&base_ct->content().detail)) {
           if (!bcc->base_type_name.local_name().empty())

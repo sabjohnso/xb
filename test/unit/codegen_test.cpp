@@ -5891,6 +5891,68 @@ TEST_CASE("codegen: restriction inherits non-prohibited base attributes",
   CHECK(find_field(*top, "ref") == nullptr);
 }
 
+// Attributes from base type's attribute groups should also be inherited.
+TEST_CASE("codegen: restriction inherits attributes from base attribute groups",
+          "[codegen][restriction]") {
+  schema s;
+  s.set_target_namespace("urn:test");
+
+  // An attribute group with "name" and "ref" and "form" attributes
+  attribute_group_def defref(
+      qname("urn:test", "defRef"),
+      {attribute_use{qname("", "name"), qname(xs_ns, "NCName"), false, {}, {}},
+       attribute_use{qname("", "ref"), qname(xs_ns, "QName"), false, {}, {}},
+       attribute_use{
+           qname("", "form"), qname(xs_ns, "string"), false, {}, {}}});
+  s.add_attribute_group_def(std::move(defref));
+
+  // Base type uses the attribute group + has a direct attribute
+  content_type base_ct(content_kind::empty, std::monostate{});
+  std::vector<attribute_use> base_attrs;
+  base_attrs.push_back(
+      {qname("", "type"), qname(xs_ns, "QName"), false, {}, {}});
+  std::vector<attribute_group_ref> base_refs;
+  base_refs.push_back({qname("urn:test", "defRef")});
+  s.add_complex_type(complex_type(qname("urn:test", "BaseElem"), false, false,
+                                  std::move(base_ct), std::move(base_attrs),
+                                  std::move(base_refs)));
+
+  // Restricted type: prohibits "ref", explicitly lists "name" as required.
+  // "type" and "form" should be inherited (type from direct attrs, form
+  // from the attribute group).
+  std::vector<attribute_use> restr_attrs;
+  restr_attrs.push_back({qname("", "ref"), qname{}, false, {}, {}});
+  restr_attrs.push_back(
+      {qname("", "name"), qname(xs_ns, "NCName"), true, {}, {}});
+
+  complex_content cc(qname("urn:test", "BaseElem"),
+                     derivation_method::restriction);
+  content_type restr_ct(content_kind::element_only, std::move(cc));
+  s.add_complex_type(complex_type(qname("urn:test", "TopElem"), false, false,
+                                  std::move(restr_ct), std::move(restr_attrs)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen gen(ss, types);
+  auto files = gen.generate();
+
+  const cpp_struct* top = nullptr;
+  for (const auto& f : files) {
+    top = find_struct(f, "top_elem");
+    if (top) break;
+  }
+  REQUIRE(top != nullptr);
+
+  // "name" explicitly listed (required)
+  CHECK(find_field(*top, "name") != nullptr);
+  // "type" inherited from base's direct attributes
+  CHECK(find_field(*top, "type") != nullptr);
+  // "form" inherited from base's attribute group (defRef)
+  CHECK(find_field(*top, "form") != nullptr);
+  // "ref" prohibited
+  CHECK(find_field(*top, "ref") == nullptr);
+}
+
 // ===== Abstract element substitution group expansion in content models =====
 
 // When a content model contains a choice with an abstract element ref,
