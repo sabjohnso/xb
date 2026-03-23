@@ -194,6 +194,20 @@ target_link_libraries(xb_bes_add_library_test
 target_compile_features(xb_bes_add_library_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_bes_add_library_test TARGET xb_bes_add_library_test)
 
+# --- BSON BES test ---
+xb_add_library(
+  TARGET xb_bson_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/bson/bson.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_bson_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_bson_test bson_test.cpp)
+target_link_libraries(xb_bson_test
+  PRIVATE Catch2::Catch2WithMain xb_bson_types)
+target_compile_features(xb_bson_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_bson_test TARGET xb_bson_test)
+
 # --- MessagePack BES test ---
 xb_add_library(
   TARGET xb_msgpack_types

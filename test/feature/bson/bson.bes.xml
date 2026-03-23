@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BSON (Binary JSON) encoding specification — bsonspec.org.
+     BSON uses little-endian byte order throughout.
+
+     A BSON document is:  int32 size | element* | 0x00
+     An element is:        byte type | cstring name | value
+
+     This BES models the fixed-layout portions of BSON: the document
+     header, element headers for each value type, and the fixed-size
+     value payloads.  Variable-length portions (cstring names, string
+     bodies, binary data) follow the fixed heads and are handled at
+     the application layer. -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/bson">
+
+  <defaults byte-order="little-endian" alignment="1"/>
+
+  <!-- Document header: 4-byte total size (little-endian int32).
+       The size includes itself, all elements, and the trailing 0x00. -->
+  <message name="DocumentHeader" type="DocumentHeader">
+    <field name="size" bits="32"/>
+  </message>
+
+  <!-- Element header: 1-byte type + (cstring name follows separately) -->
+  <message name="ElementHeader" type="ElementHeader">
+    <field name="type_id" bits="8"/>
+  </message>
+
+  <!-- Double value (type 0x01): 8-byte IEEE 754 float -->
+  <message name="DoubleElement" type="DoubleElement">
+    <field name="type_id" bits="8"/>
+    <field name="value"   bits="64"/>
+  </message>
+
+  <!-- String header (type 0x02): type + int32 byte length.
+       The length includes the trailing null byte of the string data. -->
+  <message name="StringHeader" type="StringHeader">
+    <field name="type_id" bits="8"/>
+    <field name="length"  bits="32"/>
+  </message>
+
+  <!-- Boolean value (type 0x08): type + 1-byte value (0x00 or 0x01) -->
+  <message name="BooleanElement" type="BooleanElement">
+    <field name="type_id" bits="8"/>
+    <field name="value"   bits="8"/>
+  </message>
+
+  <!-- Null/Undefined/MinKey/MaxKey (types 0x0A, 0x06, 0xFF, 0x7F):
+       type byte only, no value payload -->
+  <message name="NullElement" type="NullElement">
+    <field name="type_id" bits="8"/>
+  </message>
+
+  <!-- Int32 value (type 0x10): type + 4-byte signed integer -->
+  <message name="Int32Element" type="Int32Element">
+    <field name="type_id" bits="8"/>
+    <field name="value"   bits="32"/>
+  </message>
+
+  <!-- Int64 value (type 0x12): type + 8-byte signed integer -->
+  <message name="Int64Element" type="Int64Element">
+    <field name="type_id" bits="8"/>
+    <field name="value"   bits="64"/>
+  </message>
+
+  <!-- DateTime value (type 0x09): type + int64 UTC milliseconds -->
+  <message name="DateTimeElement" type="DateTimeElement">
+    <field name="type_id" bits="8"/>
+    <field name="value"   bits="64"/>
+  </message>
+
+  <!-- Timestamp value (type 0x11): type + uint32 increment + uint32 timestamp -->
+  <message name="TimestampElement" type="TimestampElement">
+    <field name="type_id"   bits="8"/>
+    <field name="increment" bits="32"/>
+    <field name="timestamp" bits="32"/>
+  </message>
+
+  <!-- ObjectId value (type 0x07): type + 12 bytes (96 bits) -->
+  <message name="ObjectIdElement" type="ObjectIdElement">
+    <field name="type_id" bits="8"/>
+    <field name="oid"     bits="96" encoding="raw"/>
+  </message>
+
+  <!-- Binary header (type 0x05): type + int32 length + byte subtype -->
+  <message name="BinaryHeader" type="BinaryHeader">
+    <field name="type_id" bits="8"/>
+    <field name="length"  bits="32"/>
+    <field name="subtype" bits="8"/>
+  </message>
+
+  <!-- Decimal128 value (type 0x13): type + 16 bytes (128 bits) -->
+  <message name="Decimal128Element" type="Decimal128Element">
+    <field name="type_id" bits="8"/>
+    <field name="value"   bits="128" encoding="raw"/>
+  </message>
+
+</encoding>
