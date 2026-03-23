@@ -72,6 +72,10 @@ at build time.
 
 #]=======================================================================]
 
+# Capture xb's cmake/ directory at include-time so that the function
+# can locate helper scripts regardless of which project calls it.
+set(_xb_cmake_dir "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL "")
+
 function(xb_generate_cpp)
   cmake_parse_arguments(XB_GEN
     "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT;BINARY_ONLY"
@@ -325,7 +329,7 @@ function(xb_generate_cpp)
     set(tmp_dir "${CMAKE_BINARY_DIR}/_xb_gen_tmp/${XB_GEN_TARGET}/$<CONFIG>")
     set(xb_cmd_tmp ${xb_cmd_prefix} -o "${tmp_dir}"
       ${xb_cmd_opts} ${XB_GEN_SCHEMAS})
-    set(copy_script "${PROJECT_SOURCE_DIR}/cmake/xbCopyIfDifferent.cmake")
+    set(copy_script "${_xb_cmake_dir}/xbCopyIfDifferent.cmake")
 
     add_custom_command(
       OUTPUT "${stamp}"
