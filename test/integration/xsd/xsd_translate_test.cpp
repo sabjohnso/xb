@@ -47,22 +47,22 @@ translate_include(const xs::include_type& inc) {
 }
 
 // Translate xs::local_element → xb::particle with element_decl.
-// Note: local_element's name comes from the attribute group defRef
-// which isn't inherited through the restriction — we don't have it.
-// The type attribute IS available.
 static particle
-translate_local_element_particle([[maybe_unused]] const xs::local_element& le,
-                                 [[maybe_unused]] const std::string& tns) {
+translate_local_element_particle(const xs::local_element& le,
+                                 const std::string& tns) {
+  qname name;
+  if (le.name.has_value()) name = qname(tns, le.name.value());
+
   qname type_name;
   if (le.type.has_value())
     type_name = le.type.value();
+  else if (le.choice.has_value())
+    type_name = qname(tns, le.name.value_or("anon") + "_type");
   else
     type_name = qname(xs_ns, "anyType");
 
   bool nillable = le.nillable.value_or(false);
-  // Name is unavailable (not inherited through restriction).
-  // Use empty name — the element ref context provides it.
-  return particle(element_decl(qname{}, type_name, nillable), occurrence{1, 1});
+  return particle(element_decl(name, type_name, nillable), occurrence{1, 1});
 }
 
 // Translate xs::top_level_element → xb::element_decl
@@ -71,7 +71,10 @@ static element_decl
 translate_element(const xs::top_level_element& elem, const std::string& tns,
                   schema& out_schema) {
   qname type_name;
-  if (elem.choice.has_value()) {
+
+  if (elem.type.has_value()) {
+    type_name = elem.type.value();
+  } else if (elem.choice.has_value()) {
     // Inline type — synthesize a name and create the type
     std::string synth = elem.name + "_type";
     type_name = qname(tns, synth);
@@ -110,7 +113,6 @@ translate_element(const xs::top_level_element& elem, const std::string& tns,
                                                      xs::local_complex_type>>) {
             if (v) {
               content_type ct;
-              // TODO: translate local complex type content model
               out_schema.add_complex_type(
                   complex_type(type_name, false, false, std::move(ct)));
             }
@@ -118,10 +120,19 @@ translate_element(const xs::top_level_element& elem, const std::string& tns,
         },
         elem.choice.value());
   } else {
-    // No type attribute available in the restricted struct.
     type_name = qname(xs_ns, "anyType");
   }
-  return element_decl(qname(tns, elem.name), type_name);
+
+  bool nillable = elem.nillable.value_or(false);
+  auto default_val = elem.default_.has_value()
+                         ? std::optional<std::string>(elem.default_.value())
+                         : std::nullopt;
+  auto fixed_val = elem.fixed.has_value()
+                       ? std::optional<std::string>(elem.fixed.value())
+                       : std::nullopt;
+
+  return element_decl(qname(tns, elem.name), type_name, nillable, false,
+                      default_val, fixed_val);
 }
 
 // Translate xs::extension_type → xb::complex_content
@@ -238,6 +249,9 @@ translate_complex_type_decl(const xs::top_level_complex_type& ct,
         }
       },
       ct.choice);
+
+  // Use mixed from the type's own attribute (may also be set on complexContent)
+  if (ct.mixed.has_value() && ct.mixed.value()) is_mixed = true;
 
   return complex_type(qname(tns, ct.name), false, is_mixed, std::move(content));
 }
