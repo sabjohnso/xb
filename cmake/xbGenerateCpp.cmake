@@ -329,6 +329,7 @@ function(xb_generate_cpp)
 
     add_custom_command(
       OUTPUT "${stamp}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${stamp_dir}"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "${tmp_dir}"
       COMMAND ${xb_cmd_tmp}
       COMMAND "${CMAKE_COMMAND}"
@@ -364,6 +365,7 @@ function(xb_generate_cpp)
 
     add_custom_command(
       OUTPUT "${xsd_stamp}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${xsd_stamp_dir}"
       COMMAND "${CMAKE_COMMAND}" -E make_directory
         "${CMAKE_BINARY_DIR}/_xb_gen_tmp/${XB_GEN_TARGET}_xsd/$<CONFIG>"
       COMMAND ${xsd_cmd}

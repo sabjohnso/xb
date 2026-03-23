@@ -40,6 +40,7 @@ add_custom_command(
   OUTPUT "${xb_ENCODING_STAMP}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${xb_ENCODING_GEN_DIR}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${xb_ENCODING_TMP_DIR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/_encoding_stamps/$<CONFIG>"
   COMMAND "$<TARGET_FILE:xb_bootstrap>"
     -t "${xb_ENCODING_TYPEMAP}"
     -n "http://xb.dev/encoding=xb::bes"
