@@ -6,4 +6,4 @@ target_compile_definitions(xb_fixml_integration_test PRIVATE
   XB_INCLUDE_DIR=${PROJECT_SOURCE_DIR}/src/include
   XB_LIB_FILE=$<TARGET_FILE:xb::xb>
   XB_SANITIZERS=$<IF:$<CONFIG:RelWithDebInfo>,1,0>)
-add_test(NAME xb_fixml_integration_test COMMAND xb_fixml_integration_test)
+ctest_deps_add_test(NAME xb_fixml_integration_test TARGET xb_fixml_integration_test)

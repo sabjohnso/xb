@@ -4,8 +4,8 @@ add_library(xb_header INTERFACE)
 set_target_properties(xb_header PROPERTIES EXPORT_NAME header)
 target_include_directories(xb_header
   INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:${xb_INSTALL_INCLUDEDIR}>)
 
 install(TARGETS xb_header

@@ -128,69 +128,72 @@ function(xb_generate_cpp)
   # SPLIT is the CLI default, no flag needed
 
   # --- Build the command line ---
-  set(xb_cmd "$<TARGET_FILE:${xb_exe}>" generate)
+  # Options are collected into xb_cmd_opts (without -o and schemas) so
+  # the stamp-file path can redirect output to a per-config temp dir.
+  set(xb_cmd_prefix "$<TARGET_FILE:${xb_exe}>" generate)
   if(mode_flag)
-    list(APPEND xb_cmd ${mode_flag})
+    list(APPEND xb_cmd_prefix ${mode_flag})
   endif()
-  list(APPEND xb_cmd -o "${XB_GEN_OUTPUT_DIR}")
 
+  set(xb_cmd_opts)
   if(XB_GEN_TYPE_MAP)
-    list(APPEND xb_cmd -t "${XB_GEN_TYPE_MAP}")
+    list(APPEND xb_cmd_opts -t "${XB_GEN_TYPE_MAP}")
   endif()
 
   foreach(ns_mapping IN LISTS XB_GEN_NAMESPACE_MAP)
-    list(APPEND xb_cmd -n "${ns_mapping}")
+    list(APPEND xb_cmd_opts -n "${ns_mapping}")
   endforeach()
 
   if(XB_GEN_ENCAPSULATION)
-    list(APPEND xb_cmd --encapsulation "${XB_GEN_ENCAPSULATION}")
+    list(APPEND xb_cmd_opts --encapsulation "${XB_GEN_ENCAPSULATION}")
   endif()
 
   if(XB_GEN_HEADER_SUFFIX)
-    list(APPEND xb_cmd --header-suffix "${XB_GEN_HEADER_SUFFIX}")
+    list(APPEND xb_cmd_opts --header-suffix "${XB_GEN_HEADER_SUFFIX}")
   endif()
 
   if(XB_GEN_SOURCE_SUFFIX)
-    list(APPEND xb_cmd --source-suffix "${XB_GEN_SOURCE_SUFFIX}")
+    list(APPEND xb_cmd_opts --source-suffix "${XB_GEN_SOURCE_SUFFIX}")
   endif()
 
   if(XB_GEN_TYPE_STYLE)
-    list(APPEND xb_cmd --type-style "${XB_GEN_TYPE_STYLE}")
+    list(APPEND xb_cmd_opts --type-style "${XB_GEN_TYPE_STYLE}")
   endif()
 
   if(XB_GEN_FIELD_STYLE)
-    list(APPEND xb_cmd --field-style "${XB_GEN_FIELD_STYLE}")
+    list(APPEND xb_cmd_opts --field-style "${XB_GEN_FIELD_STYLE}")
   endif()
 
   if(XB_GEN_ENUM_STYLE)
-    list(APPEND xb_cmd --enum-style "${XB_GEN_ENUM_STYLE}")
+    list(APPEND xb_cmd_opts --enum-style "${XB_GEN_ENUM_STYLE}")
   endif()
 
   if(XB_GEN_GENERATE_DOCS)
-    list(APPEND xb_cmd --generate-docs)
+    list(APPEND xb_cmd_opts --generate-docs)
   endif()
 
   if(XB_GEN_SEPARATE_FWD_HEADER)
-    list(APPEND xb_cmd --separate-fwd-header)
+    list(APPEND xb_cmd_opts --separate-fwd-header)
   endif()
 
   if(XB_GEN_NO_FORMAT)
-    list(APPEND xb_cmd --no-format)
+    list(APPEND xb_cmd_opts --no-format)
   endif()
 
   if(XB_GEN_ENCODING)
-    list(APPEND xb_cmd --encoding "${XB_GEN_ENCODING}")
+    list(APPEND xb_cmd_opts --encoding "${XB_GEN_ENCODING}")
   endif()
 
   if(XB_GEN_VALIDATION_LEVEL)
-    list(APPEND xb_cmd --validation-level "${XB_GEN_VALIDATION_LEVEL}")
+    list(APPEND xb_cmd_opts --validation-level "${XB_GEN_VALIDATION_LEVEL}")
   endif()
 
   if(XB_GEN_BINARY_ONLY)
-    list(APPEND xb_cmd --binary-only)
+    list(APPEND xb_cmd_opts --binary-only)
   endif()
 
-  list(APPEND xb_cmd ${XB_GEN_SCHEMAS})
+  set(xb_cmd ${xb_cmd_prefix} -o "${XB_GEN_OUTPUT_DIR}"
+    ${xb_cmd_opts} ${XB_GEN_SCHEMAS})
 
   # --- Collect dependencies for the custom command ---
   set(xb_deps ${XB_GEN_SCHEMAS})
@@ -305,18 +308,32 @@ function(xb_generate_cpp)
   else()
     # --- In-tree build or header-only: stamp-file approach ---
     #
-    # With Ninja Multi-Config the stamp must be config-independent so
-    # the custom command is not re-triggered needlessly when a
-    # different config's binary happens to be newer.  The generated
-    # C++ source is deterministic regardless of build config, so we
-    # depend only on the input files (schemas, type map, encoding),
-    # not on the binary itself.  A build-order dependency on the
-    # generator target is added separately.
-    set(stamp "${XB_GEN_OUTPUT_DIR}/.xb_generate.stamp")
+    # Ninja Multi-Config shares .ninja_log across configs and tracks
+    # the command hash for each output.  The COMMAND uses
+    # $<TARGET_FILE:...> (config-specific), so a config-independent
+    # stamp would have different command hashes per config, causing
+    # Ninja to re-run the command on every config switch.
+    #
+    # To avoid this the stamp is per-config ($<CONFIG> in path).
+    # The generated C++ is deterministic regardless of build config,
+    # so we write to a per-config temp dir first and copy_if_different
+    # into the real output dir.  This prevents touching the generated
+    # files' timestamps when their content hasn't changed, which would
+    # cascade unnecessary recompilation of downstream targets.
+    set(stamp_dir "${CMAKE_BINARY_DIR}/_xb_gen_stamps/${XB_GEN_TARGET}/$<CONFIG>")
+    set(stamp "${stamp_dir}/.xb_generate.stamp")
+    set(tmp_dir "${CMAKE_BINARY_DIR}/_xb_gen_tmp/${XB_GEN_TARGET}/$<CONFIG>")
+    set(xb_cmd_tmp ${xb_cmd_prefix} -o "${tmp_dir}"
+      ${xb_cmd_opts} ${XB_GEN_SCHEMAS})
+    set(copy_script "${PROJECT_SOURCE_DIR}/cmake/xbCopyIfDifferent.cmake")
 
     add_custom_command(
       OUTPUT "${stamp}"
-      COMMAND ${xb_cmd}
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${tmp_dir}"
+      COMMAND ${xb_cmd_tmp}
+      COMMAND "${CMAKE_COMMAND}"
+        -DSRC_DIR=${tmp_dir} -DDST_DIR=${XB_GEN_OUTPUT_DIR}
+        -P "${copy_script}"
       COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
       DEPENDS ${xb_deps}
       COMMENT "Generating C++ from XSD schemas for ${XB_GEN_TARGET}"
@@ -336,18 +353,29 @@ function(xb_generate_cpp)
 
   # --- Optional XSD generation from BES ---
   if(XB_GEN_XSD_OUTPUT AND XB_GEN_ENCODING)
+    # Same per-config stamp + copy_if_different pattern as above.
+    set(xsd_stamp_dir "${CMAKE_BINARY_DIR}/_xb_gen_stamps/${XB_GEN_TARGET}_xsd/$<CONFIG>")
+    set(xsd_stamp "${xsd_stamp_dir}/.xsd_generate.stamp")
+    set(xsd_tmp "${CMAKE_BINARY_DIR}/_xb_gen_tmp/${XB_GEN_TARGET}_xsd/$<CONFIG>/output.xsd")
+
     set(xsd_cmd "$<TARGET_FILE:${xb_exe}>" generate-xsd
       --encoding "${XB_GEN_ENCODING}"
-      --output "${XB_GEN_XSD_OUTPUT}")
+      --output "${xsd_tmp}")
 
     add_custom_command(
-      OUTPUT "${XB_GEN_XSD_OUTPUT}"
+      OUTPUT "${xsd_stamp}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${CMAKE_BINARY_DIR}/_xb_gen_tmp/${XB_GEN_TARGET}_xsd/$<CONFIG>"
       COMMAND ${xsd_cmd}
-      DEPENDS "${XB_GEN_ENCODING}" "$<TARGET_FILE:${xb_exe}>"
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${xsd_tmp}" "${XB_GEN_XSD_OUTPUT}"
+      COMMAND "${CMAKE_COMMAND}" -E touch "${xsd_stamp}"
+      DEPENDS "${XB_GEN_ENCODING}"
       COMMENT "Generating XSD from BES for ${XB_GEN_TARGET}"
       VERBATIM)
 
-    add_custom_target(${XB_GEN_TARGET}_xsd DEPENDS "${XB_GEN_XSD_OUTPUT}")
+    add_custom_target(${XB_GEN_TARGET}_xsd DEPENDS "${xsd_stamp}")
+    add_dependencies(${XB_GEN_TARGET}_xsd ${xb_exe})
     add_dependencies(${XB_GEN_TARGET} ${XB_GEN_TARGET}_xsd)
   endif()
 endfunction()
