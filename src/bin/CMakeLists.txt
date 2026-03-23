@@ -32,15 +32,15 @@ target_compile_features(xb_bootstrap PRIVATE cxx_std_${xb_CXX_STANDARD})
 
 set(xb_ENCODING_XSD "${PROJECT_SOURCE_DIR}/schema/xb-encoding.xsd")
 set(xb_ENCODING_TYPEMAP "${PROJECT_SOURCE_DIR}/schema/xb-encoding-typemap.xml")
-set(xb_ENCODING_GEN_DIR "${CMAKE_BINARY_DIR}/src/include/xb/wire")
-set(xb_ENCODING_TMP_DIR "${CMAKE_BINARY_DIR}/_encoding_tmp/$<CONFIG>")
-set(xb_ENCODING_STAMP "${CMAKE_BINARY_DIR}/_encoding_stamps/$<CONFIG>/.encoding.stamp")
+set(xb_ENCODING_GEN_DIR "${PROJECT_BINARY_DIR}/src/include/xb/wire")
+set(xb_ENCODING_TMP_DIR "${PROJECT_BINARY_DIR}/_encoding_tmp/$<CONFIG>")
+set(xb_ENCODING_STAMP "${PROJECT_BINARY_DIR}/_encoding_stamps/$<CONFIG>/.encoding.stamp")
 
 add_custom_command(
   OUTPUT "${xb_ENCODING_STAMP}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${xb_ENCODING_GEN_DIR}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${xb_ENCODING_TMP_DIR}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/_encoding_stamps/$<CONFIG>"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${PROJECT_BINARY_DIR}/_encoding_stamps/$<CONFIG>"
   COMMAND "$<TARGET_FILE:xb_bootstrap>"
     -t "${xb_ENCODING_TYPEMAP}"
     -n "http://xb.dev/encoding=xb::bes"
