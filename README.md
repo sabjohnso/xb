@@ -48,6 +48,100 @@ different design decisions:
 - **HTTP transport** — libcurl-based transport with TLS, client certificates,
   timeouts, and redirect handling (requires libcurl)
 
+### Binary Encoding (BES)
+
+xb includes a declarative Binary Encoding Specification (BES) format for
+mapping XSD data types to wire-level binary layouts. BES targets
+high-performance use cases — market data feeds, binary protocols, and
+low-latency messaging — where direct buffer access matters more than XML
+serialization.
+
+A BES document (`*.bes.xml`, validated by `schema/xb-encoding.xsd`) describes:
+
+- **Field layouts** — width in bits, byte order, bit order, alignment, padding
+- **Primitive encodings** — unsigned, two's complement, BCD, IEEE 754,
+  fixed-point, ASCII, UTF-8/UTF-16, epoch timestamps, bitsets, and more
+- **Protocol framing** — named frame layers (Ethernet, IPv4, UDP, etc.)
+  composed into frame stacks for multi-layer protocol parsing
+- **Message definitions** — application messages with discriminant-based
+  dispatch, repeating groups, choices, computed fields, and conditional
+  presence
+- **Selector matching** — CSS-like specificity rules (qname, path, type,
+  namespace) for binding encoding rules to XSD components
+- **Import cascading** — BES documents can import and override other BES
+  documents
+
+#### Generated Types
+
+For each BES message, xb generates three C++ classes:
+
+- **`_view`** — a `constexpr` read-only view over a `std::span<const std::byte>`
+  buffer, with zero-copy field accessors that handle byte-swapping and bit
+  extraction inline
+- **`_mutable_view`** — a mutable view with setters for in-place field
+  modification
+- **`_owned`** — a self-contained type that manages its own buffer, with an
+  aggregate constructor and conversion to view types
+
+For frame stacks, xb generates frame parsers that peel protocol headers and
+dispatch to the correct message type based on discriminant fields.
+
+#### BES-Only Workflow
+
+BES files can be used without a separate XSD schema. xb infers XSD types from
+field properties (width, encoding) and generates a synthetic schema
+internally. This is useful when the binary format *is* the specification.
+
+```sh
+# Generate binary types from a BES file alone
+xb generate --encoding protocol.bes.xml --output-dir out/ --binary-only
+
+# Generate an XSD schema from a BES file
+xb generate-xsd --encoding protocol.bes.xml --output protocol.xsd
+```
+
+#### Example
+
+Given a BES message definition:
+
+```xml
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/protocol">
+  <defaults byte-order="big-endian"/>
+
+  <message name="AddOrder" discriminant-value="0x41">
+    <wire-field name="msg_type" bits="8"/>
+    <field name="stock_locate" bits="16"/>
+    <field name="tracking_number" bits="16"/>
+    <field name="timestamp" bits="48" encoding="unsigned"/>
+    <field name="order_ref" bits="64" encoding="unsigned"/>
+    <field name="side" bits="8" encoding="ascii"/>
+    <field name="shares" bits="32" encoding="unsigned"/>
+    <field name="stock" bits="64" encoding="ascii"/>
+    <field name="price" bits="32" encoding="unsigned"/>
+  </message>
+</encoding>
+```
+
+xb generates:
+
+```cpp
+class AddOrder_view {
+public:
+  explicit constexpr AddOrder_view(std::span<const std::byte> buf);
+  static constexpr std::size_t wire_size = 36;
+
+  constexpr auto stock_locate() const -> std::uint16_t;
+  constexpr auto tracking_number() const -> std::uint16_t;
+  constexpr auto timestamp() const -> std::uint64_t;
+  constexpr auto order_ref() const -> std::uint64_t;
+  constexpr auto side() const -> char;
+  constexpr auto shares() const -> std::uint32_t;
+  constexpr auto stock() const -> std::string_view;
+  constexpr auto price() const -> std::uint32_t;
+};
+```
+
 ### Built-in XSD Types
 
 Arbitrary-precision `xb::decimal` and `xb::integer`, plus `xb::duration`,
