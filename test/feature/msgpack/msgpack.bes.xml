@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MessagePack binary encoding specification.
+     MessagePack uses big-endian byte order with MSB-first bit packing.
+
+     The first byte determines the type. Several "fix" types pack a
+     tag and a small value into the first byte using sub-byte fields:
+
+       positive fixint:  0xxxxxxx  → tag(1)=0   + value(7)
+       fixmap:           1000xxxx  → tag(4)=0x8 + count(4)
+       fixarray:         1001xxxx  → tag(4)=0x9 + count(4)
+       fixstr:           101xxxxx  → tag(3)=0x5 + length(5)
+       negative fixint:  111xxxxx  → tag(3)=0x7 + value(5)
+
+     All other types use a full 8-bit format byte followed by 0-8
+     argument bytes in big-endian order. -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/msgpack">
+
+  <defaults byte-order="big-endian" bit-order="msb-first" alignment="1"/>
+
+  <!-- === Sub-byte "fix" types === -->
+
+  <!-- positive fixint: 0xxxxxxx (0x00-0x7f) -->
+  <message name="PositiveFixint" type="PositiveFixint">
+    <field name="tag"   bits="1"/>
+    <field name="value" bits="7"/>
+  </message>
+
+  <!-- fixmap: 1000xxxx (0x80-0x8f) -->
+  <message name="Fixmap" type="Fixmap">
+    <field name="tag"   bits="4"/>
+    <field name="count" bits="4"/>
+  </message>
+
+  <!-- fixarray: 1001xxxx (0x90-0x9f) -->
+  <message name="Fixarray" type="Fixarray">
+    <field name="tag"   bits="4"/>
+    <field name="count" bits="4"/>
+  </message>
+
+  <!-- fixstr: 101xxxxx (0xa0-0xbf) -->
+  <message name="Fixstr" type="Fixstr">
+    <field name="tag"    bits="3"/>
+    <field name="length" bits="5"/>
+  </message>
+
+  <!-- negative fixint: 111xxxxx (0xe0-0xff) -->
+  <message name="NegativeFixint" type="NegativeFixint">
+    <field name="tag"   bits="3"/>
+    <field name="value" bits="5"/>
+  </message>
+
+  <!-- === Format-byte types (no sub-byte packing) === -->
+
+  <!-- Single format byte: nil (0xc0), false (0xc2), true (0xc3) -->
+  <message name="FormatOnly" type="FormatOnly">
+    <field name="format" bits="8"/>
+  </message>
+
+  <!-- Format byte + 8-bit argument: uint8 (0xcc), int8 (0xd0),
+       bin8 (0xc4), str8 (0xd9), ext8 type byte, etc. -->
+  <message name="Format8" type="Format8">
+    <field name="format"   bits="8"/>
+    <field name="argument" bits="8"/>
+  </message>
+
+  <!-- Format byte + 16-bit argument: uint16 (0xcd), int16 (0xd1),
+       str16 (0xda), array16 (0xdc), map16 (0xde), etc. -->
+  <message name="Format16" type="Format16">
+    <field name="format"   bits="8"/>
+    <field name="argument" bits="16"/>
+  </message>
+
+  <!-- Format byte + 32-bit argument: uint32 (0xce), int32 (0xd2),
+       float32 (0xca), str32 (0xdb), array32 (0xdd), map32 (0xdf) -->
+  <message name="Format32" type="Format32">
+    <field name="format"   bits="8"/>
+    <field name="argument" bits="32"/>
+  </message>
+
+  <!-- Format byte + 64-bit argument: uint64 (0xcf), int64 (0xd3),
+       float64 (0xcb) -->
+  <message name="Format64" type="Format64">
+    <field name="format"   bits="8"/>
+    <field name="argument" bits="64"/>
+  </message>
+
+  <!-- ext format: format byte + type byte + fixed-size data.
+       fixext1 (0xd4): 1 byte, fixext2 (0xd5): 2 bytes, etc. -->
+  <message name="Fixext1" type="Fixext1">
+    <field name="format"    bits="8"/>
+    <field name="type_id"   bits="8"/>
+    <field name="data"      bits="8"/>
+  </message>
+
+  <message name="Fixext2" type="Fixext2">
+    <field name="format"    bits="8"/>
+    <field name="type_id"   bits="8"/>
+    <field name="data"      bits="16"/>
+  </message>
+
+  <message name="Fixext4" type="Fixext4">
+    <field name="format"    bits="8"/>
+    <field name="type_id"   bits="8"/>
+    <field name="data"      bits="32"/>
+  </message>
+
+</encoding>
