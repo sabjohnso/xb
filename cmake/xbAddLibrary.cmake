@@ -2,8 +2,9 @@
 xbAddLibrary
 ------------
 
-Provides ``xb_add_library()`` for generating C++ from XSD schemas and
-creating a library target with the xb runtime linked automatically.
+Provides ``xb_add_library()`` for generating C++ from XSD schemas
+and/or BES encoding files, creating a library target with the xb
+runtime linked automatically.
 
 .. command:: xb_add_library
 
@@ -11,7 +12,7 @@ creating a library target with the xb runtime linked automatically.
 
     xb_add_library(
       TARGET <name>
-      SCHEMAS <file> [<file>...]
+      [SCHEMAS <file> [<file>...]]
       [OUTPUT_DIR <dir>]
       [TYPE_MAP <file>]
       [NAMESPACE_MAP <uri=ns> ...]
@@ -25,11 +26,19 @@ creating a library target with the xb runtime linked automatically.
       [GENERATE_DOCS]
       [SEPARATE_FWD_HEADER]
       [NO_FORMAT]
+      [ENCODING <bes-file>]
+      [VALIDATION_LEVEL <full|structural|discriminant>]
+      [BINARY_ONLY]
+      [XSD_OUTPUT <file>]
     )
 
   This is a convenience wrapper around ``xb_generate_cpp()``.  It
-  generates C++ code from the given schemas, creates a library target,
-  and links the xb runtime (``xb::xb`` or ``xb``) automatically.
+  generates C++ code from the given schemas and/or BES encoding files,
+  creates a library target, and links the xb runtime (``xb::xb`` or
+  ``xb``) automatically.
+
+  ``SCHEMAS`` is required unless ``ENCODING`` + ``BINARY_ONLY`` are
+  both present, in which case schemas are synthesized from the BES.
 
   Consumers only need to link to ``<name>`` — both the generated include
   path and the xb runtime are propagated transitively.
@@ -41,8 +50,8 @@ creating a library target with the xb runtime linked automatically.
 
 function(xb_add_library)
   cmake_parse_arguments(XB_LIB
-    "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT"
-    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE"
+    "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT;BINARY_ONLY"
+    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL;XSD_OUTPUT"
     "SCHEMAS;NAMESPACE_MAP"
     ${ARGN})
 
@@ -52,11 +61,20 @@ function(xb_add_library)
   endif()
 
   if(NOT XB_LIB_SCHEMAS)
-    message(FATAL_ERROR "xb_add_library: SCHEMAS is required")
+    if(XB_LIB_ENCODING AND XB_LIB_BINARY_ONLY)
+      # BES-only mode: schemas are synthesized from BES
+    else()
+      message(FATAL_ERROR
+        "xb_add_library: SCHEMAS is required (unless ENCODING + BINARY_ONLY)")
+    endif()
   endif()
 
   # --- Forward all arguments to xb_generate_cpp ---
-  set(gen_args TARGET ${XB_LIB_TARGET} SCHEMAS ${XB_LIB_SCHEMAS})
+  set(gen_args TARGET ${XB_LIB_TARGET})
+
+  if(XB_LIB_SCHEMAS)
+    list(APPEND gen_args SCHEMAS ${XB_LIB_SCHEMAS})
+  endif()
 
   if(XB_LIB_OUTPUT_DIR)
     list(APPEND gen_args OUTPUT_DIR "${XB_LIB_OUTPUT_DIR}")
@@ -108,6 +126,22 @@ function(xb_add_library)
 
   if(XB_LIB_NO_FORMAT)
     list(APPEND gen_args NO_FORMAT)
+  endif()
+
+  if(XB_LIB_ENCODING)
+    list(APPEND gen_args ENCODING "${XB_LIB_ENCODING}")
+  endif()
+
+  if(XB_LIB_VALIDATION_LEVEL)
+    list(APPEND gen_args VALIDATION_LEVEL "${XB_LIB_VALIDATION_LEVEL}")
+  endif()
+
+  if(XB_LIB_BINARY_ONLY)
+    list(APPEND gen_args BINARY_ONLY)
+  endif()
+
+  if(XB_LIB_XSD_OUTPUT)
+    list(APPEND gen_args XSD_OUTPUT "${XB_LIB_XSD_OUTPUT}")
   endif()
 
   xb_generate_cpp(${gen_args})

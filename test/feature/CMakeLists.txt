@@ -180,6 +180,20 @@ target_link_libraries(xb_itch_benchmark_test
 target_compile_features(xb_itch_benchmark_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_itch_benchmark_test TARGET xb_itch_benchmark_test)
 
+# --- xb_add_library with BES-only mode ---
+xb_add_library(
+  TARGET xb_bes_add_library_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/itch/itch.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_bes_add_library_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_bes_add_library_test bes_add_library_test.cpp)
+target_link_libraries(xb_bes_add_library_test
+  PRIVATE Catch2::Catch2WithMain xb_bes_add_library_types)
+target_compile_features(xb_bes_add_library_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_bes_add_library_test TARGET xb_bes_add_library_test)
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})
