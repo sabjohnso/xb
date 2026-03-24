@@ -454,7 +454,110 @@ TEST_CASE("CBOR tag heads", "[cbor][appendix-a]") {
 // RFC 8949 Appendix A — Floats (major type 7, additional 25/26/27)
 //   Float arguments are encoded as IEEE 754 in network byte order.
 //   We use memcpy to reinterpret the float bits as an integer argument.
+//
+//   IEEE 754 binary16 (half-precision): sign(1) + exponent(5) + mantissa(10)
 // ===========================================================================
+
+TEST_CASE("CBOR float16 encoding", "[cbor][appendix-a]") {
+  SECTION("0.0 → 0xf9 0x0000") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25); // float16
+    h.set_argument(0x0000);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x00, 0x00}));
+  }
+
+  SECTION("-0.0 → 0xf9 0x8000") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0x8000);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x80, 0x00}));
+  }
+
+  SECTION("1.0 → 0xf9 0x3c00") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0x3c00);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x3c, 0x00}));
+  }
+
+  SECTION("1.5 → 0xf9 0x3e00") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0x3e00);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x3e, 0x00}));
+  }
+
+  SECTION("65504.0 → 0xf9 0x7bff") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0x7bff);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x7b, 0xff}));
+  }
+
+  SECTION("5.960464477539063e-8 (smallest subnormal) → 0xf9 0x0001") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0x0001);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x00, 0x01}));
+  }
+
+  SECTION("+Infinity → 0xf9 0x7c00") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0x7c00);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x7c, 0x00}));
+  }
+
+  SECTION("-Infinity → 0xf9 0xfc00") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0xfc00);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0xfc, 0x00}));
+  }
+
+  SECTION("NaN → 0xf9 0x7e00") {
+    Head16_owned h;
+    h.set_major_type(MT_SIMPLE);
+    h.set_additional(25);
+    h.set_argument(0x7e00);
+    CHECK(
+        bytes_match(h.buffer(), std::array<std::uint8_t, 3>{0xf9, 0x7e, 0x00}));
+  }
+
+  SECTION("round-trip all special values") {
+    for (std::uint16_t bits :
+         {std::uint16_t{0x0000}, std::uint16_t{0x8000}, std::uint16_t{0x3c00},
+          std::uint16_t{0x3e00}, std::uint16_t{0x7bff}, std::uint16_t{0x7c00},
+          std::uint16_t{0xfc00}, std::uint16_t{0x7e00},
+          std::uint16_t{0x0001}}) {
+      Head16_owned h;
+      h.set_major_type(MT_SIMPLE);
+      h.set_additional(25);
+      h.set_argument(bits);
+
+      Head16_view view(h.buffer());
+      CHECK(view.major_type() == MT_SIMPLE);
+      CHECK(view.additional() == 25);
+      CHECK(view.argument() == bits);
+    }
+  }
+}
 
 TEST_CASE("CBOR float32 encoding", "[cbor][appendix-a]") {
   SECTION("100000.0f → 0xfa 0x47c35000") {
