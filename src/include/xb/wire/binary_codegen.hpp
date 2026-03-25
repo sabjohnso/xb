@@ -575,6 +575,45 @@ namespace xb::wire {
 
   } // namespace detail
 
+  /// Emit accessors (and optionally mutators) for choice alternative fields.
+  template <typename Message, typename Defaults>
+  void
+  emit_choice_fields(std::ostringstream& out, const Message& message,
+                     const resolved_layout& layout, const Defaults& defaults,
+                     bool emit_mutators) {
+    for (const auto& rc : layout.choices) {
+      out << "\n  // --- choice: " << rc.name
+          << " (discriminant: " << rc.discriminant_field << ") ---\n";
+      for (const auto& ra : rc.alternatives) {
+        for (const auto& item : message.choice) {
+          std::visit(
+              [&](const auto& v) {
+                using V = std::decay_t<decltype(v)>;
+                if constexpr (detail::is_unique_ptr<V>::value) {
+                  using P = typename V::element_type;
+                  if constexpr (detail::has_alternative<P>) {
+                    for (const auto& alt_ptr : v->alternative) {
+                      if (!alt_ptr || alt_ptr->name != ra.name) continue;
+                      detail::field_source<std::decay_t<decltype(*alt_ptr)>>
+                          alt_source{*alt_ptr};
+                      for (const auto& rf : ra.fields) {
+                        if (rf.category == field_category::padding) continue;
+                        out << "  // [" << ra.name << "]\n";
+                        alt_source.emit_accessor(out, rf, defaults);
+                        if (emit_mutators)
+                          alt_source.emit_mutator(out, rf, defaults);
+                        out << "\n";
+                      }
+                    }
+                  }
+                }
+              },
+              item);
+        }
+      }
+    }
+  }
+
   template <typename Message, typename Defaults>
   std::string
   generate_view_class(const std::string& class_name, const Message& message,
@@ -582,7 +621,7 @@ namespace xb::wire {
     std::ostringstream out;
 
     // wire_size computed early — used in both the constant and the check
-    unsigned wire_bytes = layout.is_fixed ? (layout.total_bits + 7) / 8 : 0;
+    unsigned wire_bytes = (layout.total_bits + 7) / 8;
 
     out << "template <xb::wire::validation_level V = "
            "xb::wire::validation_level::full>\n";
@@ -637,6 +676,9 @@ namespace xb::wire {
       }
     }
 
+    // Pass 3: choice alternative fields (read-only)
+    emit_choice_fields(out, message, layout, defaults, false);
+
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
 
     out << "};\n";
@@ -654,7 +696,7 @@ namespace xb::wire {
                        const Defaults& defaults) {
     std::ostringstream out;
 
-    unsigned wire_bytes = layout.is_fixed ? (layout.total_bits + 7) / 8 : 0;
+    unsigned wire_bytes = (layout.total_bits + 7) / 8;
 
     out << "class " << class_name << " {\n";
     out << "  std::vector<std::byte> buf_;\n";
@@ -762,6 +804,9 @@ namespace xb::wire {
       }
     }
 
+    // Pass 3: choice alternative fields (read + write)
+    emit_choice_fields(out, message, layout, defaults, true);
+
     out << "  auto buffer() const -> std::span<const std::byte> { return "
            "buf_; }\n";
     out << "  auto mutable_buffer() -> std::span<std::byte> { return "
@@ -784,7 +829,7 @@ namespace xb::wire {
                               const Defaults& defaults) {
     std::ostringstream out;
 
-    unsigned wire_bytes = layout.is_fixed ? (layout.total_bits + 7) / 8 : 0;
+    unsigned wire_bytes = (layout.total_bits + 7) / 8;
 
     out << "template <xb::wire::validation_level V = "
            "xb::wire::validation_level::full>\n";
@@ -830,6 +875,9 @@ namespace xb::wire {
         out << "\n";
       }
     }
+
+    // Pass 3: choice alternative fields (read + write)
+    emit_choice_fields(out, message, layout, defaults, true);
 
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
 

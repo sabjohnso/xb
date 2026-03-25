@@ -30,10 +30,25 @@ namespace xb::wire {
     unsigned offset_bits;
   };
 
+  struct resolved_alternative {
+    std::string name;
+    std::string discriminant_value;
+    std::vector<resolved_field> fields;
+    unsigned total_bits = 0;
+  };
+
+  struct resolved_choice {
+    std::string name;
+    std::string discriminant_field;
+    unsigned offset_bits = 0;
+    std::vector<resolved_alternative> alternatives;
+  };
+
   struct resolved_layout {
     std::string message_name;
     std::vector<resolved_field> fields;
     std::vector<position_marker> markers;
+    std::vector<resolved_choice> choices;
     bool is_fixed = true;
     unsigned total_bits = 0;
   };
@@ -75,6 +90,9 @@ namespace xb::wire {
 
     template <typename T>
     concept has_discriminant_field = requires(T t) { t.discriminant_field; };
+
+    template <typename T>
+    concept has_alternative = requires(T t) { t.alternative; };
 
     template <typename T>
     concept has_name = requires(T t) { t.name; };
@@ -175,10 +193,69 @@ namespace xb::wire {
         if (!p) return;
         using pointee = typename T::element_type;
 
-        fixed = false;
+        // Discriminated choice: compute per-alternative layouts
+        if constexpr (has_alternative<pointee>) {
+          resolved_choice rc;
+          rc.name = p->name;
+          rc.discriminant_field = p->discriminant_field;
+          rc.offset_bits = offset;
 
-        // group_type / choice_type: emit a placeholder field
-        if constexpr (has_name<pointee>) {
+          unsigned max_bits = 0;
+          bool all_same_size = true;
+          bool first = true;
+          unsigned first_size = 0;
+
+          for (const auto& alt_ptr : p->alternative) {
+            if (!alt_ptr) continue;
+
+            resolved_alternative ra;
+            ra.name = alt_ptr->name;
+            ra.discriminant_value = alt_ptr->discriminant_value;
+
+            // Compute layout for this alternative's fields starting
+            // at the current offset.  Use a fresh walker sharing our
+            // alignment but with independent offset and field list.
+            unsigned alt_offset = offset;
+            bool alt_fixed = true;
+            resolved_layout alt_layout;
+            layout_walker alt_walker{alt_layout, alt_offset, alt_fixed,
+                                     alignment};
+
+            for (const auto& item : alt_ptr->choice)
+              std::visit(alt_walker, item);
+
+            ra.fields = std::move(alt_layout.fields);
+            ra.total_bits = alt_offset - offset;
+
+            if (!alt_fixed) all_same_size = false;
+
+            if (first) {
+              first_size = ra.total_bits;
+              first = false;
+            } else if (ra.total_bits != first_size) {
+              all_same_size = false;
+            }
+
+            if (ra.total_bits > max_bits) max_bits = ra.total_bits;
+
+            rc.alternatives.push_back(std::move(ra));
+          }
+
+          bool has_alternatives = !rc.alternatives.empty();
+          layout.choices.push_back(std::move(rc));
+
+          if (all_same_size && has_alternatives) {
+            // All alternatives have the same size — message stays fixed
+            offset += first_size;
+          } else {
+            // Variable-size choice
+            fixed = false;
+            offset += max_bits;
+          }
+        }
+        // group_type: emit a placeholder field (variable)
+        else if constexpr (has_name<pointee>) {
+          fixed = false;
           layout.fields.push_back(
               {p->name, field_category::data, 0, std::nullopt});
         }
@@ -206,7 +283,7 @@ namespace xb::wire {
       std::visit(walker, item);
 
     layout.is_fixed = is_fixed;
-    if (is_fixed) layout.total_bits = current_offset;
+    layout.total_bits = current_offset;
 
     return layout;
   }

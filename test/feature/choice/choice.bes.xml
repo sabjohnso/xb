@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BES discriminated choice test.
+     A simple tagged message format where a 1-byte type tag determines
+     the payload layout:
+
+       tag=1 (Heartbeat):   tag(8) + sequence(32)              = 5 bytes
+       tag=2 (Temperature): tag(8) + sensor_id(16) + value(32) = 7 bytes
+       tag=3 (Alert):       tag(8) + level(8) + code(16)       = 4 bytes
+
+     All alternatives share the same first field (tag) and then diverge.
+     The choice is discriminated on the tag field. -->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/choice_test">
+
+  <defaults byte-order="big-endian" alignment="1"/>
+
+  <message name="TaggedMessage" type="TaggedMessage">
+    <field name="tag" bits="8"/>
+    <choice name="payload" discriminant-field="tag">
+      <alternative name="heartbeat" discriminant-value="1">
+        <field name="sequence" bits="32"/>
+      </alternative>
+      <alternative name="temperature" discriminant-value="2">
+        <field name="sensor_id" bits="16"/>
+        <field name="value" bits="32"/>
+      </alternative>
+      <alternative name="alert" discriminant-value="3">
+        <field name="level" bits="8"/>
+        <field name="code" bits="16"/>
+      </alternative>
+    </choice>
+  </message>
+
+  <!-- Fixed-size choice: all alternatives have the same width.
+       The message should still be is_fixed=true with a known wire_size. -->
+  <message name="FixedChoice" type="FixedChoice">
+    <field name="kind" bits="8"/>
+    <choice name="body" discriminant-field="kind">
+      <alternative name="alpha" discriminant-value="1">
+        <field name="x" bits="32"/>
+      </alternative>
+      <alternative name="beta" discriminant-value="2">
+        <field name="y" bits="32"/>
+      </alternative>
+      <alternative name="gamma" discriminant-value="3">
+        <field name="z" bits="32"/>
+      </alternative>
+    </choice>
+  </message>
+
+</encoding>

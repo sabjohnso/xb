@@ -194,6 +194,20 @@ target_link_libraries(xb_bes_add_library_test
 target_compile_features(xb_bes_add_library_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_bes_add_library_test TARGET xb_bes_add_library_test)
 
+# --- BES discriminated choice test ---
+xb_add_library(
+  TARGET xb_choice_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/choice/choice.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_choice_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_choice_test choice_test.cpp)
+target_link_libraries(xb_choice_test
+  PRIVATE Catch2::Catch2WithMain xb_choice_types)
+target_compile_features(xb_choice_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_choice_test TARGET xb_choice_test)
+
 # --- BSON BES test ---
 xb_add_library(
   TARGET xb_bson_types
