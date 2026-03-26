@@ -374,10 +374,52 @@ namespace {
           binary_header << "namespace " << binary_ns << " {\n\n";
         }
 
+        // Forward-declare all view/owned classes so that cross-references
+        // (e.g. repeat element-type) resolve regardless of generation order.
+        for (const auto& bound : plan.messages()) {
+          auto base = bound.message->name;
+          binary_header << "template <xb::wire::validation_level>\n"
+                        << "class " << base << "_view;\n";
+          binary_header << "template <xb::wire::validation_level>\n"
+                        << "class " << base << "_mutable_view;\n";
+          binary_header << "class " << base << "_owned;\n";
+        }
+        binary_header << "\n";
+
         // Collect discriminator entries for framing dispatch
         std::vector<xb::wire::message_entry> disc_entries;
 
-        for (const auto& bound : plan.messages()) {
+        // Sort messages so that types referenced via element-type are
+        // generated before messages that reference them.
+        auto sorted_messages = [&]() {
+          auto msgs = plan.messages();
+          // Collect names referenced via element-type
+          std::set<std::string> referenced;
+          for (const auto& bound : msgs) {
+            for (const auto& item : bound.message->choice) {
+              std::visit(
+                  [&](const auto& v) {
+                    using V = std::decay_t<decltype(v)>;
+                    if constexpr (std::is_same_v<
+                                      V,
+                                      std::unique_ptr<xb::bes::repeat_type>>) {
+                      if (v && v->element_type.has_value())
+                        referenced.insert(*v->element_type);
+                    }
+                  },
+                  item);
+            }
+          }
+          // Two-pass: referenced types first, then the rest
+          decltype(msgs) result;
+          for (const auto& b : msgs)
+            if (referenced.count(b.message->name)) result.push_back(b);
+          for (const auto& b : msgs)
+            if (!referenced.count(b.message->name)) result.push_back(b);
+          return result;
+        }();
+
+        for (const auto& bound : sorted_messages) {
           auto& msg = *bound.message;
           auto layout = xb::wire::compute_layout(msg, defaults);
 

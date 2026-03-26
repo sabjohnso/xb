@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BES self-delimiting repeat test.
+
+     A stream of variable-size tagged messages where each message's
+     byte length is determined by its tag (discriminant).  The stream
+     uses a fill-remaining repeat with element-type — no explicit
+     count field.
+
+     TaggedMessage sizes:
+       tag=1 (Heartbeat):   1 + 4 = 5 bytes
+       tag=2 (Temperature): 1 + 2 + 4 = 7 bytes
+       tag=3 (Alert):       1 + 1 + 2 = 4 bytes
+
+     MessageStream layout:
+       stream_id(16) + [TaggedMessage × fill-remaining]
+-->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/self_delimit_test">
+
+  <defaults byte-order="big-endian" alignment="1"/>
+
+  <message name="TaggedMessage" type="TaggedMessage">
+    <field name="tag" bits="8"/>
+    <choice name="payload" discriminant-field="tag">
+      <alternative name="heartbeat" discriminant-value="1">
+        <field name="sequence" bits="32"/>
+      </alternative>
+      <alternative name="temperature" discriminant-value="2">
+        <field name="sensor_id" bits="16"/>
+        <field name="value" bits="32"/>
+      </alternative>
+      <alternative name="alert" discriminant-value="3">
+        <field name="level" bits="8"/>
+        <field name="code" bits="16"/>
+      </alternative>
+    </choice>
+  </message>
+
+  <!-- Stream: header + fill-remaining repeat of self-delimiting items -->
+  <message name="MessageStream" type="MessageStream">
+    <field name="stream_id" bits="16"/>
+    <repeat element-type="TaggedMessage"/>
+  </message>
+
+</encoding>

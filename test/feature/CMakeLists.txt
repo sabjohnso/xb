@@ -194,6 +194,20 @@ target_link_libraries(xb_bes_add_library_test
 target_compile_features(xb_bes_add_library_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_bes_add_library_test TARGET xb_bes_add_library_test)
 
+# --- BES self-delimiting repeat test ---
+xb_add_library(
+  TARGET xb_self_delimit_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/self_delimit/self_delimit.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_self_delimit_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_self_delimit_test self_delimit_test.cpp)
+target_link_libraries(xb_self_delimit_test
+  PRIVATE Catch2::Catch2WithMain xb_self_delimit_types)
+target_compile_features(xb_self_delimit_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_self_delimit_test TARGET xb_self_delimit_test)
+
 # --- BES element-type repeat test ---
 xb_add_library(
   TARGET xb_element_type_types

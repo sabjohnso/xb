@@ -621,40 +621,62 @@ namespace xb::wire {
     for (const auto& rr : layout.repeats) {
       if (rr.element_type.empty()) continue;
 
-      auto view_class = rr.element_type + "_view<>";
+      auto view_class =
+          rr.element_type + "_view<xb::wire::validation_level::full>";
       auto owned_class = rr.element_type + "_owned";
       unsigned header_bytes = (rr.offset_bits + 7) / 8;
 
-      out << "\n  // --- repeat: " << rr.count_field << " × " << rr.element_type
-          << " ---\n";
+      if (!rr.count_field.empty()) {
+        // Count-based repeat: indexed element(i) access
+        out << "\n  // --- repeat: " << rr.count_field << " × "
+            << rr.element_type << " ---\n";
 
-      if (is_const) {
-        out << "  auto element(std::size_t i) const -> " << view_class
-            << " {\n";
-        out << "    auto off = " << header_bytes << " + i * " << owned_class
-            << "::wire_size;\n";
-        out << "    return " << view_class
-            << "::from_trusted(std::span<const std::byte>(buf_).subspan(off, "
-            << owned_class << "::wire_size));\n";
-        out << "  }\n";
+        if (is_const) {
+          out << "  auto element(std::size_t i) const -> " << view_class
+              << " {\n";
+          out << "    auto off = " << header_bytes << " + i * " << owned_class
+              << "::wire_size;\n";
+          out << "    return " << view_class
+              << "::from_trusted(std::span<const std::byte>(buf_).subspan(off, "
+              << owned_class << "::wire_size));\n";
+          out << "  }\n";
+        } else {
+          auto mut_view = rr.element_type +
+                          "_mutable_view<xb::wire::validation_level::full>";
+          out << "  auto element(std::size_t i) -> " << mut_view << " {\n";
+          out << "    auto off = " << header_bytes << " + i * " << owned_class
+              << "::wire_size;\n";
+          out << "    return " << mut_view
+              << "(std::span<std::byte>(buf_).subspan(off, " << owned_class
+              << "::wire_size));\n";
+          out << "  }\n";
+          out << "  auto element(std::size_t i) const -> " << view_class
+              << " {\n";
+          out << "    auto off = " << header_bytes << " + i * " << owned_class
+              << "::wire_size;\n";
+          out << "    return " << view_class
+              << "::from_trusted(std::span<const std::byte>(buf_).subspan(off, "
+              << owned_class << "::wire_size));\n";
+          out << "  }\n";
+        }
       } else {
-        // Mutable version returns mutable_view
-        auto mut_view = rr.element_type + "_mutable_view<>";
-        out << "  auto element(std::size_t i) -> " << mut_view << " {\n";
-        out << "    auto off = " << header_bytes << " + i * " << owned_class
-            << "::wire_size;\n";
-        out << "    return " << mut_view
-            << "(std::span<std::byte>(buf_).subspan(off, " << owned_class
-            << "::wire_size));\n";
-        out << "  }\n";
-        // Also provide const version
-        out << "  auto element(std::size_t i) const -> " << view_class
-            << " {\n";
-        out << "    auto off = " << header_bytes << " + i * " << owned_class
-            << "::wire_size;\n";
-        out << "    return " << view_class
-            << "::from_trusted(std::span<const std::byte>(buf_).subspan(off, "
-            << owned_class << "::wire_size));\n";
+        // Fill-remaining repeat: for_each_element using compute_size
+        out << "\n  // --- repeat: fill-remaining × " << rr.element_type
+            << " ---\n";
+
+        out << "  template <typename Callback>\n";
+        out << "  void for_each_element(Callback&& cb) const {\n";
+        out << "    auto full = std::span<const std::byte>(buf_);\n";
+        out << "    std::size_t off = " << header_bytes << ";\n";
+        out << "    while (off < full.size()) {\n";
+        out << "      auto remaining = full.subspan(off);\n";
+        out << "      auto sz = " << view_class
+            << "::compute_size(remaining);\n";
+        out << "      if (sz == 0 || off + sz > full.size()) break;\n";
+        out << "      cb(" << view_class
+            << "::from_trusted(remaining.subspan(0, sz)));\n";
+        out << "      off += sz;\n";
+        out << "    }\n";
         out << "  }\n";
       }
     }
@@ -729,6 +751,53 @@ namespace xb::wire {
     emit_repeat_accessors(out, layout, true);
 
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
+
+    // compute_size: static method to determine byte length from buffer
+    if (layout.choices.empty()) {
+      // Fixed layout — trivial
+      out << "\n  static constexpr auto compute_size("
+             "std::span<const std::byte>) -> std::size_t {\n";
+      out << "    return wire_size;\n";
+      out << "  }\n";
+    } else {
+      // Variable layout with discriminated choice — switch on discriminant
+      out << "\n  static auto compute_size("
+             "std::span<const std::byte> buf) -> std::size_t {\n";
+
+      for (const auto& rc : layout.choices) {
+        // Find the discriminant field in the layout to get its accessor info
+        unsigned disc_offset = 0;
+        unsigned disc_width = 0;
+        for (const auto& rf : layout.fields) {
+          if (rf.name == rc.discriminant_field && rf.offset_bits.has_value()) {
+            disc_offset = *rf.offset_bits;
+            disc_width = rf.width_bits;
+            break;
+          }
+        }
+
+        // Read discriminant using extract_bits
+        std::string disc_type = detail::uint_type_for_width(disc_width);
+        out << "    auto disc = static_cast<" << disc_type
+            << ">(xb::wire::extract_bits<" << disc_offset << ", " << disc_width
+            << ">(buf));\n";
+
+        // Prefix size = bits before the choice
+        unsigned prefix_bytes = (rc.offset_bits + 7) / 8;
+
+        out << "    switch (disc) {\n";
+        for (const auto& ra : rc.alternatives) {
+          unsigned alt_bytes = (ra.total_bits + 7) / 8;
+          out << "      case " << ra.discriminant_value << ": return "
+              << prefix_bytes + alt_bytes << ";\n";
+        }
+        // Default: return prefix only (unknown discriminant)
+        out << "      default: return " << prefix_bytes << ";\n";
+        out << "    }\n";
+      }
+
+      out << "  }\n";
+    }
 
     out << "};\n";
 
