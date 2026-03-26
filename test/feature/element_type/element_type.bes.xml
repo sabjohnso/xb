@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BES element-type test: repeat with typed elements.
+
+     A sensor stream: a header with a count, followed by N fixed-size
+     SensorReading records.
+
+     Stream layout:
+       stream_id(16) + count(16) + [SensorReading × count]
+
+     SensorReading layout (8 bytes):
+       sensor_id(16) + timestamp(32) + value(16)
+-->
+<encoding xmlns="http://xb.dev/encoding"
+          target-namespace="http://example.com/element_type_test">
+
+  <defaults byte-order="big-endian" alignment="1"/>
+
+  <!-- Fixed-size element type -->
+  <message name="SensorReading" type="SensorReading">
+    <field name="sensor_id"  bits="16"/>
+    <field name="timestamp"  bits="32"/>
+    <field name="value"      bits="16"/>
+  </message>
+
+  <!-- Stream with repeated typed elements -->
+  <message name="SensorStream" type="SensorStream">
+    <field name="stream_id" bits="16"/>
+    <field name="count"     bits="16"/>
+    <repeat count-field="count" element-type="SensorReading"/>
+  </message>
+
+</encoding>

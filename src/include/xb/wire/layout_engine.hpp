@@ -44,11 +44,19 @@ namespace xb::wire {
     std::vector<resolved_alternative> alternatives;
   };
 
+  struct resolved_repeat {
+    std::string count_field;
+    std::string element_type;
+    unsigned offset_bits = 0;
+    unsigned element_wire_bits = 0;
+  };
+
   struct resolved_layout {
     std::string message_name;
     std::vector<resolved_field> fields;
     std::vector<position_marker> markers;
     std::vector<resolved_choice> choices;
+    std::vector<resolved_repeat> repeats;
     bool is_fixed = true;
     unsigned total_bits = 0;
   };
@@ -93,6 +101,9 @@ namespace xb::wire {
 
     template <typename T>
     concept has_alternative = requires(T t) { t.alternative; };
+
+    template <typename T>
+    concept has_element_type = requires(T t) { t.element_type; };
 
     template <typename T>
     concept has_name = requires(T t) { t.name; };
@@ -251,6 +262,20 @@ namespace xb::wire {
             // Variable-size choice
             fixed = false;
             offset += max_bits;
+          }
+        }
+        // repeat_type with element-type: record the repeat info
+        else if constexpr (has_element_type<pointee>) {
+          if (p->element_type.has_value()) {
+            resolved_repeat rr;
+            if (p->count_field.has_value()) rr.count_field = *p->count_field;
+            rr.element_type = *p->element_type;
+            rr.offset_bits = offset;
+            // element_wire_bits will be resolved later by codegen
+            // (it needs access to the referenced message's layout)
+            layout.repeats.push_back(std::move(rr));
+            // Repeat makes the message variable-length
+            fixed = false;
           }
         }
         // group_type: emit a placeholder field (variable)

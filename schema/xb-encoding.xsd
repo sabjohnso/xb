@@ -812,6 +812,18 @@
         </xs:documentation>
       </xs:annotation>
     </xs:attribute>
+    <xs:attribute name="element-type" type="xs:NCName"
+                  use="optional">
+      <xs:annotation>
+        <xs:documentation>
+          Name of a BES message type used as the element of each
+          repetition.  When present, the codegen generates typed
+          element access (indexed by position) using the referenced
+          message's view class.  The referenced message must have a
+          fixed wire size.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
   </xs:complexType>
 
   <!-- ===================================================================

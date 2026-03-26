@@ -614,6 +614,52 @@ namespace xb::wire {
     }
   }
 
+  /// Emit typed element accessor for each repeat with element-type.
+  inline void
+  emit_repeat_accessors(std::ostringstream& out, const resolved_layout& layout,
+                        bool is_const) {
+    for (const auto& rr : layout.repeats) {
+      if (rr.element_type.empty()) continue;
+
+      auto view_class = rr.element_type + "_view<>";
+      auto owned_class = rr.element_type + "_owned";
+      unsigned header_bytes = (rr.offset_bits + 7) / 8;
+
+      out << "\n  // --- repeat: " << rr.count_field << " × " << rr.element_type
+          << " ---\n";
+
+      if (is_const) {
+        out << "  auto element(std::size_t i) const -> " << view_class
+            << " {\n";
+        out << "    auto off = " << header_bytes << " + i * " << owned_class
+            << "::wire_size;\n";
+        out << "    return " << view_class
+            << "::from_trusted(std::span<const std::byte>(buf_).subspan(off, "
+            << owned_class << "::wire_size));\n";
+        out << "  }\n";
+      } else {
+        // Mutable version returns mutable_view
+        auto mut_view = rr.element_type + "_mutable_view<>";
+        out << "  auto element(std::size_t i) -> " << mut_view << " {\n";
+        out << "    auto off = " << header_bytes << " + i * " << owned_class
+            << "::wire_size;\n";
+        out << "    return " << mut_view
+            << "(std::span<std::byte>(buf_).subspan(off, " << owned_class
+            << "::wire_size));\n";
+        out << "  }\n";
+        // Also provide const version
+        out << "  auto element(std::size_t i) const -> " << view_class
+            << " {\n";
+        out << "    auto off = " << header_bytes << " + i * " << owned_class
+            << "::wire_size;\n";
+        out << "    return " << view_class
+            << "::from_trusted(std::span<const std::byte>(buf_).subspan(off, "
+            << owned_class << "::wire_size));\n";
+        out << "  }\n";
+      }
+    }
+  }
+
   template <typename Message, typename Defaults>
   std::string
   generate_view_class(const std::string& class_name, const Message& message,
@@ -678,6 +724,9 @@ namespace xb::wire {
 
     // Pass 3: choice alternative fields (read-only)
     emit_choice_fields(out, message, layout, defaults, false);
+
+    // Pass 4: typed repeat element accessors (read-only)
+    emit_repeat_accessors(out, layout, true);
 
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
 
@@ -807,6 +856,9 @@ namespace xb::wire {
     // Pass 3: choice alternative fields (read + write)
     emit_choice_fields(out, message, layout, defaults, true);
 
+    // Pass 4: typed repeat element accessors (read + write)
+    emit_repeat_accessors(out, layout, false);
+
     out << "  auto buffer() const -> std::span<const std::byte> { return "
            "buf_; }\n";
     out << "  auto mutable_buffer() -> std::span<std::byte> { return "
@@ -878,6 +930,9 @@ namespace xb::wire {
 
     // Pass 3: choice alternative fields (read + write)
     emit_choice_fields(out, message, layout, defaults, true);
+
+    // Pass 4: typed repeat element accessors (read + write)
+    emit_repeat_accessors(out, layout, false);
 
     out << "  static constexpr std::size_t wire_size = " << wire_bytes << ";\n";
 

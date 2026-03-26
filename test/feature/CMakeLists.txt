@@ -194,6 +194,20 @@ target_link_libraries(xb_bes_add_library_test
 target_compile_features(xb_bes_add_library_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_bes_add_library_test TARGET xb_bes_add_library_test)
 
+# --- BES element-type repeat test ---
+xb_add_library(
+  TARGET xb_element_type_types
+  ENCODING ${PROJECT_SOURCE_DIR}/test/feature/element_type/element_type.bes.xml
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_element_type_gen
+  MODE HEADER_ONLY
+  BINARY_ONLY)
+
+add_executable(xb_element_type_test element_type_test.cpp)
+target_link_libraries(xb_element_type_test
+  PRIVATE Catch2::Catch2WithMain xb_element_type_types)
+target_compile_features(xb_element_type_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_element_type_test TARGET xb_element_type_test)
+
 # --- BES discriminated choice test ---
 xb_add_library(
   TARGET xb_choice_types
