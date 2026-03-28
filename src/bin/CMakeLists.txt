@@ -80,10 +80,24 @@ endif()
 
 set_target_properties(xb_cli PROPERTIES
   OUTPUT_NAME xb
-  EXPORT_NAME cli)
+  EXPORT_NAME cli
+  INSTALL_RPATH "\$ORIGIN/../${xb_INSTALL_LIBDIR}")
 
 add_executable(xb::cli ALIAS xb_cli)
 
 install(TARGETS xb_cli
   EXPORT xb_EXPORTS
   DESTINATION ${xb_INSTALL_BINDIR})
+
+# When curl is a FetchContent'd shared library (CURL_DISABLE_INSTALL ON),
+# install it alongside xb so the installed binary can find it via RPATH.
+if(CURL_FOUND AND TARGET CURL::libcurl)
+  get_target_property(_curl_type CURL::libcurl TYPE)
+  if(_curl_type STREQUAL "SHARED_LIBRARY")
+    install(TARGETS libcurl_shared
+      LIBRARY DESTINATION ${xb_INSTALL_LIBDIR}
+      NAMELINK_SKIP)
+  elseif(_curl_type STREQUAL "IMPORTED_LIBRARY" OR _curl_type STREQUAL "UNKNOWN_LIBRARY")
+    # System-installed curl: nothing to do, already on the library path.
+  endif()
+endif()

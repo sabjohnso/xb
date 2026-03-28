@@ -491,3 +491,9 @@ target_link_libraries(xb_bes_to_xsd_test
   PRIVATE Catch2::Catch2WithMain xb::xb)
 target_compile_features(xb_bes_to_xsd_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_bes_to_xsd_test TARGET xb_bes_to_xsd_test)
+
+add_executable(xb_test_value_generator_test test_value_generator_test.cpp)
+target_link_libraries(xb_test_value_generator_test
+  PRIVATE Catch2::Catch2WithMain xb::xb)
+target_compile_features(xb_test_value_generator_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_test_value_generator_test TARGET xb_test_value_generator_test)
