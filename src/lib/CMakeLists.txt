@@ -24,6 +24,7 @@ add_library(xb STATIC
   test_value_generator.cpp
   test_vector_generator.cpp
   test_doc_generator.cpp
+  test_harness_generator.cpp
   schema_fetcher.cpp
   rng_parser.cpp
   rng_simplify.cpp

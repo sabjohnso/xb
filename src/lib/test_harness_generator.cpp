@@ -1,0 +1,185 @@
+#include <xb/test_harness_generator.hpp>
+
+#include <xb/naming.hpp>
+#include <xb/test_value_generator.hpp>
+#include <xb/test_vector_generator.hpp>
+
+#include <ostream>
+#include <string>
+
+namespace xb {
+
+  namespace {
+
+    std::string
+    cpp_type_name(const qname& xsd_type) {
+      return to_snake_case(xsd_type.local_name());
+    }
+
+    std::string
+    cpp_field_name(const qname& xsd_name) {
+      return to_cpp_identifier(xsd_name.local_name());
+    }
+
+    std::string
+    cpp_ns(const std::string& xml_ns) {
+      codegen_options opts;
+      return cpp_namespace_for(xml_ns, opts);
+    }
+
+    std::string
+    qualified_type(const qname& type_name) {
+      std::string ns = cpp_ns(type_name.namespace_uri());
+      std::string type = cpp_type_name(type_name);
+      if (ns.empty()) return type;
+      return ns + "::" + type;
+    }
+
+    std::string
+    escape_string_literal(const std::string& s) {
+      std::string result;
+      result.reserve(s.size() + 2);
+      result += '"';
+      for (char c : s) {
+        switch (c) {
+          case '"':
+            result += "\\\"";
+            break;
+          case '\\':
+            result += "\\\\";
+            break;
+          case '\n':
+            result += "\\n";
+            break;
+          case '\t':
+            result += "\\t";
+            break;
+          default:
+            result += c;
+        }
+      }
+      result += '"';
+      return result;
+    }
+
+    void
+    write_field_assignment(std::ostream& out, const std::string& var,
+                           const test_field_value& field) {
+      const auto& fname = cpp_field_name(field.field_name);
+
+      if (const auto* val = std::get_if<std::string>(&field.content)) {
+        out << "  " << var << "." << fname << " = "
+            << escape_string_literal(*val) << ";\n";
+      } else if (const auto* repeated =
+                     std::get_if<std::vector<std::vector<test_field_value>>>(
+                         &field.content)) {
+        for (const auto& instance : *repeated) {
+          for (const auto& f : instance) {
+            if (const auto* v = std::get_if<std::string>(&f.content)) {
+              out << "  " << var << "." << fname << ".push_back("
+                  << escape_string_literal(*v) << ");\n";
+            }
+          }
+        }
+      }
+    }
+
+    void
+    write_test_case(std::ostream& out, const test_vector& vec,
+                    const qname& element_name, const qname& type_name) {
+      std::string type_str = qualified_type(type_name);
+      std::string write_fn = "write_" + cpp_type_name(type_name);
+      std::string read_fn = "read_" + cpp_type_name(type_name);
+      std::string ns = cpp_ns(type_name.namespace_uri());
+      if (!ns.empty()) {
+        write_fn = ns + "::" + write_fn;
+        read_fn = ns + "::" + read_fn;
+      }
+      std::string elem_ns = element_name.namespace_uri();
+      std::string elem_local = element_name.local_name();
+
+      std::string sanitized_label = vec.label;
+      for (auto& c : sanitized_label) {
+        if (c == '"') c = '\'';
+      }
+
+      out << "TEST_CASE("
+          << escape_string_literal(elem_local + ": " + sanitized_label)
+          << ", \"[auto][" << elem_local << "]\") {\n";
+
+      // Construct the object
+      out << "  " << type_str << " original;\n";
+      for (const auto& field : vec.fields)
+        write_field_assignment(out, "original", field);
+
+      out << "\n";
+
+      // Serialize
+      out << "  std::ostringstream os;\n";
+      out << "  {\n";
+      out << "    xb::ostream_writer writer(os);\n";
+      out << "    writer.start_element(xb::qname{"
+          << escape_string_literal(elem_ns) << ", "
+          << escape_string_literal(elem_local) << "});\n";
+      out << "    writer.namespace_declaration(\"\", "
+          << escape_string_literal(elem_ns) << ");\n";
+      out << "    " << write_fn << "(original, writer);\n";
+      out << "    writer.end_element();\n";
+      out << "  }\n\n";
+
+      // Deserialize
+      out << "  xb::expat_reader reader(os.str());\n";
+      out << "  reader.read();\n";
+      out << "  auto parsed = " << read_fn << "(reader);\n\n";
+
+      // Compare
+      out << "  REQUIRE(original == parsed);\n";
+      out << "}\n\n";
+    }
+
+  } // namespace
+
+  test_harness_generator::test_harness_generator(const schema_set& schemas)
+      : schemas_(schemas) {}
+
+  void
+  test_harness_generator::generate(const qname& element_name,
+                                   std::ostream& out) const {
+    const auto* elem = schemas_.find_element(element_name);
+    if (!elem) return;
+
+    test_value_generator val_gen(schemas_);
+    test_vector_generator vec_gen(schemas_, val_gen);
+    auto vectors = vec_gen.generate(element_name);
+    if (vectors.empty()) return;
+
+    // Collect namespaces for include path derivation
+    std::string type_header =
+        to_snake_case(elem->type_name().local_name()) + ".hpp";
+    std::string ns = cpp_ns(elem->type_name().namespace_uri());
+
+    // Write file header
+    out << "// Auto-generated by xb test-vectors\n";
+    out << "// DO NOT EDIT — regenerate from schema\n\n";
+
+    out << "#include <catch2/catch_test_macros.hpp>\n";
+    out << "#include <xb/ostream_writer.hpp>\n";
+    out << "#include <xb/expat_reader.hpp>\n";
+    out << "#include <xb/qname.hpp>\n";
+    out << "#include <sstream>\n";
+    out << "#include <string>\n";
+
+    // Include the generated type header
+    if (!ns.empty()) {
+      out << "#include \"" << type_header << "\"\n";
+    } else {
+      out << "#include \"" << type_header << "\"\n";
+    }
+    out << "\n";
+
+    // Write test cases
+    for (const auto& vec : vectors)
+      write_test_case(out, vec, element_name, elem->type_name());
+  }
+
+} // namespace xb
