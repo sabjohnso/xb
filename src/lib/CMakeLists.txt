@@ -22,6 +22,7 @@ add_library(xb STATIC
   xpath_expr.cpp
   doc_generator.cpp
   test_value_generator.cpp
+  test_vector_generator.cpp
   schema_fetcher.cpp
   rng_parser.cpp
   rng_simplify.cpp
