@@ -35,7 +35,7 @@ set(XSD_GEN_STAMP_DIR ${CMAKE_BINARY_DIR}/_xb_gen_stamps/xsd_translate/$<CONFIG>
 set(XSD_GEN_STAMP ${XSD_GEN_STAMP_DIR}/.xsd_translate.stamp)
 
 add_custom_command(
-  OUTPUT ${XSD_GEN_STAMP}
+  OUTPUT ${XSD_GEN_STAMP} ${XSD_GEN_HPP} ${XSD_GEN_CPP} ${XSD_GEN_NS_HPP} ${XSD_GEN_NS_CPP}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${XSD_GEN_TMP}
   COMMAND $<TARGET_FILE:xb_cli> generate
     -o ${XSD_GEN_TMP}
