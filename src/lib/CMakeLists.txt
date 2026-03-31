@@ -26,6 +26,7 @@ add_library(xb STATIC
   test_doc_generator.cpp
   test_harness_generator.cpp
   coverage_analyzer.cpp
+  xinclude_reader.cpp
   schema_fetcher.cpp
   rng_parser.cpp
   rng_simplify.cpp

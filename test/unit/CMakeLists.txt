@@ -522,6 +522,12 @@ target_link_libraries(xb_coverage_analyzer_test
 target_compile_features(xb_coverage_analyzer_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_coverage_analyzer_test TARGET xb_coverage_analyzer_test)
 
+add_executable(xb_xinclude_reader_test xinclude_reader_test.cpp)
+target_link_libraries(xb_xinclude_reader_test
+  PRIVATE Catch2::Catch2WithMain xb::xb)
+target_compile_features(xb_xinclude_reader_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_xinclude_reader_test TARGET xb_xinclude_reader_test)
+
 add_executable(xb_bes_value_generator_test
   bes_value_generator_test.cpp
   ${PROJECT_SOURCE_DIR}/src/lib/bes_value_generator.cpp)
