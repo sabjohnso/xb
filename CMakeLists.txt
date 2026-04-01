@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(xb VERSION 0.15.0 LANGUAGES C CXX)
+project(xb VERSION 0.16.0 LANGUAGES C CXX)
 
 option(xb_BUILD_TESTING "Build the xb tests" ${PROJECT_IS_TOP_LEVEL})
 option(xb_BUILD_EXAMPLES "Build the xb examples" ${PROJECT_IS_TOP_LEVEL})

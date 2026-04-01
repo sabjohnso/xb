@@ -4,6 +4,8 @@
 #include <xb/content_type.hpp>
 #include <xb/element_decl.hpp>
 #include <xb/model_group.hpp>
+#include <xb/model_group_def.hpp>
+#include <xb/wildcard.hpp>
 
 #include <set>
 #include <string>
@@ -57,26 +59,38 @@ namespace xb::railroad {
     build_node(const model_group& mg, const schema_set& schemas);
 
     node
+    wrap_occurrence(node inner, const particle& p) {
+      if (p.occurs.max_occurs > 1) {
+        auto rep = std::make_unique<node>(std::move(inner));
+        inner = node{repeat_node{
+            std::move(rep),
+            occurrence_label(p.occurs.min_occurs > 0 ? p.occurs.min_occurs : 1,
+                             p.occurs.max_occurs)}};
+      }
+      if (p.occurs.min_occurs == 0) {
+        auto opt = std::make_unique<node>(std::move(inner));
+        inner = node{optional_node{std::move(opt)}};
+      }
+      return inner;
+    }
+
+    node
     build_particle_node(const particle& p, const schema_set& schemas) {
-      // Check for nested model group
+      // Check for nested model group (inline xs:sequence/xs:choice)
       if (auto* mg_ptr = std::get_if<std::unique_ptr<model_group>>(&p.term)) {
-        if (*mg_ptr) {
-          node inner = build_node(**mg_ptr, schemas);
-          // Wrap in occurrence modifiers
-          if (p.occurs.max_occurs > 1) {
-            auto rep = std::make_unique<node>(std::move(inner));
-            inner = node{repeat_node{std::move(rep),
-                                     occurrence_label(p.occurs.min_occurs > 0
-                                                          ? p.occurs.min_occurs
-                                                          : 1,
-                                                      p.occurs.max_occurs)}};
-          }
-          if (p.occurs.min_occurs == 0) {
-            auto opt = std::make_unique<node>(std::move(inner));
-            inner = node{optional_node{std::move(opt)}};
-          }
-          return inner;
-        }
+        if (*mg_ptr) return wrap_occurrence(build_node(**mg_ptr, schemas), p);
+      }
+
+      // Check for group_ref (xs:group ref="...")
+      if (auto* gref = std::get_if<group_ref>(&p.term)) {
+        const auto* mgd = schemas.find_model_group_def(gref->ref);
+        if (mgd) return wrap_occurrence(build_node(mgd->group(), schemas), p);
+        return node{terminal{gref->ref.local_name(), "group", false}};
+      }
+
+      // Check for wildcard (xs:any)
+      if (std::get_if<wildcard>(&p.term)) {
+        return wrap_occurrence(node{terminal{"any", "wildcard", false}}, p);
       }
 
       const auto* elem = resolve_element(p, schemas);
@@ -87,24 +101,7 @@ namespace xb::railroad {
                         schemas.find_complex_type(elem->type_name()) != nullptr;
 
       node inner = is_complex ? make_reference(*elem) : make_terminal(*elem);
-
-      // Wrap in occurrence modifiers
-      bool is_repeating = p.occurs.max_occurs > 1;
-      bool is_optional = p.occurs.min_occurs == 0;
-
-      if (is_repeating) {
-        auto child = std::make_unique<node>(std::move(inner));
-        std::size_t rep_min = p.occurs.min_occurs > 0 ? p.occurs.min_occurs : 1;
-        inner = node{repeat_node{
-            std::move(child), occurrence_label(rep_min, p.occurs.max_occurs)}};
-      }
-
-      if (is_optional) {
-        auto child = std::make_unique<node>(std::move(inner));
-        inner = node{optional_node{std::move(child)}};
-      }
-
-      return inner;
+      return wrap_occurrence(std::move(inner), p);
     }
 
     node
@@ -150,7 +147,8 @@ namespace xb::railroad {
       std::string type_label;
       if (attr.type_name.namespace_uri() == xsd_ns)
         type_label = attr.type_name.local_name();
-      result.attributes.push_back({attr.name.local_name(), type_label, true});
+      result.attributes.push_back(
+          {attr.name.local_name(), type_label, true, attr.required});
     }
 
     const auto* mg = get_model_group(*ct);
@@ -192,10 +190,25 @@ namespace xb::railroad {
       const auto* mg = get_model_group(*ct);
       if (!mg) continue;
 
-      for (const auto& p : mg->particles()) {
-        const auto* child_elem = resolve_element(p, schemas);
-        if (child_elem && child_elem->type_name().namespace_uri() != xsd_ns) {
-          worklist.push_back(child_elem->type_name());
+      // Collect elements from particles, recursing into group refs
+      std::vector<const model_group*> groups_to_scan;
+      groups_to_scan.push_back(mg);
+      while (!groups_to_scan.empty()) {
+        const auto* g = groups_to_scan.back();
+        groups_to_scan.pop_back();
+        for (const auto& p : g->particles()) {
+          const auto* child_elem = resolve_element(p, schemas);
+          if (child_elem && child_elem->type_name().namespace_uri() != xsd_ns) {
+            worklist.push_back(child_elem->type_name());
+          }
+          if (auto* gref = std::get_if<group_ref>(&p.term)) {
+            const auto* mgd = schemas.find_model_group_def(gref->ref);
+            if (mgd) groups_to_scan.push_back(&mgd->group());
+          }
+          if (auto* nested =
+                  std::get_if<std::unique_ptr<model_group>>(&p.term)) {
+            if (*nested) groups_to_scan.push_back(nested->get());
+          }
         }
       }
     }

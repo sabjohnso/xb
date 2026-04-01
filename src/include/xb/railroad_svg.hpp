@@ -20,6 +20,7 @@ namespace xb::railroad {
     std::string attribute_stroke = "#997700";
     std::string reference_fill = "#d4edda";
     std::string reference_stroke = "#28a745";
+    std::string text_color = "#111111";
     std::string line_color = "#333333";
     std::string background = "white";
   };

@@ -19,6 +19,7 @@ namespace xb::railroad {
     std::string label;
     std::string type_label; // optional: shown smaller below
     bool is_attribute = false;
+    bool required = true; // for attributes: required vs optional
   };
 
   /// A sequence of nodes rendered left-to-right.
