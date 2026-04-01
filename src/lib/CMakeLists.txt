@@ -27,6 +27,8 @@ add_library(xb STATIC
   test_harness_generator.cpp
   coverage_analyzer.cpp
   xinclude_reader.cpp
+  railroad.cpp
+  railroad_svg.cpp
   schema_fetcher.cpp
   rng_parser.cpp
   rng_simplify.cpp

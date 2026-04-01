@@ -528,6 +528,12 @@ target_link_libraries(xb_xinclude_reader_test
 target_compile_features(xb_xinclude_reader_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_xinclude_reader_test TARGET xb_xinclude_reader_test)
 
+add_executable(xb_railroad_test railroad_test.cpp)
+target_link_libraries(xb_railroad_test
+  PRIVATE Catch2::Catch2WithMain xb::xb)
+target_compile_features(xb_railroad_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_railroad_test TARGET xb_railroad_test)
+
 add_executable(xb_bes_value_generator_test
   bes_value_generator_test.cpp
   ${PROJECT_SOURCE_DIR}/src/lib/bes_value_generator.cpp)
