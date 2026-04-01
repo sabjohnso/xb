@@ -311,6 +311,52 @@
           "required": true
         }
       ]
+    },
+    {
+      "name": "railroad",
+      "doc": [
+        "Render schema content models as railroad diagrams in SVG.",
+        "Produces a visual representation of complex type structures showing sequences, choices, optional and repeating elements."
+      ],
+      "args": [
+        {
+          "kind": "option",
+          "names": ["type"],
+          "doc": ["Target complex type local name. If omitted, diagrams are generated for all complex types reachable from --element."],
+          "type": "string",
+          "docv": "NAME"
+        },
+        {
+          "kind": "option",
+          "names": ["element"],
+          "doc": ["Target root element local name. Used to discover reachable types."],
+          "type": "string",
+          "docv": "NAME"
+        },
+        {
+          "kind": "option",
+          "names": ["namespace"],
+          "doc": ["Target element/type namespace URI."],
+          "type": "string",
+          "docv": "URI"
+        },
+        {
+          "kind": "option",
+          "names": ["output", "o"],
+          "doc": ["Output SVG file (default: stdout)."],
+          "type": "file",
+          "docv": "FILE"
+        },
+        {
+          "kind": "positional",
+          "name": "schemas",
+          "doc": ["Schema files to process (XSD, RNG, RNC, or DTD)."],
+          "type": "file",
+          "docv": "SCHEMA",
+          "repeated": true,
+          "required": true
+        }
+      ]
     }
   ],
   "exits": [

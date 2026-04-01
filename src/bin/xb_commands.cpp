@@ -11,6 +11,8 @@
 #include <xb/expat_reader.hpp>
 #include <xb/naming.hpp>
 #include <xb/ostream_writer.hpp>
+#include <xb/railroad.hpp>
+#include <xb/railroad_svg.hpp>
 #include <xb/rng_compact_parser.hpp>
 #include <xb/rng_compact_writer.hpp>
 #include <xb/rng_parser.hpp>
@@ -978,6 +980,120 @@ namespace {
   }
 
   // ---------------------------------------------------------------------------
+  // railroad subcommand
+  // ---------------------------------------------------------------------------
+
+  int
+  run_railroad(const nlohmann::json& config) {
+    std::string type_name = config.value("type", "");
+    std::string element_name = config.value("element", "");
+    std::string namespace_uri = config.value("namespace", "");
+    std::string output_file = config.value("output", "");
+
+    std::vector<std::string> schema_files;
+    if (config.contains("schemas") && config["schemas"].is_array()) {
+      for (const auto& s : config["schemas"])
+        schema_files.push_back(s.get<std::string>());
+    }
+
+    if (schema_files.empty()) {
+      std::cerr << "xb railroad: no input files\n";
+      return exit_usage;
+    }
+
+    if (type_name.empty() && element_name.empty()) {
+      std::cerr
+          << "xb railroad: either --type or --element must be specified\n";
+      return exit_usage;
+    }
+
+    // Load & parse schemas
+    xb::schema_set schemas;
+    for (const auto& file : schema_files) {
+      std::string content = read_file(file);
+      try {
+        parse_schema_file(file, content, schemas);
+      } catch (const std::exception& e) {
+        std::cerr << "xb railroad: error parsing schema " << file << ": "
+                  << e.what() << "\n";
+        return exit_parse;
+      }
+    }
+
+    try {
+      schemas.resolve();
+    } catch (const std::exception& e) {
+      std::cerr << "xb railroad: schema resolution error: " << e.what() << "\n";
+      return exit_parse;
+    }
+
+    // Resolve namespace if not specified
+    std::string ns_uri = namespace_uri;
+    if (ns_uri.empty()) {
+      std::string target = type_name.empty() ? element_name : type_name;
+      for (const auto& s : schemas.schemas()) {
+        if (!type_name.empty()) {
+          for (const auto& ct : s.complex_types()) {
+            if (ct.name().local_name() == target) {
+              ns_uri = ct.name().namespace_uri();
+              break;
+            }
+          }
+        }
+        if (!element_name.empty() && ns_uri.empty()) {
+          for (const auto& e : s.elements()) {
+            if (e.name().local_name() == target) {
+              ns_uri = e.name().namespace_uri();
+              break;
+            }
+          }
+        }
+        if (!ns_uri.empty()) break;
+      }
+    }
+
+    // Build diagrams
+    std::vector<xb::railroad::diagram> diagrams;
+    try {
+      if (!type_name.empty()) {
+        diagrams.push_back(
+            xb::railroad::build_diagram(schemas, xb::qname{ns_uri, type_name}));
+      } else {
+        diagrams = xb::railroad::build_diagrams(
+            schemas, xb::qname{ns_uri, element_name});
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "xb railroad: diagram build error: " << e.what() << "\n";
+      return exit_codegen;
+    }
+
+    if (diagrams.empty()) {
+      std::cerr << "xb railroad: no diagrams generated\n";
+      return exit_codegen;
+    }
+
+    // Render SVG
+    try {
+      if (output_file.empty()) {
+        xb::railroad::render_svg(diagrams, std::cout);
+      } else {
+        std::ofstream out(output_file);
+        if (!out) {
+          std::cerr << "xb railroad: cannot write file: " << output_file
+                    << "\n";
+          return exit_io;
+        }
+        xb::railroad::render_svg(diagrams, out);
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "xb railroad: SVG render error: " << e.what() << "\n";
+      return exit_codegen;
+    }
+
+    return exit_success;
+  }
+
+  // ---------------------------------------------------------------------------
   // convert subcommand
   // ---------------------------------------------------------------------------
 
@@ -1202,6 +1318,7 @@ xb_cli::run(const nlohmann::json& config) {
   if (command == "sample-doc") return run_sample_doc(cmd_config);
   if (command == "fetch") return run_fetch(cmd_config);
   if (command == "convert") return run_convert(cmd_config);
+  if (command == "railroad") return run_railroad(cmd_config);
 
   std::cerr << "xb: unknown command: " << command << "\n";
   return exit_usage;
