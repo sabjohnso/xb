@@ -1,0 +1,94 @@
+site_name: xb
+site_description: XML databinding & binary encoding for C++20
+site_url: https://xb.dev
+
+repo_url: https://github.com/sbj/xb
+repo_name: xb
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quick-start.md
+    - CMake Integration: getting-started/cmake-integration.md
+  - Guides:
+    - XML Schema Code Generation: guides/xml-schema.md
+    - Type Mapping: guides/type-mapping.md
+    - Naming Styles: guides/naming-styles.md
+    - RELAX NG: guides/relax-ng.md
+    - DTD: guides/dtd.md
+    - Schematron: guides/schematron.md
+    - Schema Conversion: guides/schema-conversion.md
+    - Sample Documents: guides/sample-documents.md
+    - Railroad Diagrams: guides/railroad-diagrams.md
+  - Binary Encoding:
+    - Overview: binary-encoding/overview.md
+    - BES Format: binary-encoding/bes-format.md
+    - Generated Types: binary-encoding/generated-types.md
+    - Validation Levels: binary-encoding/validation-levels.md
+    - Protocol Framing: binary-encoding/protocol-framing.md
+    - BES-Only Workflow: binary-encoding/bes-only-workflow.md
+    - Examples: binary-encoding/examples.md
+  - Web Services:
+    - SOAP: web-services/soap.md
+    - WSDL: web-services/wsdl.md
+    - WS-Addressing: web-services/ws-addressing.md
+    - WS-Security: web-services/ws-security.md
+    - MTOM/XOP: web-services/mtom-xop.md
+  - Reference:
+    - CLI: reference/cli.md
+    - XSD Type Map: reference/xsd-type-map.md
+    - BES Schema: reference/bes-schema.md
+    - Exit Codes: reference/exit-codes.md
+  - Design:
+    - Architecture: design/architecture.md
+    - Design Decisions: design/design-decisions.md

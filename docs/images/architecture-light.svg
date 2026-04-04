@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 520" width="760" height="520">
+  <style>
+    .box { rx: 8; ry: 8; stroke-width: 2; }
+    .title { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; fill: #111; font-weight: bold; }
+    .item { font-family: 'SF Mono', 'Consolas', monospace; font-size: 11px; fill: #333; }
+    .conn { stroke: #888; stroke-width: 2; }
+  </style>
+  <defs><marker id="aL" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#888"/></marker></defs>
+
+  <!-- CLI -->
+  <rect class="box" x="235" y="10" width="290" height="72" fill="#fff3cd" stroke="#997700"/>
+  <text class="title" x="380" y="32" text-anchor="middle">CLI (xb)</text>
+  <text class="item" x="380" y="50" text-anchor="middle">generate, convert, fetch,</text>
+  <text class="item" x="380" y="66" text-anchor="middle">sample-doc, railroad, generate-xsd</text>
+
+  <!-- Connectors from CLI -->
+  <line class="conn" x1="310" y1="82" x2="140" y2="120" marker-end="url(#aL)"/>
+  <line class="conn" x1="380" y1="82" x2="380" y2="120" marker-end="url(#aL)"/>
+  <line class="conn" x1="450" y1="82" x2="620" y2="120" marker-end="url(#aL)"/>
+
+  <!-- Schema Parsers -->
+  <rect class="box" x="15" y="125" width="250" height="140" fill="#ddeeff" stroke="#336699"/>
+  <text class="title" x="140" y="148" text-anchor="middle">Schema Parsers</text>
+  <text class="item" x="30" y="170">schema_parser</text>
+  <text class="item" x="30" y="186">rng_xml_parser</text>
+  <text class="item" x="30" y="202">rng_compact_parser</text>
+  <text class="item" x="30" y="218">dtd_parser</text>
+  <text class="item" x="30" y="234">schematron_parser</text>
+  <text class="item" x="30" y="250">wsdl_parser, wsdl2_parser</text>
+
+  <!-- Resolvers -->
+  <rect class="box" x="290" y="125" width="180" height="140" fill="#ddeeff" stroke="#336699"/>
+  <text class="title" x="380" y="148" text-anchor="middle">Resolvers</text>
+  <text class="item" x="305" y="176">wsdl_resolver</text>
+  <text class="item" x="305" y="196">wsdl2_resolver</text>
+  <text class="item" x="305" y="216">bes_resolver</text>
+
+  <!-- Code Generation -->
+  <rect class="box" x="495" y="125" width="250" height="140" fill="#ddeeff" stroke="#336699"/>
+  <text class="title" x="620" y="148" text-anchor="middle">Code Generation</text>
+  <text class="item" x="510" y="170">codegen</text>
+  <text class="item" x="510" y="186">wsdl_codegen</text>
+  <text class="item" x="510" y="202">binary_codegen</text>
+  <text class="item" x="510" y="218">cpp_writer</text>
+  <text class="item" x="510" y="234">xsd_writer, rng_writer</text>
+  <text class="item" x="510" y="250">dtd_writer, doc_generator</text>
+
+  <!-- Connectors to Internal Models -->
+  <line class="conn" x1="140" y1="265" x2="140" y2="300" marker-end="url(#aL)"/>
+  <line class="conn" x1="380" y1="265" x2="380" y2="300" marker-end="url(#aL)"/>
+  <line class="conn" x1="620" y1="265" x2="620" y2="300" marker-end="url(#aL)"/>
+
+  <!-- Internal Models -->
+  <rect class="box" x="15" y="305" width="730" height="90" fill="#d4edda" stroke="#28a745"/>
+  <text class="title" x="380" y="328" text-anchor="middle">Internal Models</text>
+  <text class="item" x="40" y="352">schema (XSD IR)</text>
+  <text class="item" x="40" y="368">rng::pattern</text>
+  <text class="item" x="40" y="384">dtd::document, schematron::schema</text>
+  <text class="item" x="310" y="352">service_description</text>
+  <text class="item" x="310" y="368">encoding_model</text>
+  <text class="item" x="310" y="384">wsdl::document, wsdl2::description</text>
+  <text class="item" x="560" y="352">cpp_file (C++ IR)</text>
+  <text class="item" x="560" y="368">railroad::diagram</text>
+
+  <!-- Connector to XML I/O -->
+  <line class="conn" x1="380" y1="395" x2="380" y2="425" marker-end="url(#aL)"/>
+
+  <!-- XML I/O Layer -->
+  <rect class="box" x="15" y="430" width="730" height="78" fill="#f3e5f5" stroke="#8e24aa"/>
+  <text class="title" x="380" y="452" text-anchor="middle">XML I/O Layer</text>
+  <text class="item" x="40" y="474">xml_reader (abstract)</text>
+  <text class="item" x="40" y="490">expat_reader, xinclude_reader</text>
+  <text class="item" x="430" y="474">xml_writer (abstract)</text>
+  <text class="item" x="430" y="490">ostream_writer, any_element</text>
+</svg>

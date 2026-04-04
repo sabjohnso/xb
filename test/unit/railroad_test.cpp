@@ -595,3 +595,180 @@ TEST_CASE("Generated SVG is well-formed XML", "[railroad][svg]") {
   double h = std::stod(svg.substr(h_pos + 8));
   CHECK(h > 0);
 }
+
+// ---------------------------------------------------------------------------
+// Color scheme: for_scheme factory
+// ---------------------------------------------------------------------------
+
+TEST_CASE("for_scheme(light) returns light defaults", "[railroad][svg]") {
+  auto opts =
+      xb::railroad::svg_options::for_scheme(xb::railroad::color_scheme::light);
+  CHECK(opts.background == "white");
+  CHECK(opts.text_color == "#111111");
+  CHECK(opts.line_color == "#333333");
+}
+
+TEST_CASE("for_scheme(dark) returns dark-appropriate colors",
+          "[railroad][svg]") {
+  auto opts =
+      xb::railroad::svg_options::for_scheme(xb::railroad::color_scheme::dark);
+  // Dark background, light text/lines
+  CHECK(opts.background == "#1e1e1e");
+  CHECK(opts.text_color == "#d4d4d4");
+  CHECK(opts.line_color == "#cccccc");
+  // Fills should be darker variants
+  CHECK(opts.terminal_fill != "#ddeeff");
+  CHECK(opts.reference_fill != "#d4edda");
+  CHECK(opts.attribute_fill != "#fff3cd");
+}
+
+// ---------------------------------------------------------------------------
+// Transparent background
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Transparent background omits background rect", "[railroad][svg]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "x"}, xb::qname{xs_ns, "int"}},
+      xb::occurrence{1, 1});
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto diag = xb::railroad::build_diagram(ss, xb::qname{test_ns, "T"});
+
+  xb::railroad::svg_options opts;
+  opts.transparent_background = true;
+
+  std::ostringstream out;
+  xb::railroad::render_svg(diag, out);
+  std::string opaque_svg = out.str();
+
+  std::ostringstream out2;
+  xb::railroad::render_svg(diag, out2, opts);
+  std::string transparent_svg = out2.str();
+
+  // Opaque version has background rect, transparent does not
+  CHECK(contains(opaque_svg, "fill=\"white\""));
+  CHECK(!contains(transparent_svg, "<rect width=\"100%\""));
+}
+
+TEST_CASE("Transparent background with multiple diagrams", "[railroad][svg]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "x"}, xb::qname{xs_ns, "int"}},
+      xb::occurrence{1, 1});
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "A"}, std::move(parts)));
+
+  auto ss = make_schema_set(std::move(s));
+  std::vector<xb::railroad::diagram> diagrams;
+  diagrams.push_back(xb::railroad::build_diagram(ss, xb::qname{test_ns, "A"}));
+
+  xb::railroad::svg_options opts;
+  opts.transparent_background = true;
+
+  std::ostringstream out;
+  xb::railroad::render_svg(diagrams, out, opts);
+  std::string svg = out.str();
+
+  CHECK(!contains(svg, "<rect width=\"100%\""));
+  CHECK(contains(svg, "<svg"));
+  CHECK(contains(svg, "</svg>"));
+}
+
+// ---------------------------------------------------------------------------
+// Dark scheme: title and subtitle colors
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Dark scheme title uses text_color not default black",
+          "[railroad][svg]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "x"}, xb::qname{xs_ns, "int"}},
+      xb::occurrence{1, 1});
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "MyType"}, std::move(parts)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto diag = xb::railroad::build_diagram(ss, xb::qname{test_ns, "MyType"});
+
+  auto opts =
+      xb::railroad::svg_options::for_scheme(xb::railroad::color_scheme::dark);
+
+  std::ostringstream out;
+  xb::railroad::render_svg(diag, out, opts);
+  std::string svg = out.str();
+
+  // Title "MyType" should use the configured text_color
+  CHECK(contains(svg, "fill=\"" + opts.text_color + "\">MyType<"));
+}
+
+TEST_CASE("Dark scheme subtitle uses subtitle_color", "[railroad][svg]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "item"}, xb::qname{xs_ns, "string"}},
+      xb::occurrence{1, xb::unbounded});
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto diag = xb::railroad::build_diagram(ss, xb::qname{test_ns, "T"});
+
+  auto opts =
+      xb::railroad::svg_options::for_scheme(xb::railroad::color_scheme::dark);
+
+  std::ostringstream out;
+  xb::railroad::render_svg(diag, out, opts);
+  std::string svg = out.str();
+
+  // Count label "1..*" should use subtitle_color, not hardcoded #666666
+  CHECK(contains(svg, "fill=\"" + opts.subtitle_color + "\""));
+  CHECK(!contains(svg, "#666666"));
+  CHECK(!contains(svg, "#666\""));
+}
+
+// ---------------------------------------------------------------------------
+// Dark scheme + transparent: combined usage
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Dark scheme with transparent background", "[railroad][svg]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "name"}, xb::qname{xs_ns, "string"}},
+      xb::occurrence{1, 1});
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+
+  auto ss = make_schema_set(std::move(s));
+  auto diag = xb::railroad::build_diagram(ss, xb::qname{test_ns, "T"});
+
+  auto opts =
+      xb::railroad::svg_options::for_scheme(xb::railroad::color_scheme::dark);
+  opts.transparent_background = true;
+
+  std::ostringstream out;
+  xb::railroad::render_svg(diag, out, opts);
+  std::string svg = out.str();
+
+  // No background rect
+  CHECK(!contains(svg, "<rect width=\"100%\""));
+  // Uses dark text color
+  CHECK(contains(svg, opts.text_color));
+  CHECK(contains(svg, opts.line_color));
+}

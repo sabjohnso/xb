@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 200" width="380" height="200">
+  <style>
+    .outer { rx: 8; ry: 8; stroke-width: 2; }
+    .inner { rx: 4; ry: 4; stroke-width: 1.5; }
+    .title { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; fill: #111; font-weight: bold; }
+    .label { font-family: system-ui, -apple-system, sans-serif; font-size: 12px; fill: #111; }
+    .sublabel { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #666; font-style: italic; }
+  </style>
+  <!-- Outer box -->
+  <rect class="outer" x="10" y="10" width="360" height="180" fill="#f8f9fa" stroke="#666"/>
+  <text class="title" x="190" y="32" text-anchor="middle">MIME Multipart Message</text>
+  <!-- Part 1 -->
+  <rect class="inner" x="25" y="46" width="330" height="55" fill="#ddeeff" stroke="#336699"/>
+  <text class="label" x="40" y="66">Part 1: SOAP Envelope</text>
+  <text class="sublabel" x="50" y="86">&lt;xop:Include href="cid:1"/&gt;</text>
+  <!-- Part 2 -->
+  <rect class="inner" x="25" y="112" width="330" height="65" fill="#d4edda" stroke="#28a745"/>
+  <text class="label" x="40" y="132">Part 2: Binary attachment</text>
+  <text class="sublabel" x="50" y="150">Content-ID: &lt;1&gt;</text>
+  <text class="sublabel" x="50" y="166">[raw binary data]</text>
+</svg>

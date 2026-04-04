@@ -5,6 +5,7 @@ project(xb VERSION 0.16.0 LANGUAGES C CXX)
 option(xb_BUILD_TESTING "Build the xb tests" ${PROJECT_IS_TOP_LEVEL})
 option(xb_BUILD_EXAMPLES "Build the xb examples" ${PROJECT_IS_TOP_LEVEL})
 option(xb_BUILD_INTEGRATION_TESTS "Build the xb integration tests" OFF)
+option(xb_BUILD_DOCS "Build the documentation site" OFF)
 set(xb_CXX_STANDARD 20 CACHE STRING "C++ standard for xb")
 
 include(GNUInstallDirs)
@@ -43,6 +44,10 @@ endif()
 
 if(xb_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if(xb_BUILD_DOCS)
+  add_subdirectory(docs)
 endif()
 
 install(FILES schema/xb-typemap.xsd

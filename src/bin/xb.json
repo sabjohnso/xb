@@ -348,6 +348,19 @@
           "docv": "FILE"
         },
         {
+          "kind": "option",
+          "names": ["theme"],
+          "doc": ["Color scheme: light (default) or dark."],
+          "type": "string",
+          "docv": "THEME",
+          "default": "light"
+        },
+        {
+          "kind": "flag",
+          "names": ["transparent"],
+          "doc": ["Use a transparent background instead of a solid fill."]
+        },
+        {
           "kind": "positional",
           "name": "schemas",
           "doc": ["Schema files to process (XSD, RNG, RNC, or DTD)."],

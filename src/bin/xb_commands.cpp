@@ -989,6 +989,8 @@ namespace {
     std::string element_name = config.value("element", "");
     std::string namespace_uri = config.value("namespace", "");
     std::string output_file = config.value("output", "");
+    std::string theme = config.value("theme", "light");
+    bool transparent = config.value("transparent", false);
 
     std::vector<std::string> schema_files;
     if (config.contains("schemas") && config["schemas"].is_array()) {
@@ -1072,10 +1074,16 @@ namespace {
       return exit_codegen;
     }
 
+    // Build SVG options
+    auto scheme = (theme == "dark") ? xb::railroad::color_scheme::dark
+                                    : xb::railroad::color_scheme::light;
+    auto svg_opts = xb::railroad::svg_options::for_scheme(scheme);
+    svg_opts.transparent_background = transparent;
+
     // Render SVG
     try {
       if (output_file.empty()) {
-        xb::railroad::render_svg(diagrams, std::cout);
+        xb::railroad::render_svg(diagrams, std::cout, svg_opts);
       } else {
         std::ofstream out(output_file);
         if (!out) {
@@ -1083,7 +1091,7 @@ namespace {
                     << "\n";
           return exit_io;
         }
-        xb::railroad::render_svg(diagrams, out);
+        xb::railroad::render_svg(diagrams, out, svg_opts);
       }
     } catch (const std::exception& e) {
       std::cerr << "xb railroad: SVG render error: " << e.what() << "\n";

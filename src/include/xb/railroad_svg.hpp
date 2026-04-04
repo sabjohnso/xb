@@ -7,6 +7,8 @@
 
 namespace xb::railroad {
 
+  enum class color_scheme { light, dark };
+
   struct svg_options {
     double font_size = 14.0;
     double padding = 8.0;
@@ -21,8 +23,13 @@ namespace xb::railroad {
     std::string reference_fill = "#d4edda";
     std::string reference_stroke = "#28a745";
     std::string text_color = "#111111";
+    std::string subtitle_color = "#666666";
     std::string line_color = "#333333";
     std::string background = "white";
+    bool transparent_background = false;
+
+    static svg_options
+    for_scheme(color_scheme scheme);
   };
 
   /// Render a single diagram to SVG.

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 120" width="680" height="120">
+  <style>
+    .box { rx: 8; ry: 8; stroke-width: 2; }
+    .label { font-family: system-ui, -apple-system, sans-serif; font-size: 14px; fill: #111; }
+    .sublabel { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #666; }
+    .connector { font-family: system-ui, -apple-system, sans-serif; font-size: 20px; fill: #666; }
+  </style>
+  <!-- XSD Schema -->
+  <rect class="box" x="10" y="10" width="170" height="90" fill="#ddeeff" stroke="#336699"/>
+  <text class="label" x="95" y="42" text-anchor="middle" font-weight="bold">XSD Schema</text>
+  <text class="sublabel" x="95" y="62" text-anchor="middle">(data model)</text>
+  <!-- + -->
+  <text class="connector" x="210" y="62" text-anchor="middle">+</text>
+  <!-- BES File -->
+  <rect class="box" x="240" y="10" width="170" height="90" fill="#d4edda" stroke="#28a745"/>
+  <text class="label" x="325" y="42" text-anchor="middle" font-weight="bold">BES File</text>
+  <text class="sublabel" x="325" y="62" text-anchor="middle">(wire layout)</text>
+  <!-- arrow -->
+  <line x1="425" y1="55" x2="465" y2="55" stroke="#666" stroke-width="2" marker-end="url(#arrowL)"/>
+  <defs><marker id="arrowL" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M 0 0 L 8 4 L 0 8 Z" fill="#666"/></marker></defs>
+  <!-- Generated C++ -->
+  <rect class="box" x="475" y="10" width="195" height="90" fill="#fff3cd" stroke="#997700"/>
+  <text class="label" x="572" y="38" text-anchor="middle" font-weight="bold">Generated C++</text>
+  <text class="sublabel" x="572" y="58" text-anchor="middle">_view, _owned,</text>
+  <text class="sublabel" x="572" y="74" text-anchor="middle">_mutable_view</text>
+</svg>

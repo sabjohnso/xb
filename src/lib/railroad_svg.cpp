@@ -7,6 +7,24 @@
 
 namespace xb::railroad {
 
+  svg_options
+  svg_options::for_scheme(color_scheme scheme) {
+    svg_options opts;
+    if (scheme == color_scheme::dark) {
+      opts.terminal_fill = "#1a3a4a";
+      opts.terminal_stroke = "#5b9bd5";
+      opts.attribute_fill = "#3a3000";
+      opts.attribute_stroke = "#d4a017";
+      opts.reference_fill = "#1a3a2a";
+      opts.reference_stroke = "#4caf50";
+      opts.text_color = "#d4d4d4";
+      opts.subtitle_color = "#999999";
+      opts.line_color = "#cccccc";
+      opts.background = "#1e1e1e";
+    }
+    return opts;
+  }
+
   namespace {
 
     struct bounds {
@@ -347,7 +365,7 @@ namespace xb::railroad {
       // Type label below the box
       if (!t.type_label.empty()) {
         render_text(out, x + sz.width / 2, y + bh / 2 + opts.font_size * 0.55,
-                    t.type_label, opts, 0.75, "#888888");
+                    t.type_label, opts, 0.75, opts.subtitle_color);
       }
     }
 
@@ -367,7 +385,7 @@ namespace xb::railroad {
       std::string type_label = r.type_name.local_name();
       if (!type_label.empty()) {
         render_text(out, x + sz.width / 2, y + bh / 2 + opts.font_size * 0.55,
-                    type_label, opts, 0.75, "#888888");
+                    type_label, opts, 0.75, opts.subtitle_color);
       }
     }
 
@@ -558,7 +576,7 @@ namespace xb::railroad {
       // Count label below loop
       if (!rep.count_label.empty()) {
         render_text(out, (x + right_x) / 2, loop_y + opts.font_size * 0.8,
-                    rep.count_label, opts, 0.75, "#666666");
+                    rep.count_label, opts, 0.75, opts.subtitle_color);
       }
     }
 
@@ -592,7 +610,8 @@ namespace xb::railroad {
       // Title
       out << "<text x=\"" << x << "\" y=\"" << y << "\" font-family=\""
           << opts.font_family << "\" font-size=\"" << opts.font_size * 1.4
-          << "\" font-weight=\"bold\">" << xml_escape(diag.name) << "</text>\n";
+          << "\" font-weight=\"bold\" fill=\"" << opts.text_color << "\">"
+          << xml_escape(diag.name) << "</text>\n";
 
       double content_y = y + opts.line_height * 1.5;
       double center_y = content_y + sz.height / 2;
@@ -619,7 +638,8 @@ namespace xb::railroad {
 
         out << "<text x=\"" << attr_x << "\" y=\"" << attr_y
             << "\" font-family=\"" << opts.font_family << "\" font-size=\""
-            << opts.font_size * 0.85 << "\" fill=\"#666\">attributes:</text>\n";
+            << opts.font_size * 0.85 << "\" fill=\"" << opts.subtitle_color
+            << "\">attributes:</text>\n";
 
         attr_x += text_width("attributes: ", opts);
         for (const auto& attr : diag.attributes) {
@@ -655,8 +675,10 @@ namespace xb::railroad {
            "<path d=\"M 0 0 L 6 3 L 0 6 Z\" fill=\""
         << opts.line_color << "\"/></marker></defs>\n";
 
-    out << "<rect width=\"100%\" height=\"100%\" fill=\"" << opts.background
-        << "\"/>\n";
+    if (!opts.transparent_background) {
+      out << "<rect width=\"100%\" height=\"100%\" fill=\"" << opts.background
+          << "\"/>\n";
+    }
 
     render_diagram_body(out, diag, margin, margin + opts.font_size, opts);
 
@@ -686,8 +708,10 @@ namespace xb::railroad {
            "<path d=\"M 0 0 L 6 3 L 0 6 Z\" fill=\""
         << opts.line_color << "\"/></marker></defs>\n";
 
-    out << "<rect width=\"100%\" height=\"100%\" fill=\"" << opts.background
-        << "\"/>\n";
+    if (!opts.transparent_background) {
+      out << "<rect width=\"100%\" height=\"100%\" fill=\"" << opts.background
+          << "\"/>\n";
+    }
 
     double y = margin + opts.font_size;
     for (const auto& diag : diagrams) {
