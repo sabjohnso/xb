@@ -160,6 +160,9 @@ various configurations:
 
 | Example | Configuration |
 |---------|--------------|
+| `xsd-addressbook/` | XSD code generation, XML serialization round-trip |
+| `soap-envelope/` | SOAP 1.2 envelope, headers, pipeline, fault detection |
+| `wsdl-client/` | WSDL-style client with mock transport |
 | `bes-hello/` | Minimal BES, `HEADER_ONLY`, `BINARY_ONLY` |
 | `bes-market-data/` | Multiple message types, discriminant dispatch |
 | `bes-protocol-stack/` | Protocol framing with frame stacks |

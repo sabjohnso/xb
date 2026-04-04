@@ -127,12 +127,19 @@ xb defines an abstract transport interface for SOAP communication:
 
 class my_transport : public xb::service::transport {
 public:
-    auto send(const std::string& endpoint,
-              const std::string& action,
-              const std::string& body)
-        -> std::string override;
+    xb::soap::envelope
+    call(const std::string& endpoint,
+         const std::string& soap_action,
+         const xb::soap::envelope& request) override;
 };
 ```
 
 For HTTP transport with libcurl, see the built-in HTTP transport
 implementation.
+
+## Complete Example
+
+See `examples/wsdl-client/` for a working example that generates types from
+an XSD schema, implements a mock transport, builds a SOAP request using the
+service support utilities, sends it through the transport, and parses the
+typed response.

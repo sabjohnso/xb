@@ -91,19 +91,24 @@ The header pipeline processes SOAP headers through registered handlers:
 
 xb::soap::header_pipeline pipeline;
 
-// Register a handler — returns true if the header was processed
-pipeline.add([](const xb::soap::header_block& hdr) -> bool {
-    if (hdr.content.name().local_name() == "MyHeader") {
-        // Process header
+// Register a handler for a specific header element name
+pipeline.add_handler(
+    xb::qname{"urn:example:auth", "Token"},
+    [](const xb::soap::header_block& hdr) -> bool {
+        // Process the header
         return true;
-    }
-    return false;
-});
+    });
 
-// Process headers — throws soap_fault_exception for
+// Process all headers — throws soap_fault_exception for
 // unhandled mustUnderstand headers
-pipeline.process(env.headers);
+pipeline.process(env);
 ```
+
+## Complete Example
+
+See `examples/soap-envelope/` for a working example that builds a SOAP 1.2
+request, serializes it, parses it back, processes headers through the pipeline,
+and detects faults.
 
 ## Integration with WSDL
 

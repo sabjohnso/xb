@@ -259,3 +259,10 @@ Use `--list-outputs` to see what files will be generated without writing them:
 ```sh
 xb generate --list-outputs schema.xsd
 ```
+
+## Complete Example
+
+See `examples/xsd-addressbook/` for a working example that defines an
+addressbook schema with sequences, optional elements, repeating elements,
+attributes, and enumerations, then generates types, constructs values,
+serializes to XML, and verifies a round-trip.

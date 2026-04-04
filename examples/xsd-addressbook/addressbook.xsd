@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Addressbook schema demonstrating sequences, optional elements,
+     repeating elements, attributes, and enumerations. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://example.com/addressbook"
+           xmlns:ab="http://example.com/addressbook"
+           elementFormDefault="qualified">
+
+  <xs:simpleType name="PhoneKind">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="home"/>
+      <xs:enumeration value="work"/>
+      <xs:enumeration value="mobile"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="Phone">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="kind" type="ab:PhoneKind" use="required"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:complexType name="Address">
+    <xs:sequence>
+      <xs:element name="street" type="xs:string"/>
+      <xs:element name="city"   type="xs:string"/>
+      <xs:element name="state"  type="xs:string" minOccurs="0"/>
+      <xs:element name="zip"    type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="country" type="xs:string" default="US"/>
+  </xs:complexType>
+
+  <xs:complexType name="Person">
+    <xs:sequence>
+      <xs:element name="name"    type="xs:string"/>
+      <xs:element name="email"   type="xs:string" minOccurs="0"/>
+      <xs:element name="phone"   type="ab:Phone"  minOccurs="0"
+                  maxOccurs="unbounded"/>
+      <xs:element name="address" type="ab:Address" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:int" use="required"/>
+  </xs:complexType>
+
+  <xs:element name="addressbook">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="person" type="ab:Person"
+                    maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
