@@ -139,7 +139,8 @@ implementation.
 
 ## Complete Example
 
-See `examples/wsdl-client/` for a working example that generates types from
-an XSD schema, implements a mock transport, builds a SOAP request using the
-service support utilities, sends it through the transport, and parses the
-typed response.
+See `examples/wsdl-client/` for a working example with both client and
+server. The server dispatches by SOAPAction, parses typed requests, and
+returns typed responses (or SOAP faults). The client builds typed requests,
+sends them through an in-process transport, checks for faults, and parses
+typed responses.
