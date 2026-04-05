@@ -25,13 +25,12 @@ namespace {
     operator==(const price_request&) const = default;
   };
 
+  // Matches the convention of XSD-generated write functions:
+  // writes the inner content (not the wrapper element).
   void
-  write_price_request(xb::xml_writer& w, const price_request& req) {
-    w.start_element(xb::qname("urn:ex", "GetPrice"));
-    w.namespace_declaration("ns", "urn:ex");
+  write_price_request(const price_request& req, xb::xml_writer& w) {
     w.start_element(xb::qname("urn:ex", "ticker"));
     w.characters(req.ticker);
-    w.end_element();
     w.end_element();
   }
 
@@ -71,8 +70,8 @@ TEST_CASE("wsdl support: make/parse body element round-trip",
 
   auto elem =
       svc::make_body_element(xb::qname("urn:ex", "GetPrice"), original,
-                             [](xb::xml_writer& w, const price_request& r) {
-                               write_price_request(w, r);
+                             [](const price_request& r, xb::xml_writer& w) {
+                               write_price_request(r, w);
                              });
 
   CHECK(elem.name().local_name() == "GetPrice");

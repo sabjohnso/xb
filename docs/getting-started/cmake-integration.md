@@ -27,6 +27,8 @@ consuming target only needs to link `my_types`.
 | `TARGET`  | Yes | Name of the library target to create |
 | `SCHEMAS` | No* | XSD schema files to process |
 | `ENCODING` | No* | BES file for binary encoding |
+| `WSDL` | No* | WSDL file for client/server code generation |
+| `WSDL_MODE` | No | `client`, `server`, or `both` (default) |
 | `MODE` | No | `HEADER_ONLY` (single .hpp), `FILE_PER_TYPE`, or `SPLIT` (default) |
 | `BINARY_ONLY` | No | Suppress XML type generation (BES-only mode) |
 | `TYPE_MAP` | No | Custom type mapping file |
@@ -36,7 +38,7 @@ consuming target only needs to link `my_types`.
 | `FIELD_STYLE` | No | Naming style for fields |
 | `ENUM_STYLE` | No | Naming style for enum values |
 
-*At least one of `SCHEMAS` or `ENCODING` is required.
+*At least one of `SCHEMAS`, `ENCODING`, or `WSDL` is required.
 
 ### Output Modes
 
@@ -101,6 +103,30 @@ xb_add_library(
 xb infers XSD types from field properties and generates a synthetic schema
 internally.
 
+### WSDL Code Generation
+
+Generate client stubs, server skeletons, and XSD types from a WSDL file:
+
+```cmake
+xb_add_library(
+  TARGET weather_service
+  WSDL ${CMAKE_CURRENT_SOURCE_DIR}/weather.wsdl
+  MODE HEADER_ONLY
+  NAMESPACE_MAP "http://example.com/weather=weather")
+```
+
+This produces type headers, a `*_client.hpp` with typed methods per
+operation, and a `*_server.hpp` with an interface and dispatcher. Use
+`WSDL_MODE` to generate only client or server code:
+
+```cmake
+xb_add_library(
+  TARGET weather_client_only
+  WSDL ${CMAKE_CURRENT_SOURCE_DIR}/weather.wsdl
+  WSDL_MODE client
+  MODE HEADER_ONLY)
+```
+
 ## `xb_generate_cpp` (Low-Level)
 
 For more control over the generation process:
@@ -162,7 +188,7 @@ various configurations:
 |---------|--------------|
 | `xsd-addressbook/` | XSD code generation, XML serialization round-trip |
 | `soap-envelope/` | SOAP 1.2 envelope, headers, pipeline, fault detection |
-| `wsdl-client/` | WSDL-style client with mock transport |
+| `wsdl-client/` | WSDL client/server with generated stubs over HTTP |
 | `bes-hello/` | Minimal BES, `HEADER_ONLY`, `BINARY_ONLY` |
 | `bes-market-data/` | Multiple message types, discriminant dispatch |
 | `bes-protocol-stack/` | Protocol framing with frame stacks |

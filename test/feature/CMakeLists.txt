@@ -34,6 +34,8 @@ target_compile_features(xb_cli_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 target_compile_definitions(xb_cli_test PRIVATE
   XB_CLI=$<TARGET_FILE:xb::cli>
   XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema)
+# The test invokes the xb CLI at runtime — ensure it is built first.
+add_dependencies(xb_cli_test xb_cli)
 ctest_deps_add_test(NAME xb_cli_test TARGET xb_cli_test)
 
 xb_generate_cpp(
@@ -299,4 +301,7 @@ target_compile_definitions(xb_cmake_fetch_install_test PRIVATE
   XB_BUILD_DIR=${CMAKE_BINARY_DIR}
   XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema
   XB_BUILD_CONFIG=$<CONFIG>)
+# The test runs cmake --install which needs all targets (including xb_cli)
+# to be built before the install step can rewrite RPATHs.
+add_dependencies(xb_cmake_fetch_install_test xb_cli xb)
 ctest_deps_add_test(NAME xb_cmake_fetch_install_test TARGET xb_cmake_fetch_install_test)

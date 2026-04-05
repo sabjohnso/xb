@@ -33,6 +33,11 @@
 #include <xb/wire/encoding_resolver.hpp>
 #include <xb/wire/layout_engine.hpp>
 #include <xb/wire/layout_validation.hpp>
+#include <xb/wsdl2_parser.hpp>
+#include <xb/wsdl2_resolver.hpp>
+#include <xb/wsdl_codegen.hpp>
+#include <xb/wsdl_parser.hpp>
+#include <xb/wsdl_resolver.hpp>
 #include <xb/xsd_to_rng.hpp>
 #include <xb/xsd_writer.hpp>
 
@@ -1310,6 +1315,191 @@ namespace {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // generate-wsdl subcommand
+  // ---------------------------------------------------------------------------
+
+  int
+  run_generate_wsdl(const nlohmann::json& config) {
+    std::string wsdl_file = config.value("wsdl", "");
+    if (wsdl_file.empty()) {
+      std::cerr << "xb generate-wsdl: no input file\n";
+      return exit_usage;
+    }
+
+    std::string output_dir = config.value("output-dir", ".");
+    std::string type_map_file = config.value("type-map", "");
+    std::string wsdl_mode = config.value("wsdl-mode", "both");
+    bool no_format = config.value("no-format", false);
+
+    std::unordered_map<std::string, std::string> namespace_map;
+    if (config.contains("namespace-map") &&
+        config["namespace-map"].is_array()) {
+      for (const auto& pair : config["namespace-map"]) {
+        namespace_map[pair[0].get<std::string>()] = pair[1].get<std::string>();
+      }
+    }
+
+    // Parse naming styles
+    auto parse_naming_style = [](const std::string& s) -> xb::naming_style {
+      if (s == "pascal") return xb::naming_style::pascal_case;
+      if (s == "camel") return xb::naming_style::camel_case;
+      if (s == "upper-snake") return xb::naming_style::upper_snake;
+      if (s == "original") return xb::naming_style::original;
+      return xb::naming_style::snake_case;
+    };
+
+    xb::codegen_options codegen_opts;
+    codegen_opts.namespace_map = namespace_map;
+    codegen_opts.mode = xb::output_mode::header_only;
+    codegen_opts.naming.type_style =
+        parse_naming_style(config.value("type-style", "snake"));
+    codegen_opts.naming.field_style =
+        parse_naming_style(config.value("field-style", "snake"));
+    codegen_opts.naming.enum_style =
+        parse_naming_style(config.value("enum-style", "snake"));
+
+    // Load type map
+    auto types = xb::type_map::defaults();
+    if (!type_map_file.empty()) {
+      std::string tm_xml = read_file(type_map_file);
+      xb::expat_reader tm_reader(tm_xml);
+      tm_reader.read();
+      auto override = xb::type_map::load(tm_reader);
+      types.merge(override);
+    }
+
+    // Read WSDL file
+    std::string wsdl_xml = read_file(wsdl_file);
+
+    // Detect WSDL version by root element namespace and parse
+    xb::service::service_description service_desc;
+    xb::schema_set* schemas_ptr = nullptr;
+    xb::wsdl::document wsdl_doc;
+    xb::wsdl2::description wsdl2_doc;
+
+    try {
+      // Peek at root element to detect WSDL version
+      bool is_wsdl2 = false;
+      {
+        xb::expat_reader peek(wsdl_xml);
+        while (peek.read()) {
+          if (peek.node_type() == xb::xml_node_type::start_element) {
+            is_wsdl2 =
+                peek.name().namespace_uri() == "http://www.w3.org/ns/wsdl";
+            break;
+          }
+        }
+      }
+
+      // Parse with the appropriate parser (each advances to root internally)
+      xb::expat_reader reader(wsdl_xml);
+
+      if (is_wsdl2) {
+        xb::wsdl2_parser parser;
+        wsdl2_doc = parser.parse(reader);
+        wsdl2_doc.types.resolve();
+        schemas_ptr = &wsdl2_doc.types;
+
+        xb::wsdl2_resolver resolver;
+        service_desc = resolver.resolve(wsdl2_doc, types, codegen_opts);
+      } else {
+        xb::wsdl_parser parser;
+        wsdl_doc = parser.parse(reader);
+        wsdl_doc.types.resolve();
+        schemas_ptr = &wsdl_doc.types;
+
+        xb::wsdl_resolver resolver;
+        service_desc = resolver.resolve(wsdl_doc, types, codegen_opts);
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "xb generate-wsdl: error parsing WSDL: " << e.what() << "\n";
+      return exit_parse;
+    }
+
+    // Locate .clang-format for formatting
+    std::string style_file;
+    if (!no_format) {
+      auto dir = fs::path(wsdl_file).parent_path();
+      while (!dir.empty()) {
+        auto cf = dir / ".clang-format";
+        if (fs::exists(cf)) {
+          style_file = cf.string();
+          break;
+        }
+        auto parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+      }
+    }
+
+    fs::create_directories(output_dir);
+
+    xb::cpp_writer writer;
+
+    // Generate XSD types from inline schemas
+    try {
+      xb::codegen gen(*schemas_ptr, types, codegen_opts);
+      auto type_files = gen.generate();
+      for (const auto& file : type_files) {
+        auto path = fs::path(output_dir) / file.filename;
+        std::ofstream out(path);
+        if (!out) {
+          std::cerr << "xb generate-wsdl: cannot write file: " << path.string()
+                    << "\n";
+          return exit_io;
+        }
+        std::string code = writer.write(file);
+        if (!no_format)
+          code = xb::format_cpp_code(code, path.string(), style_file);
+        out << code;
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "xb generate-wsdl: type generation error: " << e.what()
+                << "\n";
+      return exit_codegen;
+    }
+
+    // Generate WSDL client/server code
+    try {
+      xb::wsdl_codegen codegen;
+      xb::wsdl_codegen_options wsdl_opts;
+      wsdl_opts.namespace_map = namespace_map;
+
+      std::vector<xb::cpp_file> wsdl_files;
+
+      if (wsdl_mode == "client" || wsdl_mode == "both") {
+        auto client_files = codegen.generate_client(service_desc, wsdl_opts);
+        wsdl_files.insert(wsdl_files.end(), client_files.begin(),
+                          client_files.end());
+      }
+      if (wsdl_mode == "server" || wsdl_mode == "both") {
+        auto server_files = codegen.generate_server(service_desc, wsdl_opts);
+        wsdl_files.insert(wsdl_files.end(), server_files.begin(),
+                          server_files.end());
+      }
+
+      for (const auto& file : wsdl_files) {
+        auto path = fs::path(output_dir) / file.filename;
+        std::ofstream out(path);
+        if (!out) {
+          std::cerr << "xb generate-wsdl: cannot write file: " << path.string()
+                    << "\n";
+          return exit_io;
+        }
+        std::string code = writer.write(file);
+        if (!no_format)
+          code = xb::format_cpp_code(code, path.string(), style_file);
+        out << code;
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "xb generate-wsdl: codegen error: " << e.what() << "\n";
+      return exit_codegen;
+    }
+
+    return exit_success;
+  }
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -1327,6 +1517,7 @@ xb_cli::run(const nlohmann::json& config) {
   if (command == "fetch") return run_fetch(cmd_config);
   if (command == "convert") return run_convert(cmd_config);
   if (command == "railroad") return run_railroad(cmd_config);
+  if (command == "generate-wsdl") return run_generate_wsdl(cmd_config);
 
   std::cerr << "xb: unknown command: " << command << "\n";
   return exit_usage;

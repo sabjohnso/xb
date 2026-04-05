@@ -4,6 +4,83 @@ xb parses WSDL 1.1 and WSDL 2.0 service definitions, resolves them to a
 version-independent service IR, and generates C++ client stubs and server
 skeletons.
 
+## Code Generation
+
+The `generate-wsdl` subcommand produces three sets of files from a single
+WSDL file:
+
+1. **XSD types** — structs, enums, and read/write functions from the
+   inline `<types>` schemas
+2. **Client stubs** — a `*_client` class per port with typed methods for
+   each operation
+3. **Server skeletons** — a `*_interface` abstract class and a
+   `*_dispatcher` that routes SOAP requests to the implementation
+
+### CLI
+
+```sh
+xb generate-wsdl -o gen/ \
+    -n "http://example.com/weather=weather" \
+    weather.wsdl
+```
+
+### CMake
+
+```cmake
+xb_add_library(
+  TARGET weather_service
+  WSDL ${CMAKE_CURRENT_SOURCE_DIR}/weather.wsdl
+  MODE HEADER_ONLY
+  NAMESPACE_MAP "http://example.com/weather=weather")
+```
+
+### Generated Client
+
+The generated client class wraps SOAP envelope construction, transport
+calls, fault checking, and response parsing:
+
+```cpp
+#include <weather.hpp>
+#include <weather_port_client.hpp>
+
+xb::service::http_transport transport;
+xb::client::weather_port_client client(transport, "http://localhost:8080/");
+
+weather::get_temperature req;
+req.city = "Springfield";
+auto resp = client.get_temperature(req);
+std::cout << resp.temperature << " " << resp.unit << "\n";
+```
+
+### Generated Server
+
+Implement the pure virtual interface, wire it to the dispatcher, and
+serve via `http_listener`:
+
+```cpp
+#include <weather.hpp>
+#include <weather_port_server.hpp>
+
+class my_weather : public xb::server::weather_port_interface {
+  weather::get_temperature_response
+  get_temperature(const weather::get_temperature& req) override {
+      weather::get_temperature_response resp;
+      resp.temperature = lookup(req.city);
+      resp.unit = "F";
+      resp.city = req.city;
+      return resp;
+  }
+};
+
+my_weather impl;
+xb::server::weather_port_dispatcher dispatcher(impl);
+xb::service::http_listener server({.port = 8080});
+server.serve([&](const std::string& action,
+                 const xb::soap::envelope& request) {
+    return dispatcher.dispatch(action, request);
+});
+```
+
 ## Supported Versions
 
 | Version | Namespace | Parser |

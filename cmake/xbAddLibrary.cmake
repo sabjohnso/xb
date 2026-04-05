@@ -51,7 +51,7 @@ runtime linked automatically.
 function(xb_add_library)
   cmake_parse_arguments(XB_LIB
     "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT;BINARY_ONLY"
-    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL;XSD_OUTPUT"
+    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL;XSD_OUTPUT;WSDL;WSDL_MODE"
     "SCHEMAS;NAMESPACE_MAP"
     ${ARGN})
 
@@ -60,12 +60,12 @@ function(xb_add_library)
     message(FATAL_ERROR "xb_add_library: TARGET is required")
   endif()
 
-  if(NOT XB_LIB_SCHEMAS)
+  if(NOT XB_LIB_SCHEMAS AND NOT XB_LIB_WSDL)
     if(XB_LIB_ENCODING AND XB_LIB_BINARY_ONLY)
       # BES-only mode: schemas are synthesized from BES
     else()
       message(FATAL_ERROR
-        "xb_add_library: SCHEMAS is required (unless ENCODING + BINARY_ONLY)")
+        "xb_add_library: SCHEMAS or WSDL is required (unless ENCODING + BINARY_ONLY)")
     endif()
   endif()
 
@@ -142,6 +142,14 @@ function(xb_add_library)
 
   if(XB_LIB_XSD_OUTPUT)
     list(APPEND gen_args XSD_OUTPUT "${XB_LIB_XSD_OUTPUT}")
+  endif()
+
+  if(XB_LIB_WSDL)
+    list(APPEND gen_args WSDL "${XB_LIB_WSDL}")
+  endif()
+
+  if(XB_LIB_WSDL_MODE)
+    list(APPEND gen_args WSDL_MODE "${XB_LIB_WSDL_MODE}")
   endif()
 
   xb_generate_cpp(${gen_args})

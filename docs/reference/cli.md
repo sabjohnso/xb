@@ -185,6 +185,52 @@ xb railroad --element root schema.rnc > diagram.svg
 
 ---
 
+### `generate-wsdl`
+
+Generate C++ client and server code from a WSDL file.
+
+```
+xb generate-wsdl [OPTIONS] WSDL
+```
+
+Parses a WSDL 1.1 or 2.0 file and produces:
+
+- XSD type headers (from inline `<types>` schemas)
+- Client stub headers (`*_client.hpp`) with typed methods per operation
+- Server skeleton headers (`*_server.hpp`) with interface + dispatcher classes
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--output-dir` | `-o` | `.` | Output directory |
+| `--type-map` | `-t` | -- | Type map override file |
+| `--namespace-map` | `-n` | -- | Namespace mapping (URI=NS). Repeatable |
+| `--wsdl-mode` | -- | `both` | What to generate: `client`, `server`, or `both` |
+| `--header-only` | -- | -- | Generate header-only output |
+| `--type-style` | -- | `snake` | Naming style for types |
+| `--field-style` | -- | `snake` | Naming style for fields |
+| `--enum-style` | -- | `snake` | Naming style for enum values |
+| `--no-format` | -- | -- | Skip clang-format post-processing |
+
+**Positional:** `WSDL` — WSDL file to process (`.wsdl`).
+
+WSDL version is auto-detected from the root element namespace.
+
+#### Examples
+
+```sh
+# Generate client + server + types from WSDL
+xb generate-wsdl -o gen/ service.wsdl
+
+# Client only, with namespace mapping
+xb generate-wsdl --wsdl-mode client \
+    -n "http://example.com/ns=myns" -o gen/ service.wsdl
+
+# Server only
+xb generate-wsdl --wsdl-mode server -o gen/ service.wsdl
+```
+
+---
+
 ## Exit Codes
 
 | Code | Meaning |

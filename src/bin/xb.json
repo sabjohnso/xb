@@ -370,6 +370,94 @@
           "required": true
         }
       ]
+    },
+    {
+      "name": "generate-wsdl",
+      "doc": [
+        "Generate C++ client and server code from a WSDL file.",
+        "Parses a WSDL 1.1 or 2.0 definition and produces XSD types, client stubs, and server skeletons."
+      ],
+      "args": [
+        {
+          "kind": "option",
+          "names": ["output-dir", "o"],
+          "doc": ["Output directory for generated files."],
+          "type": "dir",
+          "docv": "DIR",
+          "default": "."
+        },
+        {
+          "kind": "option",
+          "names": ["type-map", "t"],
+          "doc": ["Type map override file (xb-typemap.xml)."],
+          "type": "file",
+          "docv": "FILE"
+        },
+        {
+          "kind": "option",
+          "names": ["namespace-map", "n"],
+          "doc": ["Namespace mapping (URI=C++ namespace). May be repeated."],
+          "type": {
+            "pair": {
+              "first": "string",
+              "second": "string",
+              "separator": "="
+            }
+          },
+          "docv": "URI=NS",
+          "repeated": true
+        },
+        {
+          "kind": "option",
+          "names": ["wsdl-mode"],
+          "doc": ["What to generate: client, server, or both (default)."],
+          "type": "string",
+          "docv": "MODE",
+          "default": "both"
+        },
+        {
+          "kind": "flag",
+          "names": ["header-only"],
+          "doc": ["Generate header-only output."]
+        },
+        {
+          "kind": "option",
+          "names": ["type-style"],
+          "doc": ["Naming style for types: snake, pascal, camel, upper-snake, original."],
+          "type": "string",
+          "docv": "STYLE",
+          "default": "snake"
+        },
+        {
+          "kind": "option",
+          "names": ["field-style"],
+          "doc": ["Naming style for fields."],
+          "type": "string",
+          "docv": "STYLE",
+          "default": "snake"
+        },
+        {
+          "kind": "option",
+          "names": ["enum-style"],
+          "doc": ["Naming style for enum values."],
+          "type": "string",
+          "docv": "STYLE",
+          "default": "snake"
+        },
+        {
+          "kind": "flag",
+          "names": ["no-format"],
+          "doc": ["Skip clang-format post-processing of generated files."]
+        },
+        {
+          "kind": "positional",
+          "name": "wsdl",
+          "doc": ["WSDL file to process (.wsdl)."],
+          "type": "file",
+          "docv": "WSDL",
+          "required": true
+        }
+      ]
     }
   ],
   "exits": [

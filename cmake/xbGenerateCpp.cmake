@@ -79,7 +79,7 @@ set(_xb_cmake_dir "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL "")
 function(xb_generate_cpp)
   cmake_parse_arguments(XB_GEN
     "GENERATE_DOCS;SEPARATE_FWD_HEADER;NO_FORMAT;BINARY_ONLY"
-    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL;XSD_OUTPUT"
+    "TARGET;OUTPUT_DIR;TYPE_MAP;MODE;ENCAPSULATION;HEADER_SUFFIX;SOURCE_SUFFIX;TYPE_STYLE;FIELD_STYLE;ENUM_STYLE;ENCODING;VALIDATION_LEVEL;XSD_OUTPUT;WSDL;WSDL_MODE"
     "SCHEMAS;NAMESPACE_MAP"
     ${ARGN})
 
@@ -88,11 +88,11 @@ function(xb_generate_cpp)
     message(FATAL_ERROR "xb_generate_cpp: TARGET is required")
   endif()
 
-  if(NOT XB_GEN_SCHEMAS)
+  if(NOT XB_GEN_SCHEMAS AND NOT XB_GEN_WSDL)
     if(XB_GEN_ENCODING AND XB_GEN_BINARY_ONLY)
       # BES-only mode: schemas are synthesized from BES
     else()
-      message(FATAL_ERROR "xb_generate_cpp: SCHEMAS is required (unless ENCODING + BINARY_ONLY)")
+      message(FATAL_ERROR "xb_generate_cpp: SCHEMAS or WSDL is required (unless ENCODING + BINARY_ONLY)")
     endif()
   endif()
 
@@ -134,9 +134,16 @@ function(xb_generate_cpp)
   # --- Build the command line ---
   # Options are collected into xb_cmd_opts (without -o and schemas) so
   # the stamp-file path can redirect output to a per-config temp dir.
-  set(xb_cmd_prefix "$<TARGET_FILE:${xb_exe}>" generate)
-  if(mode_flag)
-    list(APPEND xb_cmd_prefix ${mode_flag})
+  if(XB_GEN_WSDL)
+    set(xb_cmd_prefix "$<TARGET_FILE:${xb_exe}>" generate-wsdl)
+    if(mode_flag)
+      list(APPEND xb_cmd_prefix ${mode_flag})
+    endif()
+  else()
+    set(xb_cmd_prefix "$<TARGET_FILE:${xb_exe}>" generate)
+    if(mode_flag)
+      list(APPEND xb_cmd_prefix ${mode_flag})
+    endif()
   endif()
 
   set(xb_cmd_opts)
@@ -196,11 +203,23 @@ function(xb_generate_cpp)
     list(APPEND xb_cmd_opts --binary-only)
   endif()
 
-  set(xb_cmd ${xb_cmd_prefix} -o "${XB_GEN_OUTPUT_DIR}"
-    ${xb_cmd_opts} ${XB_GEN_SCHEMAS})
+  if(XB_GEN_WSDL AND XB_GEN_WSDL_MODE)
+    list(APPEND xb_cmd_opts --wsdl-mode "${XB_GEN_WSDL_MODE}")
+  endif()
+
+  if(XB_GEN_WSDL)
+    set(xb_cmd ${xb_cmd_prefix} -o "${XB_GEN_OUTPUT_DIR}"
+      ${xb_cmd_opts} "${XB_GEN_WSDL}")
+  else()
+    set(xb_cmd ${xb_cmd_prefix} -o "${XB_GEN_OUTPUT_DIR}"
+      ${xb_cmd_opts} ${XB_GEN_SCHEMAS})
+  endif()
 
   # --- Collect dependencies for the custom command ---
   set(xb_deps ${XB_GEN_SCHEMAS})
+  if(XB_GEN_WSDL)
+    list(APPEND xb_deps "${XB_GEN_WSDL}")
+  endif()
   if(XB_GEN_TYPE_MAP)
     list(APPEND xb_deps "${XB_GEN_TYPE_MAP}")
   endif()
@@ -327,8 +346,13 @@ function(xb_generate_cpp)
     set(stamp_dir "${CMAKE_BINARY_DIR}/_xb_gen_stamps/${XB_GEN_TARGET}/$<CONFIG>")
     set(stamp "${stamp_dir}/.xb_generate.stamp")
     set(tmp_dir "${CMAKE_BINARY_DIR}/_xb_gen_tmp/${XB_GEN_TARGET}/$<CONFIG>")
-    set(xb_cmd_tmp ${xb_cmd_prefix} -o "${tmp_dir}"
-      ${xb_cmd_opts} ${XB_GEN_SCHEMAS})
+    if(XB_GEN_WSDL)
+      set(xb_cmd_tmp ${xb_cmd_prefix} -o "${tmp_dir}"
+        ${xb_cmd_opts} "${XB_GEN_WSDL}")
+    else()
+      set(xb_cmd_tmp ${xb_cmd_prefix} -o "${tmp_dir}"
+        ${xb_cmd_opts} ${XB_GEN_SCHEMAS})
+    endif()
     set(copy_script "${_xb_cmake_dir}/xbCopyIfDifferent.cmake")
 
     add_custom_command(

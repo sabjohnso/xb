@@ -29,7 +29,11 @@ namespace xb::service {
   make_body_element(const qname& name, const T& value, WriteFn write_fn) {
     std::ostringstream os;
     ostream_writer writer(os);
-    write_fn(writer, value);
+    writer.start_element(name);
+    if (!name.namespace_uri().empty())
+      writer.namespace_declaration("", name.namespace_uri());
+    write_fn(value, writer);
+    writer.end_element();
     std::string xml = os.str();
 
     expat_reader reader(xml);
