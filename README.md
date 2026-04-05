@@ -312,6 +312,27 @@ find_package(xb REQUIRED)
 target_link_libraries(my_target PRIVATE xb::header)
 ```
 
+## Documentation
+
+xb includes a full documentation site built with
+[MkDocs Material](https://squidfunk.github.io/mkdocs-material/). To build
+and preview it locally:
+
+```sh
+pip install mkdocs-material
+cmake --preset default -Dxb_BUILD_DOCS=ON
+cmake --build build --config Release --target xb_docs
+```
+
+The static site is generated in `build/docs/site/`. To launch a live
+preview server with auto-reload:
+
+```sh
+cmake --build build --config Release --target xb_docs_serve
+```
+
+This serves the documentation at `http://127.0.0.1:8000/`.
+
 ## Project Layout
 
 ```
