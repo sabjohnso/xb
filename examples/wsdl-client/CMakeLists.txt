@@ -1,8 +1,8 @@
 # WSDL Client/Server example
 #
 # Demonstrates a SOAP service with both client and server sides using
-# xb-generated types, the SOAP support utilities, and an in-process
-# transport that connects them.
+# xb-generated types, http_listener for the server, and http_transport
+# for the client, communicating over HTTP on localhost.
 
 xb_add_library(
   TARGET weather_types

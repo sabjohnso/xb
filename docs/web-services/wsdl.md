@@ -134,13 +134,33 @@ public:
 };
 ```
 
-For HTTP transport with libcurl, see the built-in HTTP transport
-implementation.
+For HTTP transport with libcurl, see [HTTP Transport](http-transport.md).
+
+## Hosting a SOAP Service
+
+Use `http_listener` to host a SOAP service. The handler function receives
+a SOAPAction and request envelope, and returns a response envelope:
+
+```cpp
+#include <xb/http_listener.hpp>
+
+xb::service::http_listener server({.port = 8080});
+
+server.serve([&](const std::string& action,
+                 const xb::soap::envelope& request) {
+    // Dispatch by SOAPAction, parse typed request, return typed response
+    return dispatcher.dispatch(action, request);
+});
+```
+
+The listener automatically handles SOAP version detection, HTTP error
+responses, and exception-to-fault conversion. See
+[HTTP Listener](http-listener.md) for full details.
 
 ## Complete Example
 
 See `examples/wsdl-client/` for a working example with both client and
-server. The server dispatches by SOAPAction, parses typed requests, and
-returns typed responses (or SOAP faults). The client builds typed requests,
-sends them through an in-process transport, checks for faults, and parses
-typed responses.
+server communicating over HTTP on localhost. The server dispatches by
+SOAPAction, parses typed requests, and returns typed responses (or SOAP
+faults). The client uses `http_transport` to make calls, checks for
+faults, and parses typed responses.

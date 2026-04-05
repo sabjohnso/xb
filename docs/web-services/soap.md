@@ -110,6 +110,15 @@ See `examples/soap-envelope/` for a working example that builds a SOAP 1.2
 request, serializes it, parses it back, processes headers through the pipeline,
 and detects faults.
 
+## Transport
+
+xb provides both client and server HTTP transports for SOAP:
+
+- [HTTP Transport](http-transport.md) — libcurl-based client for making SOAP
+  calls over HTTP/HTTPS with TLS, timeouts, and redirect handling
+- [HTTP Listener](http-listener.md) — POSIX socket-based server for hosting
+  SOAP services with automatic fault generation and SOAP version detection
+
 ## Integration with WSDL
 
 When using WSDL-generated client stubs, SOAP envelopes are managed

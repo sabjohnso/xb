@@ -81,6 +81,8 @@ nav:
   - Web Services:
     - SOAP: web-services/soap.md
     - WSDL: web-services/wsdl.md
+    - HTTP Transport: web-services/http-transport.md
+    - HTTP Listener: web-services/http-listener.md
     - WS-Addressing: web-services/ws-addressing.md
     - WS-Security: web-services/ws-security.md
     - MTOM/XOP: web-services/mtom-xop.md

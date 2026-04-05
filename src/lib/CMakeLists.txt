@@ -65,6 +65,13 @@ if(CURL_FOUND)
   target_compile_definitions(xb PUBLIC XB_HAS_CURL)
 endif()
 
+include(CheckIncludeFileCXX)
+check_include_file_cxx("sys/socket.h" XB_HAS_SYS_SOCKET)
+if(XB_HAS_SYS_SOCKET)
+  target_sources(xb PRIVATE http_listener.cpp)
+  target_compile_definitions(xb PUBLIC XB_HAS_POSIX_SOCKETS)
+endif()
+
 if(OPENSSL_FOUND)
   target_sources(xb PRIVATE wss_crypto.cpp)
   target_link_libraries(xb PRIVATE $<BUILD_INTERFACE:OpenSSL::Crypto>)

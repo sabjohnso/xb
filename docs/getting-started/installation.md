@@ -11,9 +11,11 @@
 
 ### Optional
 
-- **libcurl** — enables HTTP transport for WSDL services and MTOM
+- **libcurl** — enables HTTP client transport for WSDL services and MTOM
 - **OpenSSL** — enables WS-Security cryptographic operations (password digest,
   HMAC, X.509)
+- **POSIX sockets** (Linux, macOS) — enables the built-in HTTP listener for
+  hosting SOAP services (automatically detected, no extra install needed)
 
 ## Building from Source
 
