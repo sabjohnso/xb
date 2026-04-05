@@ -99,7 +99,7 @@ Or using FetchContent:
 include(FetchContent)
 FetchContent_Declare(xb
   GIT_REPOSITORY https://github.com/sbj/xb.git
-  GIT_TAG        v0.16.0)
+  GIT_TAG        v0.17.0)
 FetchContent_MakeAvailable(xb)
 
 target_link_libraries(my_target PRIVATE xb::xb)
