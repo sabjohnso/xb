@@ -159,8 +159,17 @@ responses, and exception-to-fault conversion. See
 
 ## Complete Example
 
-See `examples/wsdl-client/` for a working example with both client and
-server communicating over HTTP on localhost. The server dispatches by
-SOAPAction, parses typed requests, and returns typed responses (or SOAP
-faults). The client uses `http_transport` to make calls, checks for
-faults, and parses typed responses.
+See `examples/wsdl-client/` for a working example with separate client and
+server executables communicating over HTTP on localhost:
+
+```sh
+# Terminal 1: start the server
+./weather_server 8080
+
+# Terminal 2: run the client
+./weather_client http://127.0.0.1:8080/ Springfield Shelbyville Atlantis
+```
+
+The server dispatches by SOAPAction, parses typed requests, and returns
+typed responses (or SOAP faults). The client uses `http_transport` to make
+calls, checks for faults, and parses typed responses.
