@@ -231,6 +231,45 @@ xb generate-wsdl --wsdl-mode server -o gen/ service.wsdl
 
 ---
 
+### `test-vectors`
+
+Generate test vectors from a schema.
+
+```
+xb test-vectors --element NAME [OPTIONS] SCHEMA...
+```
+
+Produces boundary-value test vectors as XML documents or Catch2 test sources.
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--element` | -- | (required) | Target element local name |
+| `--namespace` | -- | -- | Target element namespace URI |
+| `--format` | -- | `xml` | Output format: `xml` or `catch2` |
+| `--output-dir` | -- | -- | Write one file per vector to this directory |
+| `--output` | `-o` | stdout | Output file |
+| `--report` | -- | -- | Print coverage report to stderr |
+
+**Positional:** `SCHEMA...` — schema files (XSD, RNG, RNC, or DTD).
+
+#### Examples
+
+```sh
+# XML vectors to stdout
+xb test-vectors --element purchaseOrder po.xsd
+
+# One file per vector
+xb test-vectors --output-dir vectors/ --element purchaseOrder po.xsd
+
+# Catch2 test source
+xb test-vectors --format catch2 --element purchaseOrder po.xsd > tests.cpp
+
+# XML vectors with coverage report
+xb test-vectors --element purchaseOrder --report po.xsd
+```
+
+---
+
 ## Exit Codes
 
 | Code | Meaning |

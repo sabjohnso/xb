@@ -2,6 +2,7 @@
 
 #include <xb/code_formatter.hpp>
 #include <xb/codegen.hpp>
+#include <xb/coverage_analyzer.hpp>
 #include <xb/cpp_writer.hpp>
 #include <xb/doc_generator.hpp>
 #include <xb/dtd_parser.hpp>
@@ -25,6 +26,8 @@
 #include <xb/schema_to_dtd.hpp>
 #include <xb/schematron_overlay.hpp>
 #include <xb/schematron_parser.hpp>
+#include <xb/test_doc_generator.hpp>
+#include <xb/test_harness_generator.hpp>
 #include <xb/type_map.hpp>
 #include <xb/wire/bes_resolver.hpp>
 #include <xb/wire/bes_to_xsd.hpp>
@@ -50,6 +53,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -1500,6 +1504,166 @@ namespace {
     return exit_success;
   }
 
+  // ---------------------------------------------------------------------------
+  // test-vectors subcommand
+  // ---------------------------------------------------------------------------
+
+  // Sanitize a label for use as a filename component.
+  std::string
+  sanitize_label(const std::string& label) {
+    std::string result;
+    result.reserve(label.size());
+    for (char c : label) {
+      if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_')
+        result += c;
+      else
+        result += '_';
+    }
+    return result;
+  }
+
+  int
+  run_test_vectors(const nlohmann::json& config) {
+    std::string element_name = config.value("element", "");
+    std::string namespace_uri = config.value("namespace", "");
+    std::string format = config.value("format", "xml");
+    std::string output_dir = config.value("output-dir", "");
+    std::string output_file = config.value("output", "");
+    bool report = config.value("report", false);
+
+    std::vector<std::string> schema_files;
+    if (config.contains("schemas") && config["schemas"].is_array()) {
+      for (const auto& s : config["schemas"])
+        schema_files.push_back(s.get<std::string>());
+    }
+
+    if (schema_files.empty()) {
+      std::cerr << "xb test-vectors: no input files\n";
+      return exit_usage;
+    }
+
+    if (element_name.empty()) {
+      std::cerr << "xb test-vectors: --element is required\n";
+      return exit_usage;
+    }
+
+    // Load & parse schemas
+    xb::schema_set schemas;
+    for (const auto& file : schema_files) {
+      std::string content = read_file(file);
+      try {
+        parse_schema_file(file, content, schemas);
+      } catch (const std::exception& e) {
+        std::cerr << "xb test-vectors: error parsing schema " << file << ": "
+                  << e.what() << "\n";
+        return exit_parse;
+      }
+    }
+
+    try {
+      schemas.resolve();
+    } catch (const std::exception& e) {
+      std::cerr << "xb test-vectors: schema resolution error: " << e.what()
+                << "\n";
+      return exit_parse;
+    }
+
+    // Find the target element's namespace if not specified
+    std::string ns_uri = namespace_uri;
+    if (ns_uri.empty()) {
+      for (const auto& s : schemas.schemas()) {
+        for (const auto& e : s.elements()) {
+          if (e.name().local_name() == element_name) {
+            ns_uri = e.name().namespace_uri();
+            break;
+          }
+        }
+        if (!ns_uri.empty()) break;
+      }
+      if (ns_uri.empty()) {
+        std::cerr << "xb test-vectors: element '" << element_name
+                  << "' not found in any schema\n";
+        return exit_codegen;
+      }
+    }
+
+    xb::qname target{ns_uri, element_name};
+
+    // Coverage report (to stderr, independent of format/output)
+    if (report) {
+      xb::coverage_analyzer analyzer(schemas);
+      auto cov = analyzer.analyze(target);
+      xb::coverage_analyzer::print(cov, std::cerr);
+    }
+
+    try {
+      if (format == "catch2") {
+        // Catch2 test harness output
+        xb::test_harness_generator harness(schemas);
+
+        if (!output_file.empty()) {
+          std::ofstream out(output_file);
+          if (!out) {
+            std::cerr << "xb test-vectors: cannot write file: " << output_file
+                      << "\n";
+            return exit_io;
+          }
+          harness.generate(target, out);
+        } else {
+          harness.generate(target, std::cout);
+        }
+      } else {
+        // XML test document output
+        xb::test_doc_generator doc_gen(schemas);
+
+        if (!output_dir.empty()) {
+          fs::create_directories(output_dir);
+          std::size_t index = 0;
+          auto count = doc_gen.count(target);
+          int width = (count < 10) ? 1 : (count < 100) ? 2 : 3;
+
+          doc_gen.generate(
+              target, [&](const std::string& xml, const std::string& label) {
+                ++index;
+                std::ostringstream name;
+                name << std::setw(width) << std::setfill('0') << index << "-"
+                     << sanitize_label(label) << ".xml";
+                auto path = fs::path(output_dir) / name.str();
+                std::ofstream out(path);
+                if (!out) {
+                  std::cerr
+                      << "xb test-vectors: cannot write file: " << path.string()
+                      << "\n";
+                  return;
+                }
+                out << xml;
+              });
+        } else if (!output_file.empty()) {
+          std::ofstream out(output_file);
+          if (!out) {
+            std::cerr << "xb test-vectors: cannot write file: " << output_file
+                      << "\n";
+            return exit_io;
+          }
+          doc_gen.generate(
+              target, [&](const std::string& xml, const std::string& label) {
+                out << "<!-- vector: " << label << " -->\n" << xml << "\n";
+              });
+        } else {
+          doc_gen.generate(target, [](const std::string& xml,
+                                      const std::string& label) {
+            std::cout << "<!-- vector: " << label << " -->\n" << xml << "\n";
+          });
+        }
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "xb test-vectors: " << e.what() << "\n";
+      return exit_codegen;
+    }
+
+    return exit_success;
+  }
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -1518,6 +1682,7 @@ xb_cli::run(const nlohmann::json& config) {
   if (command == "convert") return run_convert(cmd_config);
   if (command == "railroad") return run_railroad(cmd_config);
   if (command == "generate-wsdl") return run_generate_wsdl(cmd_config);
+  if (command == "test-vectors") return run_test_vectors(cmd_config);
 
   std::cerr << "xb: unknown command: " << command << "\n";
   return exit_usage;

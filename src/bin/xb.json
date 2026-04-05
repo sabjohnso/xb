@@ -458,6 +458,66 @@
           "required": true
         }
       ]
+    },
+    {
+      "name": "test-vectors",
+      "doc": [
+        "Generate test vectors from a schema.",
+        "Produces boundary-value test vectors as XML documents or Catch2 test sources."
+      ],
+      "args": [
+        {
+          "kind": "option",
+          "names": ["element"],
+          "doc": ["Target element local name."],
+          "type": "string",
+          "docv": "NAME",
+          "required": true
+        },
+        {
+          "kind": "option",
+          "names": ["namespace"],
+          "doc": ["Target element namespace URI."],
+          "type": "string",
+          "docv": "URI"
+        },
+        {
+          "kind": "option",
+          "names": ["format"],
+          "doc": ["Output format: xml (default) or catch2."],
+          "type": "string",
+          "docv": "FORMAT",
+          "default": "xml"
+        },
+        {
+          "kind": "option",
+          "names": ["output-dir"],
+          "doc": ["Write one file per vector to this directory."],
+          "type": "dir",
+          "docv": "DIR"
+        },
+        {
+          "kind": "option",
+          "names": ["output", "o"],
+          "doc": ["Output file (default: stdout)."],
+          "type": "file",
+          "docv": "FILE"
+        },
+        {
+          "kind": "flag",
+          "names": ["report"],
+          "doc": ["Print a coverage report to stderr."]
+        },
+        {
+          "kind": "positional",
+          "name": "schemas",
+          "doc": ["Schema files to process (XSD, RNG, RNC, or DTD)."],
+          "type": "file",
+          "docv": "SCHEMA",
+          "repeated": true,
+          "required": true
+        }
+      ]
     }
   ],
   "exits": [

@@ -70,6 +70,7 @@ nav:
     - Schema Conversion: guides/schema-conversion.md
     - Sample Documents: guides/sample-documents.md
     - Railroad Diagrams: guides/railroad-diagrams.md
+    - Test Vectors: guides/test-vectors.md
   - Binary Encoding:
     - Overview: binary-encoding/overview.md
     - BES Format: binary-encoding/bes-format.md
