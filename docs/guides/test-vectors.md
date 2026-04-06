@@ -129,6 +129,40 @@ The test vector generator walks the schema and produces vectors covering:
 | Boolean | Both true and false |
 | Date/time | Epoch, leap year, timezone variants |
 
+## CMake Integration
+
+Use `xb_generate_test_vectors()` to generate and compile round-trip tests
+at build time:
+
+```cmake
+xb_add_library(
+  TARGET my_types
+  SCHEMAS ${CMAKE_CURRENT_SOURCE_DIR}/schema.xsd
+  MODE HEADER_ONLY)
+
+xb_generate_test_vectors(
+  TARGET my_auto_tests
+  SCHEMAS ${CMAKE_CURRENT_SOURCE_DIR}/schema.xsd
+  ELEMENTS PurchaseOrder LineItem
+  NAMESPACE "http://example.com/po"
+  LINK my_types)
+```
+
+This generates one `.cpp` file per element containing Catch2 test cases,
+compiles them into a test executable, and registers it with CTest. The
+generated tests link against Catch2, the xb runtime, and any targets
+listed in `LINK`.
+
+### Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `TARGET` | Yes | Name of the test executable to create |
+| `SCHEMAS` | Yes | Schema files to process |
+| `ELEMENTS` | Yes | Root element names to generate tests for |
+| `NAMESPACE` | No | Target namespace URI (auto-detected if omitted) |
+| `LINK` | No | Additional targets to link (e.g., generated types library) |
+
 ## Input Formats
 
 Test vectors work with all schema formats xb supports:

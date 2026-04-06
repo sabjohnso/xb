@@ -32,6 +32,7 @@ add_subdirectory(src)
 include(${PROJECT_SOURCE_DIR}/cmake/xbGenerateCpp.cmake)
 include(${PROJECT_SOURCE_DIR}/cmake/xbAddLibrary.cmake)
 include(${PROJECT_SOURCE_DIR}/cmake/xbFetchSchemas.cmake)
+include(${PROJECT_SOURCE_DIR}/cmake/xbGenerateTestVectors.cmake)
 
 if(xb_BUILD_TESTING)
   # FindCURL.cmake in cmake_utilities force-sets BUILD_TESTING OFF.
@@ -59,7 +60,7 @@ install(EXPORT xb_EXPORTS
   DESTINATION ${xb_INSTALL_CONFDIR})
 
 install(FILES cmake/xbGenerateCpp.cmake cmake/xbAddLibrary.cmake cmake/xbFetchSchemas.cmake
-  cmake/xbCopyIfDifferent.cmake
+  cmake/xbCopyIfDifferent.cmake cmake/xbGenerateTestVectors.cmake
   DESTINATION ${xb_INSTALL_CONFDIR})
 
 configure_file(xb-config.cmake.in xb-config.cmake @ONLY)

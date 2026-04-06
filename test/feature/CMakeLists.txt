@@ -74,6 +74,20 @@ target_link_libraries(xb_cmake_add_lib_test
 target_compile_features(xb_cmake_add_lib_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_cmake_add_lib_test TARGET xb_cmake_add_lib_test)
 
+xb_add_library(
+  TARGET xb_tv_test_types
+  SCHEMAS ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors_schema.xsd
+  OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/xb_tv_test_types
+  MODE HEADER_ONLY
+  NAMESPACE_MAP "http://example.com/tvtest=tvtest")
+
+xb_generate_test_vectors(
+  TARGET xb_auto_test_vectors
+  SCHEMAS ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors_schema.xsd
+  ELEMENTS measurement
+  NAMESPACE "http://example.com/tvtest"
+  LINK xb_tv_test_types)
+
 add_executable(xb_json_round_trip_test json_round_trip_test.cpp)
 target_link_libraries(xb_json_round_trip_test PRIVATE Catch2::Catch2WithMain xb::xb nlohmann_json::nlohmann_json)
 target_compile_features(xb_json_round_trip_test PRIVATE cxx_std_${xb_CXX_STANDARD})

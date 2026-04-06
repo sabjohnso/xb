@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Simple schema for testing xb_generate_test_vectors(). -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://example.com/tvtest"
+           xmlns:tv="http://example.com/tvtest"
+           elementFormDefault="qualified">
+
+  <xs:element name="measurement">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="value" type="xs:double"/>
+        <xs:element name="unit"  type="xs:string"/>
+        <xs:element name="note"  type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+      <xs:attribute name="id" type="xs:int" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
