@@ -147,6 +147,14 @@ or few values per field.
 xb test-vectors --coverage exhaustive --element measurement schema.xsd
 ```
 
+### Fallback Behavior
+
+- If `pairwise` is requested but the type has fewer than 2 required scalar
+  fields, boundary coverage is used instead.
+- If `exhaustive` or `pairwise` is requested but the type has no required
+  scalar fields (all are optional, complex, or repeating), boundary
+  coverage is used instead.
+
 ### Limiting Output
 
 Use `--max-vectors` to cap the total number of vectors:
@@ -203,6 +211,8 @@ listed in `LINK`.
 | `SCHEMAS` | Yes | Schema files to process |
 | `ELEMENTS` | Yes | Root element names to generate tests for |
 | `NAMESPACE` | No | Target namespace URI (auto-detected if omitted) |
+| `COVERAGE` | No | Coverage level: `boundary`, `pairwise`, `exhaustive` |
+| `MAX_VECTORS` | No | Maximum number of vectors per element |
 | `LINK` | No | Additional targets to link (e.g., generated types library) |
 
 ## Input Formats

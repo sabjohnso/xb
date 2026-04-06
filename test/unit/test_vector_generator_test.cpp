@@ -406,11 +406,13 @@ TEST_CASE("exhaustive: cross-product of all field values",
   CHECK(exhaustive.size() == x_vals.values.size() * y_vals.values.size());
 }
 
-TEST_CASE("pairwise: covers all value pairs with fewer vectors",
+TEST_CASE("pairwise: every value pair appears in at least one vector",
           "[test_vector_generator][coverage]") {
   xb::schema s;
   s.set_target_namespace(test_ns);
 
+  // Three byte fields — each has ~6 boundary values, so exhaustive would
+  // be ~216 vectors.  Pairwise should be much fewer but cover all pairs.
   std::vector<xb::particle> parts;
   parts.emplace_back(
       xb::element_decl{xb::qname{test_ns, "a"}, xb::qname{xs_ns, "byte"}},
@@ -431,18 +433,88 @@ TEST_CASE("pairwise: covers all value pairs with fewer vectors",
   xb::test_value_generator val_gen(ss);
   xb::test_vector_generator vec_gen(ss, val_gen);
 
+  // Get the value sets so we know what pairs to expect.
+  auto a_vals = val_gen.generate(xb::qname{xs_ns, "byte"});
+  auto b_vals = val_gen.generate(xb::qname{xs_ns, "byte"});
+  auto c_vals = val_gen.generate(xb::qname{xs_ns, "byte"});
+
   xb::test_vector_options pw_opts;
   pw_opts.coverage = xb::coverage_level::pairwise;
-  auto pairwise = vec_gen.generate(xb::qname{test_ns, "t"}, pw_opts);
+  auto vectors = vec_gen.generate(xb::qname{test_ns, "t"}, pw_opts);
 
+  // Fewer than exhaustive
   xb::test_vector_options ex_opts;
   ex_opts.coverage = xb::coverage_level::exhaustive;
   auto exhaustive = vec_gen.generate(xb::qname{test_ns, "t"}, ex_opts);
+  CHECK(vectors.size() < exhaustive.size());
 
-  CHECK(pairwise.size() < exhaustive.size());
+  // Extract field values from each vector into a (val_a, val_b, val_c) tuple.
+  // Fields are identified by local name.
+  struct row {
+    std::string a, b, c;
+  };
 
-  auto boundary = vec_gen.generate(xb::qname{test_ns, "t"});
-  CHECK(pairwise.size() >= boundary.size());
+  std::vector<row> rows;
+  for (const auto& vec : vectors) {
+    row r;
+    for (const auto& f : vec.fields) {
+      auto name = f.field_name.local_name();
+      if (const auto* val = std::get_if<std::string>(&f.content)) {
+        if (name == "a")
+          r.a = *val;
+        else if (name == "b")
+          r.b = *val;
+        else if (name == "c")
+          r.c = *val;
+      }
+    }
+    rows.push_back(r);
+  }
+
+  // Verify: every (a_val, b_val) pair appears in at least one row.
+  for (const auto& av : a_vals.values) {
+    for (const auto& bv : b_vals.values) {
+      bool found = false;
+      for (const auto& r : rows) {
+        if (r.a == av.xml_text && r.b == bv.xml_text) {
+          found = true;
+          break;
+        }
+      }
+      INFO("Missing pair: a=" << av.xml_text << ", b=" << bv.xml_text);
+      CHECK(found);
+    }
+  }
+
+  // Verify: every (a_val, c_val) pair appears.
+  for (const auto& av : a_vals.values) {
+    for (const auto& cv : c_vals.values) {
+      bool found = false;
+      for (const auto& r : rows) {
+        if (r.a == av.xml_text && r.c == cv.xml_text) {
+          found = true;
+          break;
+        }
+      }
+      INFO("Missing pair: a=" << av.xml_text << ", c=" << cv.xml_text);
+      CHECK(found);
+    }
+  }
+
+  // Verify: every (b_val, c_val) pair appears.
+  for (const auto& bv : b_vals.values) {
+    for (const auto& cv : c_vals.values) {
+      bool found = false;
+      for (const auto& r : rows) {
+        if (r.b == bv.xml_text && r.c == cv.xml_text) {
+          found = true;
+          break;
+        }
+      }
+      INFO("Missing pair: b=" << bv.xml_text << ", c=" << cv.xml_text);
+      CHECK(found);
+    }
+  }
 }
 
 TEST_CASE("max_vectors caps output count",
@@ -499,4 +571,106 @@ TEST_CASE("boundary default equals explicit boundary option",
   auto explicit_result = vec_gen.generate(xb::qname{test_ns, "t"}, opts);
 
   CHECK(default_result.size() == explicit_result.size());
+}
+
+TEST_CASE("max_vectors works with exhaustive",
+          "[test_vector_generator][coverage]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "x"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "y"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "t"}, xb::qname{test_ns, "T"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  xb::test_vector_options opts;
+  opts.coverage = xb::coverage_level::exhaustive;
+  opts.max_vectors = 5;
+  auto vectors = vec_gen.generate(xb::qname{test_ns, "t"}, opts);
+  CHECK(vectors.size() == 5);
+}
+
+TEST_CASE("max_vectors works with pairwise",
+          "[test_vector_generator][coverage]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "a"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "b"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "c"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "t"}, xb::qname{test_ns, "T"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  xb::test_vector_options opts;
+  opts.coverage = xb::coverage_level::pairwise;
+  opts.max_vectors = 5;
+  auto vectors = vec_gen.generate(xb::qname{test_ns, "t"}, opts);
+  CHECK(vectors.size() <= 5);
+}
+
+TEST_CASE("nonexistent element returns empty", "[test_vector_generator]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  auto vectors = vec_gen.generate(xb::qname{test_ns, "nonexistent"});
+  CHECK(vectors.empty());
+}
+
+TEST_CASE("exhaustive falls back to boundary for no scalar fields",
+          "[test_vector_generator][coverage]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  // Only an optional field — no required scalar fields.
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "note"}, xb::qname{xs_ns, "string"}},
+      xb::occurrence{0, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "t"}, xb::qname{test_ns, "T"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  // Exhaustive should fall back to boundary (not return empty).
+  xb::test_vector_options opts;
+  opts.coverage = xb::coverage_level::exhaustive;
+  auto exhaustive = vec_gen.generate(xb::qname{test_ns, "t"}, opts);
+  auto boundary = vec_gen.generate(xb::qname{test_ns, "t"});
+
+  CHECK(!exhaustive.empty());
+  CHECK(exhaustive.size() == boundary.size());
 }

@@ -323,6 +323,29 @@ TEST_CASE("min_inclusive + max_inclusive facets produce boundary values",
   CHECK(has_value(vs, "11"));  // min+1
   CHECK(has_value(vs, "99"));  // max-1
   CHECK(has_value(vs, "100")); // max_inclusive
+  CHECK(!has_value(vs, "0"));  // below range — zero excluded
+}
+
+TEST_CASE("negative range excludes zero", "[test_value_generator]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  xb::facet_set facets;
+  facets.min_inclusive = "-10";
+  facets.max_inclusive = "-1";
+
+  s.add_simple_type(xb::simple_type{xb::qname{test_ns, "NegRange"},
+                                    xb::simple_type_variety::atomic,
+                                    xb::qname{xs_ns, "integer"}, facets});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator gen(ss);
+
+  auto vs = gen.generate(xb::qname{test_ns, "NegRange"});
+
+  CHECK(has_value(vs, "-10")); // min
+  CHECK(has_value(vs, "-1"));  // max
+  CHECK(!has_value(vs, "0"));  // above range — zero excluded
 }
 
 TEST_CASE("min_exclusive + max_exclusive facets produce boundary values",

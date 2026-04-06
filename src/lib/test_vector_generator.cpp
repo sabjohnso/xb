@@ -295,7 +295,10 @@ namespace xb {
         fields.push_back({p, std::move(vals)});
       }
 
-      if (fields.empty()) return {};
+      // Fall back to boundary if there are no required scalar fields
+      // (all fields are optional, complex, or repeating).
+      if (fields.empty())
+        return generate_sequence_vectors(type_name, mg, attrs, schemas, vg);
 
       // Cross-product: iterate through all combinations.
       std::vector<std::size_t> indices(fields.size(), 0);

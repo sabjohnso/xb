@@ -37,7 +37,7 @@ tests from XSD schemas at build time.
 function(xb_generate_test_vectors)
   cmake_parse_arguments(XB_TV
     ""
-    "TARGET;NAMESPACE"
+    "TARGET;NAMESPACE;COVERAGE;MAX_VECTORS"
     "SCHEMAS;ELEMENTS;LINK"
     ${ARGN})
 
@@ -83,6 +83,14 @@ function(xb_generate_test_vectors)
 
     if(XB_TV_NAMESPACE)
       list(APPEND cmd --namespace "${XB_TV_NAMESPACE}")
+    endif()
+
+    if(XB_TV_COVERAGE)
+      list(APPEND cmd --coverage "${XB_TV_COVERAGE}")
+    endif()
+
+    if(XB_TV_MAX_VECTORS)
+      list(APPEND cmd --max-vectors "${XB_TV_MAX_VECTORS}")
     endif()
 
     list(APPEND cmd ${XB_TV_SCHEMAS})

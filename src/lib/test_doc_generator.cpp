@@ -1,7 +1,6 @@
 #include <xb/test_doc_generator.hpp>
 
 #include <xb/ostream_writer.hpp>
-#include <xb/test_value_generator.hpp>
 #include <xb/test_vector_generator.hpp>
 
 #include <sstream>

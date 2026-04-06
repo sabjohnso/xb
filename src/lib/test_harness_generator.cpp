@@ -5,6 +5,7 @@
 #include <xb/element_decl.hpp>
 #include <xb/model_group.hpp>
 #include <xb/naming.hpp>
+#include <xb/simple_type.hpp>
 #include <xb/test_value_generator.hpp>
 #include <xb/test_vector_generator.hpp>
 #include <xb/type_map.hpp>
@@ -110,23 +111,41 @@ namespace xb {
       return xml_text;
     }
 
+    // Resolve an XSD type name to its C++ type by walking the derivation
+    // chain until a built-in type with a known mapping is found.
+    std::string
+    resolve_xsd_type(const qname& type_name, const schema_set& schemas) {
+      static auto types = type_map::defaults();
+      constexpr auto xsd_ns = "http://www.w3.org/2001/XMLSchema";
+
+      // Direct XSD built-in?
+      if (type_name.namespace_uri() == xsd_ns) {
+        auto* mapping = types.find(type_name.local_name());
+        if (mapping) return mapping->cpp_type;
+        return "std::string";
+      }
+
+      // Walk the simple type derivation chain.
+      const auto* st = schemas.find_simple_type(type_name);
+      if (st && st->base_type_name() != qname{}) {
+        return resolve_xsd_type(st->base_type_name(), schemas);
+      }
+
+      return "std::string";
+    }
+
     // Look up the C++ type for a field by finding it in the parent complex
     // type.
     std::string
     resolve_field_cpp_type(const qname& field_name, const qname& parent_type,
                            const schema_set& schemas) {
-      static auto types = type_map::defaults();
-
-      // Check if it's an attribute or element of the parent type
       const auto* ct = schemas.find_complex_type(parent_type);
       if (!ct) return "std::string";
 
       // Check attributes
       for (const auto& attr : ct->attributes()) {
         if (attr.name == field_name) {
-          auto* mapping = types.find(attr.type_name.local_name());
-          if (mapping) return mapping->cpp_type;
-          return "std::string";
+          return resolve_xsd_type(attr.type_name, schemas);
         }
       }
 
@@ -141,12 +160,7 @@ namespace xb {
       for (const auto& p : cc->content_model->particles()) {
         if (const auto* elem = std::get_if<element_decl>(&p.term)) {
           if (elem->name() == field_name) {
-            if (elem->type_name().namespace_uri() ==
-                "http://www.w3.org/2001/XMLSchema") {
-              auto* mapping = types.find(elem->type_name().local_name());
-              if (mapping) return mapping->cpp_type;
-            }
-            return "std::string";
+            return resolve_xsd_type(elem->type_name(), schemas);
           }
         }
       }
@@ -194,13 +208,8 @@ namespace xb {
       std::string elem_ns = element_name.namespace_uri();
       std::string elem_local = element_name.local_name();
 
-      std::string sanitized_label = vec.label;
-      for (auto& c : sanitized_label) {
-        if (c == '"') c = '\'';
-      }
-
       out << "TEST_CASE("
-          << escape_string_literal(elem_local + ": " + sanitized_label)
+          << escape_string_literal(elem_local + ": " + vec.label)
           << ", \"[auto][" << elem_local << "]\") {\n";
 
       // Construct the object
