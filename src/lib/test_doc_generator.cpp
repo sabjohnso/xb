@@ -98,11 +98,12 @@ namespace xb {
   test_doc_generator::generate(
       const qname& element_name,
       std::function<void(const std::string& xml, const std::string& label)>
-          sink) const {
+          sink,
+      const test_vector_options& opts) const {
     test_value_generator val_gen(schemas_);
     test_vector_generator vec_gen(schemas_, val_gen);
 
-    auto vectors = vec_gen.generate(element_name);
+    auto vectors = vec_gen.generate(element_name, opts);
     xml_renderer renderer;
 
     for (const auto& vec : vectors) {
@@ -112,10 +113,11 @@ namespace xb {
   }
 
   std::size_t
-  test_doc_generator::count(const qname& element_name) const {
+  test_doc_generator::count(const qname& element_name,
+                            const test_vector_options& opts) const {
     test_value_generator val_gen(schemas_);
     test_vector_generator vec_gen(schemas_, val_gen);
-    return vec_gen.generate(element_name).size();
+    return vec_gen.generate(element_name, opts).size();
   }
 
 } // namespace xb

@@ -239,14 +239,14 @@ namespace xb {
       : schemas_(schemas) {}
 
   void
-  test_harness_generator::generate(const qname& element_name,
-                                   std::ostream& out) const {
+  test_harness_generator::generate(const qname& element_name, std::ostream& out,
+                                   const test_vector_options& opts) const {
     const auto* elem = schemas_.find_element(element_name);
     if (!elem) return;
 
     test_value_generator val_gen(schemas_);
     test_vector_generator vec_gen(schemas_, val_gen);
-    auto vectors = vec_gen.generate(element_name);
+    auto vectors = vec_gen.generate(element_name, opts);
     if (vectors.empty()) return;
 
     // Derive include path from the element's namespace (matches codegen output)

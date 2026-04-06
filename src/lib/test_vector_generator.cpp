@@ -270,6 +270,196 @@ namespace xb {
       return result;
     }
 
+    // Generate exhaustive cross-product vectors for sequence types.
+    std::vector<test_vector>
+    generate_exhaustive_vectors(const qname& type_name, const model_group& mg,
+                                const std::vector<attribute_use>& attrs,
+                                const schema_set& schemas,
+                                const test_value_generator& vg) {
+      auto plans = collect_field_plans(mg, schemas);
+
+      // Collect value sets for each required scalar field.
+      struct field_values {
+        field_plan plan;
+        std::vector<std::string> values;
+      };
+
+      std::vector<field_values> fields;
+      for (const auto& p : plans) {
+        if (p.min_occurs == 0 || p.max_occurs > 1 || p.is_complex) continue;
+        auto vs = vg.generate(p.type_name);
+        std::vector<std::string> vals;
+        for (const auto& v : vs.values)
+          vals.push_back(v.xml_text);
+        if (vals.empty()) vals.push_back("");
+        fields.push_back({p, std::move(vals)});
+      }
+
+      if (fields.empty()) return {};
+
+      // Cross-product: iterate through all combinations.
+      std::vector<std::size_t> indices(fields.size(), 0);
+      std::vector<test_vector> result;
+
+      for (;;) {
+        // Build a vector from the current index combination.
+        std::vector<test_field_value> fv;
+        std::string label = "exhaustive";
+        for (std::size_t i = 0; i < fields.size(); ++i) {
+          fv.push_back(
+              {fields[i].plan.field_name, fields[i].values[indices[i]]});
+        }
+        // Add required attributes.
+        for (const auto& attr : attrs) {
+          if (attr.required)
+            fv.push_back({attr.name, first_value(vg, attr.type_name)});
+        }
+        result.push_back({type_name, label, std::move(fv)});
+
+        // Advance the multi-index.
+        bool done = true;
+        for (std::size_t i = fields.size(); i-- > 0;) {
+          if (++indices[i] < fields[i].values.size()) {
+            done = false;
+            break;
+          }
+          indices[i] = 0;
+        }
+        if (done) break;
+      }
+
+      return result;
+    }
+
+    // Generate pairwise (2-way covering) vectors for sequence types.
+    // Uses a greedy algorithm: for each uncovered pair of (field_i=val_a,
+    // field_j=val_b), find or extend a vector that covers it.
+    std::vector<test_vector>
+    generate_pairwise_vectors(const qname& type_name, const model_group& mg,
+                              const std::vector<attribute_use>& attrs,
+                              const schema_set& schemas,
+                              const test_value_generator& vg) {
+      auto plans = collect_field_plans(mg, schemas);
+
+      struct field_values {
+        field_plan plan;
+        std::vector<std::string> values;
+      };
+
+      std::vector<field_values> fields;
+      for (const auto& p : plans) {
+        if (p.min_occurs == 0 || p.max_occurs > 1 || p.is_complex) continue;
+        auto vs = vg.generate(p.type_name);
+        std::vector<std::string> vals;
+        for (const auto& v : vs.values)
+          vals.push_back(v.xml_text);
+        if (vals.empty()) vals.push_back("");
+        fields.push_back({p, std::move(vals)});
+      }
+
+      std::size_t n = fields.size();
+      if (n < 2)
+        return generate_sequence_vectors(type_name, mg, attrs, schemas, vg);
+
+      // Build the set of all pairs that need covering.
+      // A pair is (field_i, val_a, field_j, val_b) where i < j.
+      struct pair_key {
+        std::size_t fi, vi, fj, vj;
+      };
+
+      std::vector<pair_key> all_pairs;
+      for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = i + 1; j < n; ++j) {
+          for (std::size_t vi = 0; vi < fields[i].values.size(); ++vi) {
+            for (std::size_t vj = 0; vj < fields[j].values.size(); ++vj) {
+              all_pairs.push_back({i, vi, j, vj});
+            }
+          }
+        }
+      }
+
+      // Greedy: each row is a vector of value indices (one per field).
+      // "don't care" slots are represented by SIZE_MAX.
+      constexpr auto DONTCARE = std::size_t(-1);
+      std::vector<std::vector<std::size_t>> rows;
+
+      // Mark pairs as covered.
+      std::vector<bool> covered(all_pairs.size(), false);
+
+      while (true) {
+        // Find an uncovered pair.
+        std::size_t best_pair = all_pairs.size();
+        for (std::size_t p = 0; p < all_pairs.size(); ++p) {
+          if (!covered[p]) {
+            best_pair = p;
+            break;
+          }
+        }
+        if (best_pair == all_pairs.size()) break; // all covered
+
+        auto [fi, vi, fj, vj] = all_pairs[best_pair];
+
+        // Try to extend an existing row.
+        bool extended = false;
+        for (auto& row : rows) {
+          bool fits = (row[fi] == vi || row[fi] == DONTCARE) &&
+                      (row[fj] == vj || row[fj] == DONTCARE);
+          if (fits) {
+            row[fi] = vi;
+            row[fj] = vj;
+            extended = true;
+            break;
+          }
+        }
+
+        if (!extended) {
+          // Start a new row.
+          std::vector<std::size_t> row(n, DONTCARE);
+          row[fi] = vi;
+          row[fj] = vj;
+          rows.push_back(std::move(row));
+        }
+
+        // Mark all pairs covered by this update.
+        for (std::size_t p = 0; p < all_pairs.size(); ++p) {
+          if (covered[p]) continue;
+          auto [pi, pvi, pj, pvj] = all_pairs[p];
+          // Check all rows.
+          for (const auto& row : rows) {
+            if (row[pi] == pvi && row[pj] == pvj) {
+              covered[p] = true;
+              break;
+            }
+          }
+        }
+      }
+
+      // Fill don't-care slots with the first value.
+      for (auto& row : rows) {
+        for (std::size_t i = 0; i < n; ++i) {
+          if (row[i] == DONTCARE) row[i] = 0;
+        }
+      }
+
+      // Convert rows to test_vector objects.
+      std::vector<test_vector> result;
+      for (std::size_t r = 0; r < rows.size(); ++r) {
+        std::vector<test_field_value> fv;
+        for (std::size_t i = 0; i < n; ++i) {
+          fv.push_back(
+              {fields[i].plan.field_name, fields[i].values[rows[r][i]]});
+        }
+        for (const auto& attr : attrs) {
+          if (attr.required)
+            fv.push_back({attr.name, first_value(vg, attr.type_name)});
+        }
+        result.push_back(
+            {type_name, "pairwise-" + std::to_string(r + 1), std::move(fv)});
+      }
+
+      return result;
+    }
+
   } // namespace
 
   test_vector_generator::test_vector_generator(
@@ -277,13 +467,13 @@ namespace xb {
       : schemas_(schemas), value_gen_(value_gen) {}
 
   std::vector<test_vector>
-  test_vector_generator::generate(const qname& element_name) const {
+  test_vector_generator::generate(const qname& element_name,
+                                  const test_vector_options& opts) const {
     const auto* elem = schemas_.find_element(element_name);
     if (!elem) return {};
 
     const auto* ct = schemas_.find_complex_type(elem->type_name());
     if (!ct) {
-      // Simple type element: just generate value variations.
       auto vs = value_gen_.generate(elem->type_name());
       std::vector<test_vector> result;
       for (const auto& val : vs.values) {
@@ -291,6 +481,8 @@ namespace xb {
                           "simple:" + val.reason,
                           {{elem->name(), val.xml_text}}});
       }
+      if (opts.max_vectors && result.size() > *opts.max_vectors)
+        result.resize(*opts.max_vectors);
       return result;
     }
 
@@ -298,20 +490,34 @@ namespace xb {
     if (!mg) return {};
 
     const auto& attrs = ct->attributes();
+    std::vector<test_vector> result;
 
     switch (mg->compositor()) {
       case compositor_kind::choice:
-        return generate_choice_vectors(ct->name(), *mg, attrs, schemas_,
-                                       value_gen_);
+        result = generate_choice_vectors(ct->name(), *mg, attrs, schemas_,
+                                         value_gen_);
+        break;
 
       case compositor_kind::sequence:
       case compositor_kind::all:
       case compositor_kind::interleave:
-        return generate_sequence_vectors(ct->name(), *mg, attrs, schemas_,
-                                         value_gen_);
+        if (opts.coverage == coverage_level::exhaustive) {
+          result = generate_exhaustive_vectors(ct->name(), *mg, attrs, schemas_,
+                                               value_gen_);
+        } else if (opts.coverage == coverage_level::pairwise) {
+          result = generate_pairwise_vectors(ct->name(), *mg, attrs, schemas_,
+                                             value_gen_);
+        } else {
+          result = generate_sequence_vectors(ct->name(), *mg, attrs, schemas_,
+                                             value_gen_);
+        }
+        break;
     }
 
-    return {};
+    if (opts.max_vectors && result.size() > *opts.max_vectors)
+      result.resize(*opts.max_vectors);
+
+    return result;
   }
 
 } // namespace xb

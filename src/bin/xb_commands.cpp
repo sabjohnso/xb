@@ -1527,9 +1527,20 @@ namespace {
     std::string element_name = config.value("element", "");
     std::string namespace_uri = config.value("namespace", "");
     std::string format = config.value("format", "xml");
+    std::string coverage_str = config.value("coverage", "boundary");
     std::string output_dir = config.value("output-dir", "");
     std::string output_file = config.value("output", "");
     bool report = config.value("report", false);
+
+    xb::test_vector_options tv_opts;
+    if (coverage_str == "pairwise")
+      tv_opts.coverage = xb::coverage_level::pairwise;
+    else if (coverage_str == "exhaustive")
+      tv_opts.coverage = xb::coverage_level::exhaustive;
+
+    if (config.contains("max-vectors") && !config["max-vectors"].is_null())
+      tv_opts.max_vectors =
+          static_cast<std::size_t>(config.value("max-vectors", 0));
 
     std::vector<std::string> schema_files;
     if (config.contains("schemas") && config["schemas"].is_array()) {
@@ -1608,9 +1619,9 @@ namespace {
                       << "\n";
             return exit_io;
           }
-          harness.generate(target, out);
+          harness.generate(target, out, tv_opts);
         } else {
-          harness.generate(target, std::cout);
+          harness.generate(target, std::cout, tv_opts);
         }
       } else {
         // XML test document output
@@ -1619,11 +1630,12 @@ namespace {
         if (!output_dir.empty()) {
           fs::create_directories(output_dir);
           std::size_t index = 0;
-          auto count = doc_gen.count(target);
+          auto count = doc_gen.count(target, tv_opts);
           int width = (count < 10) ? 1 : (count < 100) ? 2 : 3;
 
           doc_gen.generate(
-              target, [&](const std::string& xml, const std::string& label) {
+              target,
+              [&](const std::string& xml, const std::string& label) {
                 ++index;
                 std::ostringstream name;
                 name << std::setw(width) << std::setfill('0') << index << "-"
@@ -1637,7 +1649,8 @@ namespace {
                   return;
                 }
                 out << xml;
-              });
+              },
+              tv_opts);
         } else if (!output_file.empty()) {
           std::ofstream out(output_file);
           if (!out) {
@@ -1646,14 +1659,19 @@ namespace {
             return exit_io;
           }
           doc_gen.generate(
-              target, [&](const std::string& xml, const std::string& label) {
+              target,
+              [&](const std::string& xml, const std::string& label) {
                 out << "<!-- vector: " << label << " -->\n" << xml << "\n";
-              });
+              },
+              tv_opts);
         } else {
-          doc_gen.generate(target, [](const std::string& xml,
-                                      const std::string& label) {
-            std::cout << "<!-- vector: " << label << " -->\n" << xml << "\n";
-          });
+          doc_gen.generate(
+              target,
+              [](const std::string& xml, const std::string& label) {
+                std::cout << "<!-- vector: " << label << " -->\n"
+                          << xml << "\n";
+              },
+              tv_opts);
         }
       }
     } catch (const std::exception& e) {

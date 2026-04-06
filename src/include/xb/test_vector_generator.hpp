@@ -4,11 +4,20 @@
 #include <xb/schema_set.hpp>
 #include <xb/test_value_generator.hpp>
 
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
 
 namespace xb {
+
+  enum class coverage_level { boundary, pairwise, exhaustive };
+
+  struct test_vector_options {
+    coverage_level coverage = coverage_level::boundary;
+    std::optional<std::size_t> max_vectors;
+  };
 
   struct test_field_value {
     qname field_name;
@@ -34,7 +43,8 @@ namespace xb {
                           const test_value_generator& value_gen);
 
     std::vector<test_vector>
-    generate(const qname& element_name) const;
+    generate(const qname& element_name,
+             const test_vector_options& opts = {}) const;
   };
 
 } // namespace xb

@@ -246,6 +246,8 @@ Produces boundary-value test vectors as XML documents or Catch2 test sources.
 | `--element` | -- | (required) | Target element local name |
 | `--namespace` | -- | -- | Target element namespace URI |
 | `--format` | -- | `xml` | Output format: `xml` or `catch2` |
+| `--coverage` | -- | `boundary` | Coverage: `boundary`, `pairwise`, `exhaustive` |
+| `--max-vectors` | -- | -- | Maximum number of vectors to generate |
 | `--output-dir` | -- | -- | Write one file per vector to this directory |
 | `--output` | `-o` | stdout | Output file |
 | `--report` | -- | -- | Print coverage report to stderr |

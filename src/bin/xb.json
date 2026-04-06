@@ -491,6 +491,21 @@
         },
         {
           "kind": "option",
+          "names": ["coverage"],
+          "doc": ["Coverage strategy: boundary (default), pairwise, or exhaustive."],
+          "type": "string",
+          "docv": "LEVEL",
+          "default": "boundary"
+        },
+        {
+          "kind": "option",
+          "names": ["max-vectors"],
+          "doc": ["Maximum number of test vectors to generate."],
+          "type": "int",
+          "docv": "N"
+        },
+        {
+          "kind": "option",
           "names": ["output-dir"],
           "doc": ["Write one file per vector to this directory."],
           "type": "dir",

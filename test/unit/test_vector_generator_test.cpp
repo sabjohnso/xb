@@ -366,3 +366,137 @@ TEST_CASE("Generated vectors have descriptive labels",
   // Should have choice-related labels
   CHECK(count_with_label(vectors, "choice") >= 2);
 }
+
+// ---------------------------------------------------------------------------
+// Coverage levels
+// ---------------------------------------------------------------------------
+
+TEST_CASE("exhaustive: cross-product of all field values",
+          "[test_vector_generator][coverage]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "x"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "y"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "Point"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "p"}, xb::qname{test_ns, "Point"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  auto boundary = vec_gen.generate(xb::qname{test_ns, "p"});
+
+  xb::test_vector_options opts;
+  opts.coverage = xb::coverage_level::exhaustive;
+  auto exhaustive = vec_gen.generate(xb::qname{test_ns, "p"}, opts);
+
+  CHECK(exhaustive.size() > boundary.size());
+
+  auto x_vals = val_gen.generate(xb::qname{xs_ns, "byte"});
+  auto y_vals = val_gen.generate(xb::qname{xs_ns, "byte"});
+  CHECK(exhaustive.size() == x_vals.values.size() * y_vals.values.size());
+}
+
+TEST_CASE("pairwise: covers all value pairs with fewer vectors",
+          "[test_vector_generator][coverage]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "a"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "b"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "c"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "t"}, xb::qname{test_ns, "T"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  xb::test_vector_options pw_opts;
+  pw_opts.coverage = xb::coverage_level::pairwise;
+  auto pairwise = vec_gen.generate(xb::qname{test_ns, "t"}, pw_opts);
+
+  xb::test_vector_options ex_opts;
+  ex_opts.coverage = xb::coverage_level::exhaustive;
+  auto exhaustive = vec_gen.generate(xb::qname{test_ns, "t"}, ex_opts);
+
+  CHECK(pairwise.size() < exhaustive.size());
+
+  auto boundary = vec_gen.generate(xb::qname{test_ns, "t"});
+  CHECK(pairwise.size() >= boundary.size());
+}
+
+TEST_CASE("max_vectors caps output count",
+          "[test_vector_generator][coverage]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "x"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "y"}, xb::qname{xs_ns, "byte"}},
+      xb::occurrence{1, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "t"}, xb::qname{test_ns, "T"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  xb::test_vector_options opts;
+  opts.max_vectors = 3;
+  auto vectors = vec_gen.generate(xb::qname{test_ns, "t"}, opts);
+  CHECK(vectors.size() <= 3);
+}
+
+TEST_CASE("boundary default equals explicit boundary option",
+          "[test_vector_generator][coverage]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  std::vector<xb::particle> parts;
+  parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "x"}, xb::qname{xs_ns, "int"}},
+      xb::occurrence{1, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "T"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "t"}, xb::qname{test_ns, "T"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  auto default_result = vec_gen.generate(xb::qname{test_ns, "t"});
+
+  xb::test_vector_options opts;
+  opts.coverage = xb::coverage_level::boundary;
+  auto explicit_result = vec_gen.generate(xb::qname{test_ns, "t"}, opts);
+
+  CHECK(default_result.size() == explicit_result.size());
+}

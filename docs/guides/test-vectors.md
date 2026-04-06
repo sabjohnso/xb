@@ -113,6 +113,48 @@ Optional combos:   4 /    6  (66.7%)
 The report shows how many schema constructs are exercised by the generated
 vectors.
 
+## Coverage Levels
+
+Control how test vectors are combined with `--coverage`:
+
+### `boundary` (Default)
+
+Each field is varied independently against a baseline — one field changes
+at a time while others hold their first boundary value. Produces
+O(fields x values) vectors.
+
+```sh
+xb test-vectors --coverage boundary --element measurement schema.xsd
+```
+
+### `pairwise`
+
+Every pair of (field_i = value_a, field_j = value_b) appears in at least
+one vector. Uses a greedy covering algorithm. Catches interaction bugs
+between fields with dramatically fewer vectors than exhaustive.
+
+```sh
+xb test-vectors --coverage pairwise --element measurement schema.xsd
+```
+
+### `exhaustive`
+
+Full cross-product of all required scalar fields and their boundary values.
+Produces every possible combination. Use only for types with few fields
+or few values per field.
+
+```sh
+xb test-vectors --coverage exhaustive --element measurement schema.xsd
+```
+
+### Limiting Output
+
+Use `--max-vectors` to cap the total number of vectors:
+
+```sh
+xb test-vectors --coverage exhaustive --max-vectors 50 --element order schema.xsd
+```
+
 ## What Gets Generated
 
 The test vector generator walks the schema and produces vectors covering:
