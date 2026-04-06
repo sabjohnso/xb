@@ -98,6 +98,25 @@ namespace xb {
       return result;
     }
 
+    // Compare two integer strings numerically: return true if a < b.
+    bool
+    numeric_less_than(const std::string& a, const std::string& b) {
+      bool a_neg = !a.empty() && a[0] == '-';
+      bool b_neg = !b.empty() && b[0] == '-';
+      if (a_neg != b_neg) return a_neg; // negative < positive
+
+      std::string_view a_mag = a_neg ? std::string_view(a).substr(1) : a;
+      std::string_view b_mag = b_neg ? std::string_view(b).substr(1) : b;
+
+      // Compare magnitudes
+      auto cmp = [](std::string_view x, std::string_view y) {
+        if (x.size() != y.size()) return x.size() < y.size();
+        return x < y;
+      };
+
+      return a_neg ? cmp(b_mag, a_mag) : cmp(a_mag, b_mag);
+    }
+
     // Add +1 or -1 to a possibly-negative integer string.
     std::string
     add_one(const std::string& s) {
@@ -353,6 +372,10 @@ namespace xb {
         add_if_unique(values, sub_one(effective_max), "boundary-max-1");
         add_if_unique(values, effective_max, "boundary-max");
       }
+
+      // Skip remaining generation if the range is empty (malformed schema).
+      if (has_min && has_max && numeric_less_than(effective_max, effective_min))
+        return;
 
       // Zero if in range
       if (has_min && has_max) {

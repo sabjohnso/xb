@@ -674,3 +674,73 @@ TEST_CASE("exhaustive falls back to boundary for no scalar fields",
   CHECK(!exhaustive.empty());
   CHECK(exhaustive.size() == boundary.size());
 }
+
+TEST_CASE("nested complex type generates vectors for outer type",
+          "[test_vector_generator]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  // Inner type: Address with street + city
+  std::vector<xb::particle> addr_parts;
+  addr_parts.emplace_back(xb::element_decl{xb::qname{test_ns, "street"},
+                                           xb::qname{xs_ns, "string"}},
+                          xb::occurrence{1, 1});
+  addr_parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "city"}, xb::qname{xs_ns, "string"}},
+      xb::occurrence{1, 1});
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "Address"}, std::move(addr_parts)));
+
+  // Outer type: Person with name + address (complex)
+  std::vector<xb::particle> person_parts;
+  person_parts.emplace_back(
+      xb::element_decl{xb::qname{test_ns, "name"}, xb::qname{xs_ns, "string"}},
+      xb::occurrence{1, 1});
+  person_parts.emplace_back(xb::element_decl{xb::qname{test_ns, "address"},
+                                             xb::qname{test_ns, "Address"}},
+                            xb::occurrence{1, 1});
+  s.add_complex_type(make_sequence_type(xb::qname{test_ns, "Person"},
+                                        std::move(person_parts)));
+
+  s.add_element(xb::element_decl{xb::qname{test_ns, "person"},
+                                 xb::qname{test_ns, "Person"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  auto vectors = vec_gen.generate(xb::qname{test_ns, "person"});
+  CHECK(!vectors.empty());
+
+  // Should have a baseline with the 'name' field.
+  CHECK(count_with_label(vectors, "baseline") >= 1);
+  // The 'name' field (a string) should produce boundary variations.
+  CHECK(count_with_label(vectors, "boundary:name") >= 1);
+}
+
+TEST_CASE("element reference is resolved", "[test_vector_generator]") {
+  xb::schema s;
+  s.set_target_namespace(test_ns);
+
+  // Global element declaration
+  s.add_element(xb::element_decl{xb::qname{test_ns, "title"},
+                                 xb::qname{xs_ns, "string"}});
+
+  // Type referencing the global element
+  std::vector<xb::particle> parts;
+  parts.emplace_back(xb::element_ref{xb::qname{test_ns, "title"}},
+                     xb::occurrence{1, 1});
+
+  s.add_complex_type(
+      make_sequence_type(xb::qname{test_ns, "Book"}, std::move(parts)));
+  s.add_element(
+      xb::element_decl{xb::qname{test_ns, "book"}, xb::qname{test_ns, "Book"}});
+
+  auto ss = make_schema_set(std::move(s));
+  xb::test_value_generator val_gen(ss);
+  xb::test_vector_generator vec_gen(ss, val_gen);
+
+  auto vectors = vec_gen.generate(xb::qname{test_ns, "book"});
+  CHECK(!vectors.empty());
+  CHECK(count_with_label(vectors, "boundary:title") >= 1);
+}

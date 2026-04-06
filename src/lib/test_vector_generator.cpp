@@ -149,7 +149,8 @@ namespace xb {
           if (plan.max_occurs != xb::unbounded) {
             if (plan.max_occurs > 1) counts.push_back(plan.max_occurs);
           } else {
-            counts.push_back(2); // representative for unbounded
+            counts.push_back(2); // small representative for unbounded
+            counts.push_back(5); // larger representative for unbounded
           }
 
           for (std::size_t count : counts) {
@@ -307,8 +308,11 @@ namespace xb {
       for (;;) {
         // Build a vector from the current index combination.
         std::vector<test_field_value> fv;
-        std::string label = "exhaustive";
+        std::string label = "exhaustive:";
         for (std::size_t i = 0; i < fields.size(); ++i) {
+          if (i > 0) label += ",";
+          label += fields[i].plan.field_name.local_name() + "=" +
+                   fields[i].values[indices[i]];
           fv.push_back(
               {fields[i].plan.field_name, fields[i].values[indices[i]]});
         }

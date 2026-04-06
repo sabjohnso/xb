@@ -1600,6 +1600,13 @@ namespace {
 
     xb::qname target{ns_uri, element_name};
 
+    // Verify the element exists in the schema.
+    if (!schemas.find_element(target)) {
+      std::cerr << "xb test-vectors: element '" << element_name
+                << "' not found in namespace '" << ns_uri << "'\n";
+      return exit_codegen;
+    }
+
     // Coverage report (to stderr, independent of format/output)
     if (report) {
       xb::coverage_analyzer analyzer(schemas);

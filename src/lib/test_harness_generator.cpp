@@ -114,8 +114,8 @@ namespace xb {
     // Resolve an XSD type name to its C++ type by walking the derivation
     // chain until a built-in type with a known mapping is found.
     std::string
-    resolve_xsd_type(const qname& type_name, const schema_set& schemas) {
-      static auto types = type_map::defaults();
+    resolve_xsd_type(const qname& type_name, const schema_set& schemas,
+                     const type_map& types) {
       constexpr auto xsd_ns = "http://www.w3.org/2001/XMLSchema";
 
       // Direct XSD built-in?
@@ -128,7 +128,7 @@ namespace xb {
       // Walk the simple type derivation chain.
       const auto* st = schemas.find_simple_type(type_name);
       if (st && st->base_type_name() != qname{}) {
-        return resolve_xsd_type(st->base_type_name(), schemas);
+        return resolve_xsd_type(st->base_type_name(), schemas, types);
       }
 
       return "std::string";
@@ -138,14 +138,14 @@ namespace xb {
     // type.
     std::string
     resolve_field_cpp_type(const qname& field_name, const qname& parent_type,
-                           const schema_set& schemas) {
+                           const schema_set& schemas, const type_map& types) {
       const auto* ct = schemas.find_complex_type(parent_type);
       if (!ct) return "std::string";
 
       // Check attributes
       for (const auto& attr : ct->attributes()) {
         if (attr.name == field_name) {
-          return resolve_xsd_type(attr.type_name, schemas);
+          return resolve_xsd_type(attr.type_name, schemas, types);
         }
       }
 
@@ -160,7 +160,7 @@ namespace xb {
       for (const auto& p : cc->content_model->particles()) {
         if (const auto* elem = std::get_if<element_decl>(&p.term)) {
           if (elem->name() == field_name) {
-            return resolve_xsd_type(elem->type_name(), schemas);
+            return resolve_xsd_type(elem->type_name(), schemas, types);
           }
         }
       }
@@ -170,11 +170,11 @@ namespace xb {
     void
     write_field_assignment(std::ostream& out, const std::string& var,
                            const test_field_value& field,
-                           const qname& parent_type,
-                           const schema_set& schemas) {
+                           const qname& parent_type, const schema_set& schemas,
+                           const type_map& types) {
       const auto& fname = cpp_field_name(field.field_name);
       auto cpp_type =
-          resolve_field_cpp_type(field.field_name, parent_type, schemas);
+          resolve_field_cpp_type(field.field_name, parent_type, schemas, types);
 
       if (const auto* val = std::get_if<std::string>(&field.content)) {
         out << "  " << var << "." << fname << " = "
@@ -196,7 +196,7 @@ namespace xb {
     void
     write_test_case(std::ostream& out, const test_vector& vec,
                     const qname& element_name, const qname& type_name,
-                    const schema_set& schemas) {
+                    const schema_set& schemas, const type_map& types) {
       std::string type_str = qualified_type(type_name);
       std::string write_fn = "write_" + cpp_type_name(type_name);
       std::string read_fn = "read_" + cpp_type_name(type_name);
@@ -215,7 +215,8 @@ namespace xb {
       // Construct the object
       out << "  " << type_str << " original;\n";
       for (const auto& field : vec.fields)
-        write_field_assignment(out, "original", field, type_name, schemas);
+        write_field_assignment(out, "original", field, type_name, schemas,
+                               types);
 
       out << "\n";
 
@@ -283,8 +284,10 @@ namespace xb {
     out << "\n";
 
     // Write test cases
+    auto types = type_map::defaults();
     for (const auto& vec : vectors)
-      write_test_case(out, vec, element_name, elem->type_name(), schemas_);
+      write_test_case(out, vec, element_name, elem->type_name(), schemas_,
+                      types);
   }
 
 } // namespace xb
