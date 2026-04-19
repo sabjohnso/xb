@@ -16,7 +16,7 @@
         "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-fsanitize=undefined -fsanitize=address -g -O3",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "xb_BUILD_EXAMPLES": "ONE",
-        "CMAKE_CONFIGURATION_TYPES": "Release;RelWithAsserts;Debug"
+        "CMAKE_CONFIGURATION_TYPES": "Release;RelWithAsserts;RelWithDebInfo;Debug"
       },
       "binaryDir": "${sourceDir}/build"
     },
