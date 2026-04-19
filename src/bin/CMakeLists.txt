@@ -64,6 +64,12 @@ add_dependencies(xb_bootstrap_generate xb_bootstrap)
 # Template the version into xb.json
 configure_file(xb.json ${CMAKE_CURRENT_BINARY_DIR}/xb.json @ONLY)
 
+# Tells the patched json_commander_add_executable to use this as the
+# installed binary name (and as the base for its man pages and shell
+# completions), independent of the CMake target name xb_cli.
+# See the patch applied in cmake/xb_deps.cmake.
+set(xb_cli_OUTPUT_NAME xb)
+
 json_commander_add_executable(xb_cli
   SCHEMA ${CMAKE_CURRENT_BINARY_DIR}/xb.json
   MAIN xb_cli::run
