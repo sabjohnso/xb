@@ -85,22 +85,22 @@ function(xb_fetch_schemas)
   endif()
 
   if(NOT xb_exe_path)
-    if(TARGET xb_cli)
-      get_target_property(_imported xb_cli IMPORTED)
+    if(TARGET xb)
+      get_target_property(_imported xb IMPORTED)
       if(NOT _imported)
         message(FATAL_ERROR
-          "xb_fetch_schemas: xb_cli target exists but is not yet built. "
+          "xb_fetch_schemas: xb target exists but is not yet built. "
           "xb_fetch_schemas() runs at configure time and requires the xb "
           "binary to already exist. Use find_package(xb) with an installed "
           "build, or run 'xb fetch' manually before configuring.")
       endif()
-      get_target_property(xb_exe_path xb_cli IMPORTED_LOCATION)
+      get_target_property(xb_exe_path xb IMPORTED_LOCATION)
       if(NOT xb_exe_path)
-        get_target_property(_configs xb_cli IMPORTED_CONFIGURATIONS)
+        get_target_property(_configs xb IMPORTED_CONFIGURATIONS)
         if(_configs)
           list(GET _configs 0 _first_config)
           string(TOUPPER "${_first_config}" _first_config)
-          get_target_property(xb_exe_path xb_cli
+          get_target_property(xb_exe_path xb
             IMPORTED_LOCATION_${_first_config})
         endif()
       endif()

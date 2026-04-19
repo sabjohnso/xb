@@ -80,7 +80,7 @@ After running `cmake --install` (step 5 above), use `find_package`:
 
 ```cmake
 find_package(xb REQUIRED)
-target_link_libraries(my_target PRIVATE xb::xb)
+target_link_libraries(my_target PRIVATE xb::library)
 ```
 
 ### As a CMake Subproject
@@ -90,7 +90,7 @@ and include it with `add_subdirectory`:
 
 ```cmake
 add_subdirectory(third_party/xb)
-target_link_libraries(my_target PRIVATE xb::xb)
+target_link_libraries(my_target PRIVATE xb::library)
 ```
 
 Or using FetchContent:
@@ -102,7 +102,7 @@ FetchContent_Declare(xb
   GIT_TAG        v0.17.0)
 FetchContent_MakeAvailable(xb)
 
-target_link_libraries(my_target PRIVATE xb::xb)
+target_link_libraries(my_target PRIVATE xb::library)
 ```
 
 When used as a subproject, xb's tests and examples are automatically
@@ -112,7 +112,7 @@ disabled (they only build when xb is the top-level project).
 
 Both approaches expose the same targets:
 
-- **`xb::xb`** — the full static library including parsers, code generation,
+- **`xb::library`** — the full static library including parsers, code generation,
   schema conversion, XML I/O, SOAP/WSDL, and all runtime functionality.
 - **`xb::header`** — an interface (header-only) library that provides only
   the type definitions (`xb::decimal`, `xb::date`, `xb::qname`,

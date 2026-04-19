@@ -1,5 +1,5 @@
 add_executable(xb_xsd_bootstrap_test xsd_bootstrap_test.cpp)
-target_link_libraries(xb_xsd_bootstrap_test PRIVATE Catch2::Catch2WithMain xb::xb)
+target_link_libraries(xb_xsd_bootstrap_test PRIVATE Catch2::Catch2WithMain xb::library)
 target_compile_features(xb_xsd_bootstrap_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 target_compile_definitions(xb_xsd_bootstrap_test PRIVATE
   XB_XSD_SCHEMA_DIR=${CMAKE_CURRENT_SOURCE_DIR}
@@ -37,7 +37,7 @@ set(XSD_GEN_STAMP ${XSD_GEN_STAMP_DIR}/.xsd_translate.stamp)
 add_custom_command(
   OUTPUT ${XSD_GEN_STAMP} ${XSD_GEN_HPP} ${XSD_GEN_CPP} ${XSD_GEN_NS_HPP} ${XSD_GEN_NS_CPP}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${XSD_GEN_TMP}
-  COMMAND $<TARGET_FILE:xb_cli> generate
+  COMMAND $<TARGET_FILE:xb::cli> generate
     -o ${XSD_GEN_TMP}
     -n "http://www.w3.org/2001/XMLSchema=xs"
     -n "http://www.w3.org/XML/1998/namespace=xml_ns"
@@ -55,14 +55,14 @@ add_custom_command(
   VERBATIM)
 
 add_custom_target(xsd_translate_generate DEPENDS ${XSD_GEN_STAMP})
-add_dependencies(xsd_translate_generate xb_cli)
+add_dependencies(xsd_translate_generate xb)
 
 # Only compile the xs namespace source — xml_ns has a codegen bug with empty
 # enum values that needs to be fixed separately.
 add_library(xb_xsd_generated_lib STATIC ${XSD_GEN_CPP} xsd_parse_stubs.cpp)
 add_dependencies(xb_xsd_generated_lib xsd_translate_generate)
 target_include_directories(xb_xsd_generated_lib PUBLIC ${XSD_GEN_DIR})
-target_link_libraries(xb_xsd_generated_lib PUBLIC xb::xb)
+target_link_libraries(xb_xsd_generated_lib PUBLIC xb::library)
 target_compile_features(xb_xsd_generated_lib PUBLIC cxx_std_${xb_CXX_STANDARD})
 
 add_executable(xb_xsd_translate_test xsd_translate_test.cpp)

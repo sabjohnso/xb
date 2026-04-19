@@ -1,4 +1,4 @@
-add_library(xb STATIC
+add_library(xb_library STATIC
   any_element.cpp
   decimal.cpp
   expat_reader.cpp
@@ -60,35 +60,35 @@ add_library(xb STATIC
   code_formatter.cpp)
 
 if(CURL_FOUND)
-  target_sources(xb PRIVATE http_transport.cpp mtom_transport.cpp)
-  target_link_libraries(xb PRIVATE $<BUILD_INTERFACE:CURL::libcurl>)
-  target_compile_definitions(xb PUBLIC XB_HAS_CURL)
+  target_sources(xb_library PRIVATE http_transport.cpp mtom_transport.cpp)
+  target_link_libraries(xb_library PRIVATE $<BUILD_INTERFACE:CURL::libcurl>)
+  target_compile_definitions(xb_library PUBLIC XB_HAS_CURL)
 endif()
 
 include(CheckIncludeFileCXX)
 check_include_file_cxx("sys/socket.h" XB_HAS_SYS_SOCKET)
 if(XB_HAS_SYS_SOCKET)
-  target_sources(xb PRIVATE http_listener.cpp)
-  target_compile_definitions(xb PUBLIC XB_HAS_POSIX_SOCKETS)
+  target_sources(xb_library PRIVATE http_listener.cpp)
+  target_compile_definitions(xb_library PUBLIC XB_HAS_POSIX_SOCKETS)
 endif()
 
 if(OPENSSL_FOUND)
-  target_sources(xb PRIVATE wss_crypto.cpp)
-  target_link_libraries(xb PRIVATE $<BUILD_INTERFACE:OpenSSL::Crypto>)
-  target_compile_definitions(xb PUBLIC XB_HAS_OPENSSL)
+  target_sources(xb_library PRIVATE wss_crypto.cpp)
+  target_link_libraries(xb_library PRIVATE $<BUILD_INTERFACE:OpenSSL::Crypto>)
+  target_compile_definitions(xb_library PUBLIC XB_HAS_OPENSSL)
 endif()
 
-target_link_libraries(xb
+target_link_libraries(xb_library
   PUBLIC xb::header
   PRIVATE EXPAT::EXPAT)
 
-target_compile_features(xb PRIVATE cxx_std_${xb_CXX_STANDARD})
+target_compile_features(xb_library PRIVATE cxx_std_${xb_CXX_STANDARD})
 
-set_target_properties(xb PROPERTIES EXPORT_NAME xb)
+set_target_properties(xb_library PROPERTIES EXPORT_NAME library)
 
-add_library(xb::xb ALIAS xb)
+add_library(xb::library ALIAS xb_library)
 
-install(TARGETS xb
+install(TARGETS xb_library
   EXPORT xb_EXPORTS
   RUNTIME DESTINATION ${xb_INSTALL_BINDIR}
   LIBRARY DESTINATION ${xb_INSTALL_LIBDIR}

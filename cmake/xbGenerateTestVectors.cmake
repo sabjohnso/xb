@@ -54,13 +54,13 @@ function(xb_generate_test_vectors)
   endif()
 
   # Resolve the xb CLI executable
-  if(TARGET xb_cli)
-    set(xb_exe xb_cli)
-  elseif(TARGET xb::cli)
+  if(TARGET xb::cli)
     set(xb_exe xb::cli)
+  elseif(TARGET xb)
+    set(xb_exe xb)
   else()
     message(FATAL_ERROR
-      "xb_generate_test_vectors: neither xb_cli nor xb::cli target found")
+      "xb_generate_test_vectors: neither xb nor xb::cli target found")
   endif()
 
   set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/xb_test_vectors/${XB_TV_TARGET}")
@@ -130,10 +130,10 @@ function(xb_generate_test_vectors)
 
   # Link Catch2 and xb runtime
   target_link_libraries(${XB_TV_TARGET} PRIVATE Catch2::Catch2WithMain)
-  if(TARGET xb::xb)
-    target_link_libraries(${XB_TV_TARGET} PRIVATE xb::xb)
-  elseif(TARGET xb)
-    target_link_libraries(${XB_TV_TARGET} PRIVATE xb)
+  if(TARGET xb::library)
+    target_link_libraries(${XB_TV_TARGET} PRIVATE xb::library)
+  elseif(TARGET xb_library)
+    target_link_libraries(${XB_TV_TARGET} PRIVATE xb_library)
   endif()
 
   # Link user-specified targets

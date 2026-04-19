@@ -95,10 +95,10 @@ scripts/                # Utility scripts (formatting, etc.)
 
 | Target         | Alias        | Description                                |
 |----------------|--------------|--------------------------------------------|
-| `xb_header`    | `xb::header` | Interface (header-only) library            |
-| `xb`           | `xb::xb`     | Static library (runtime, parsers, codegen) |
-| `xb_cli`       | `xb::cli`    | CLI executable                             |
-| `xb_bootstrap` | —            | Stage-1 CLI (without BES-generated types)  |
+| `xb_header`    | `xb::header`  | Interface (header-only) library            |
+| `xb_library`   | `xb::library` | Static library (runtime, parsers, codegen) |
+| `xb`           | `xb::cli`     | CLI executable                             |
+| `xb_bootstrap` | —             | Stage-1 CLI (without BES-generated types)  |
 
 ## CLI Subcommands
 

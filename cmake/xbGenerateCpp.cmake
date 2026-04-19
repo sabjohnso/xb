@@ -68,7 +68,7 @@ at build time.
   ``NO_FORMAT`` skips clang-format post-processing of generated files.
 
   Consumers link to ``<name>`` for the include path and build-order
-  dependency, and to ``xb::xb`` (or ``xb``) for the runtime.
+  dependency, and to ``xb::library`` for the runtime.
 
 #]=======================================================================]
 
@@ -113,13 +113,13 @@ function(xb_generate_cpp)
   endif()
 
   # --- Resolve the xb CLI executable ---
-  # In the build tree, the target is xb_cli; after install it is xb::cli.
-  if(TARGET xb_cli)
-    set(xb_exe xb_cli)
-  elseif(TARGET xb::cli)
+  # In the build tree, the target is xb; after install it is xb::cli.
+  if(TARGET xb::cli)
     set(xb_exe xb::cli)
+  elseif(TARGET xb)
+    set(xb_exe xb)
   else()
-    message(FATAL_ERROR "xb_generate_cpp: neither xb_cli nor xb::cli target found")
+    message(FATAL_ERROR "xb_generate_cpp: neither xb nor xb::cli target found")
   endif()
 
   # --- Map MODE to CLI flag ---

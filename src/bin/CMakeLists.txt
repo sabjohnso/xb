@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 add_executable(xb_bootstrap xb_bootstrap.cpp)
-target_link_libraries(xb_bootstrap PRIVATE xb::xb)
+target_link_libraries(xb_bootstrap PRIVATE xb::library)
 target_compile_features(xb_bootstrap PRIVATE cxx_std_${xb_CXX_STANDARD})
 
 # ---------------------------------------------------------------------------
@@ -64,34 +64,31 @@ add_dependencies(xb_bootstrap_generate xb_bootstrap)
 # Template the version into xb.json
 configure_file(xb.json ${CMAKE_CURRENT_BINARY_DIR}/xb.json @ONLY)
 
-# Tells the patched json_commander_add_executable to use this as the
-# installed binary name (and as the base for its man pages and shell
-# completions), independent of the CMake target name xb_cli.
-# See the patch applied in cmake/xb_deps.cmake.
-set(xb_cli_OUTPUT_NAME xb)
-
-json_commander_add_executable(xb_cli
+# Target name matches the installed binary name so json-commander's
+# helper (which uses the target name for its generated man-page and
+# shell-completion paths) stays consistent with what the scripts
+# actually write — no OUTPUT_NAME override needed.
+json_commander_add_executable(xb
   SCHEMA ${CMAKE_CURRENT_BINARY_DIR}/xb.json
   MAIN xb_cli::run
   FROM_HEADER xb_main.hpp
   xb_commands.cpp)
 
 # Additional link dependencies beyond what json_commander provides
-target_link_libraries(xb_cli PRIVATE xb::xb)
-add_dependencies(xb_cli xb_bootstrap_generate)
+target_link_libraries(xb PRIVATE xb::library)
+add_dependencies(xb xb_bootstrap_generate)
 if(CURL_FOUND)
-  target_link_libraries(xb_cli PRIVATE CURL::libcurl)
-  target_compile_definitions(xb_cli PRIVATE XB_HAS_CURL)
+  target_link_libraries(xb PRIVATE CURL::libcurl)
+  target_compile_definitions(xb PRIVATE XB_HAS_CURL)
 endif()
 
-set_target_properties(xb_cli PROPERTIES
-  OUTPUT_NAME xb
+set_target_properties(xb PROPERTIES
   EXPORT_NAME cli
   INSTALL_RPATH "\$ORIGIN/../${xb_INSTALL_LIBDIR}")
 
-add_executable(xb::cli ALIAS xb_cli)
+add_executable(xb::cli ALIAS xb)
 
-install(TARGETS xb_cli
+install(TARGETS xb
   EXPORT xb_EXPORTS
   DESTINATION ${xb_INSTALL_BINDIR})
 

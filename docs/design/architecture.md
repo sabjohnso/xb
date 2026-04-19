@@ -117,10 +117,10 @@ scripts/                Utility scripts
 | Target | Alias | Description |
 |--------|-------|-------------|
 | `xb_header` | `xb::header` | Interface (header-only) library |
-| `xb` | `xb::xb` | Static library (runtime, parsers, codegen) |
-| `xb_cli` | `xb::cli` | CLI executable |
+| `xb_library` | `xb::library` | Static library (runtime, parsers, codegen) |
+| `xb` | `xb::cli` | CLI executable |
 | `xb_bootstrap` | -- | Stage-1 CLI (without BES-generated types) |
 
 The bootstrap target exists because xb uses its own BES code generation to
 build wire types. `xb_bootstrap` is a minimal build that can generate those
-types, which are then compiled into the full `xb` target.
+types, which are then compiled into the full `xb_library` target.

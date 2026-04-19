@@ -79,7 +79,7 @@ TEST_CASE("install and find_package with xb_fetch_schemas",
                  "xb_generate_cpp(\n"
                  "  TARGET gen SCHEMAS ${FETCHED_SCHEMAS} MODE HEADER_ONLY)\n"
                  "add_executable(test_exe main.cpp)\n"
-                 "target_link_libraries(test_exe PRIVATE gen xb::xb)\n"
+                 "target_link_libraries(test_exe PRIVATE gen xb::library)\n"
                  "target_compile_features(test_exe PRIVATE cxx_std_20)\n");
 
   write_file(project / "main.cpp", "#include \"typemap.hpp\"\n"

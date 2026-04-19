@@ -1,7 +1,7 @@
 /// Minimal XSD-to-C++ code generator for bootstrap builds.
 ///
 /// This binary breaks the circular dependency between the xb CLI and its
-/// own generated BES encoding types.  It links xb::xb (which has no wire
+/// own generated BES encoding types.  It links xb::library (which has no wire
 /// dependency) and drives the codegen pipeline directly — no JSON command
 /// parsing, no BES/wire code.
 ///

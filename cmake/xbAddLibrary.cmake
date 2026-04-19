@@ -34,7 +34,7 @@ runtime linked automatically.
 
   This is a convenience wrapper around ``xb_generate_cpp()``.  It
   generates C++ code from the given schemas and/or BES encoding files,
-  creates a library target, and links the xb runtime (``xb::xb`` or
+  creates a library target, and links the xb runtime (``xb::library`` or
   ``xb``) automatically.
 
   ``SCHEMAS`` is required unless ``ENCODING`` + ``BINARY_ONLY`` are
@@ -156,12 +156,12 @@ function(xb_add_library)
 
   # --- Link the xb runtime transitively ---
   get_target_property(target_type ${XB_LIB_TARGET} TYPE)
-  if(TARGET xb::xb)
-    set(xb_runtime xb::xb)
-  elseif(TARGET xb)
-    set(xb_runtime xb)
+  if(TARGET xb::library)
+    set(xb_runtime xb::library)
+  elseif(TARGET xb_library)
+    set(xb_runtime xb_library)
   else()
-    message(FATAL_ERROR "xb_add_library: neither xb::xb nor xb target found")
+    message(FATAL_ERROR "xb_add_library: neither xb::library nor xb_library target found")
   endif()
 
   if(target_type STREQUAL "INTERFACE_LIBRARY")

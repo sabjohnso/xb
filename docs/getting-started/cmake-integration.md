@@ -17,7 +17,7 @@ xb_add_library(
 target_link_libraries(my_app PRIVATE my_types)
 ```
 
-The runtime library (`xb::xb` or `xb::header`) is linked transitively — your
+The runtime library (`xb::library` or `xb::header`) is linked transitively — your
 consuming target only needs to link `my_types`.
 
 ### Parameters
