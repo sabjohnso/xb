@@ -22,7 +22,7 @@
     },
     {
       "name": "ci",
-      "inherits": "default",
+      "inherits": "multi",
       "hidden": false,
       "binaryDir": "${sourceDir}/build-ci"
     }
