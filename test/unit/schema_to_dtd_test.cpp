@@ -1,3 +1,12 @@
+// GCC emits a false -Wmaybe-uninitialized when particle values (whose
+// variant includes std::unique_ptr<model_group>) are emplace_back'd into
+// a vector at -O3. The analyzer traces destruction through the inactive
+// unique_ptr arm. Suppress here; the push is matched by the pop at EOF.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include <xb/schema_to_dtd.hpp>
 
 #include <catch2/catch_test_macros.hpp>

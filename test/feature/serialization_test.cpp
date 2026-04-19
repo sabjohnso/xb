@@ -1,3 +1,12 @@
+// GCC emits a false -Wmaybe-uninitialized when particle values (whose
+// variant includes std::unique_ptr<model_group>) are emplaced/pushed
+// into containers at -O3. The analyzer traces destruction through the
+// inactive unique_ptr arm. Matched by the pop at EOF.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include <xb/codegen.hpp>
 #include <xb/cpp_writer.hpp>
 #include <xb/expat_reader.hpp>
@@ -1084,3 +1093,7 @@ int main() {
 
   CHECK(build_and_run(files, "facet_simple_content_validate", test_code));
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif

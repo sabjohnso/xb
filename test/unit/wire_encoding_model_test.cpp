@@ -1,3 +1,13 @@
+// GCC emits a false -Wmaybe-uninitialized when std::variant values
+// holding heap-allocated alternatives (e.g., xb::bes encoding_spec's
+// variant over framing_type / frame_stack_type / message_type) are
+// emplaced/pushed into vectors at -O3. The analyzer traces destruction
+// through an inactive arm. Matched by the pop at EOF.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include <xb/wire/encoding.hpp>
 
 #include <xb/expat_reader.hpp>
@@ -373,3 +383,7 @@ TEST_CASE("encoding_type round-trips through XML", "[wire][encoding_model]") {
   CHECK(parsed_field.bits == 32);
   CHECK(parsed_field.encoding == primitive_encoding_type::unsigned_);
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
