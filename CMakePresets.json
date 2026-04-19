@@ -1,25 +1,30 @@
 {
-    "version": 6,
-    "cmakeMinimumRequired": {
-	"major" : 3,
-	"minor" : 25,
-	"patch" : 0
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "multi",
+      "hidden": true,
+      "generator": "Ninja Multi-Config",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra -pedantic -Werror",
+        "CMAKE_CXX_FLAGS_RELEASE": "-g -DNDEBUG -O3",
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-fsanitize=undefined -fsanitize=address -g -O3",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "xb_BUILD_EXAMPLES": "ONE",
+        "CMAKE_CONFIGURATION_TYPES": "Release;RelWithAsserts;Debug"
+      },
+      "binaryDir": "${sourceDir}/build"
     },
-    "configurePresets": [
-	{
-	    "name": "multi",
-            "hidden" : true,
-	    "generator" : "Ninja Multi-Config",
-	    "cacheVariables" : {
-		"CMAKE_CXX_FLAGS" : "-Wall -Wextra -pedantic -Werror",
-                "CMAKE_CXX_FLAGS_RELEASE" : "-g -DNDEBUG -O3",
-		"CMAKE_CXX_FLAGS_RELWITHDEBINFO" : "-fsanitize=undefined -fsanitize=address -g -O3",
-		"CMAKE_EXPORT_COMPILE_COMMANDS" : "ON",
-                "xb_BUILD_EXAMPLES" : "ONE",
-                "CMAKE_CONFIGURATION_TYPES" : "Release;RelWithAsserts;Debug"
-
-	    },
-            "binaryDir" : "${sourceDir}/build"
-	}
-    ]
+    {
+      "name": "ci",
+      "inherits": "default",
+      "hidden": false,
+      "binaryDir": "${sourceDir}/build-ci"
+    }
+  ]
 }
