@@ -1,4 +1,10 @@
-add_library(xb_library STATIC
+# xb_objects: an OBJECT library holding the actual compiled sources. It is
+# deliberately independent of xb::header so that xb_bootstrap (which
+# generates xb/wire/encoding.hpp) can consume these objects without
+# inheriting xb_header's add_dependencies on xb_bootstrap_generate. That
+# edge would otherwise form a cycle:
+#   xb_bootstrap -> xb::header -> xb_bootstrap_generate -> xb_bootstrap.
+add_library(xb_objects OBJECT
   any_element.cpp
   decimal.cpp
   expat_reader.cpp
@@ -59,28 +65,72 @@ add_library(xb_library STATIC
   json_codegen.cpp
   code_formatter.cpp)
 
+# Include paths are set directly (mirroring xb_header's BUILD_INTERFACE
+# paths) rather than via target_link_libraries(xb::header) to keep this
+# target free of xb_header's bootstrap-generate dependency.
+target_include_directories(xb_objects PUBLIC
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/src/include>)
+
+target_link_libraries(xb_objects PRIVATE EXPAT::EXPAT)
+target_compile_features(xb_objects PRIVATE cxx_std_${xb_CXX_STANDARD})
+
+# Feature-gated sources live on xb_library rather than xb_objects because
+# xb_bootstrap (which consumes xb_objects via $<TARGET_OBJECTS>) does not
+# propagate xb_objects' PRIVATE link dependencies — so compiling e.g.
+# wss_crypto.cpp into xb_objects would leave xb_bootstrap unable to
+# resolve OpenSSL symbols at link time. xb_bootstrap doesn't need any of
+# these features, so excluding the sources cleanly keeps the bootstrap
+# binary slim.
+
+set(xb_public_defs)
+
 if(CURL_FOUND)
-  target_sources(xb_library PRIVATE http_transport.cpp mtom_transport.cpp)
-  target_link_libraries(xb_library PRIVATE $<BUILD_INTERFACE:CURL::libcurl>)
-  target_compile_definitions(xb_library PUBLIC XB_HAS_CURL)
+  list(APPEND xb_public_defs XB_HAS_CURL)
 endif()
 
 include(CheckIncludeFileCXX)
 check_include_file_cxx("sys/socket.h" XB_HAS_SYS_SOCKET)
 if(XB_HAS_SYS_SOCKET)
+  list(APPEND xb_public_defs XB_HAS_POSIX_SOCKETS)
+endif()
+
+if(OPENSSL_FOUND)
+  list(APPEND xb_public_defs XB_HAS_OPENSSL)
+endif()
+
+target_compile_definitions(xb_objects PUBLIC ${xb_public_defs})
+
+# xb_library: the publicly-linked STATIC archive. It embeds xb_objects'
+# object files and is the target that carries the xb::header dependency
+# (and therefore the xb_bootstrap_generate ordering) that consumers need
+# before they can compile code including xb/wire/encoding.hpp.
+add_library(xb_library STATIC $<TARGET_OBJECTS:xb_objects>)
+
+if(CURL_FOUND)
+  target_sources(xb_library PRIVATE http_transport.cpp mtom_transport.cpp)
+  target_link_libraries(xb_library PRIVATE $<BUILD_INTERFACE:CURL::libcurl>)
+endif()
+
+if(XB_HAS_SYS_SOCKET)
   target_sources(xb_library PRIVATE http_listener.cpp)
-  target_compile_definitions(xb_library PUBLIC XB_HAS_POSIX_SOCKETS)
 endif()
 
 if(OPENSSL_FOUND)
   target_sources(xb_library PRIVATE wss_crypto.cpp)
   target_link_libraries(xb_library PRIVATE $<BUILD_INTERFACE:OpenSSL::Crypto>)
-  target_compile_definitions(xb_library PUBLIC XB_HAS_OPENSSL)
 endif()
+
+target_include_directories(xb_library PUBLIC
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/src/include>
+  $<INSTALL_INTERFACE:${xb_INSTALL_INCLUDEDIR}>)
 
 target_link_libraries(xb_library
   PUBLIC xb::header
   PRIVATE EXPAT::EXPAT)
+
+target_compile_definitions(xb_library PUBLIC ${xb_public_defs})
 
 target_compile_features(xb_library PRIVATE cxx_std_${xb_CXX_STANDARD})
 

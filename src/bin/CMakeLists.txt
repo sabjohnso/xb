@@ -1,9 +1,22 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Bootstrap binary (no wire/BES dependencies)
 # ---------------------------------------------------------------------------
+#
+# xb_bootstrap consumes xb_objects directly — via its compiled object files
+# and private include paths — rather than linking xb::library. Linking
+# xb::library would pull in xb::header, which carries an order-only
+# dependency on xb_bootstrap_generate (added at the end of Stage 2), and
+# that would form a cycle:
+#   xb_bootstrap -> xb::library -> xb::header -> xb_bootstrap_generate
+#     -> xb_bootstrap.
 
-add_executable(xb_bootstrap xb_bootstrap.cpp)
-target_link_libraries(xb_bootstrap PRIVATE xb::library)
+add_executable(xb_bootstrap
+  xb_bootstrap.cpp
+  $<TARGET_OBJECTS:xb_objects>)
+target_include_directories(xb_bootstrap PRIVATE
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
+  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/src/include>)
+target_link_libraries(xb_bootstrap PRIVATE EXPAT::EXPAT)
 target_compile_features(xb_bootstrap PRIVATE cxx_std_${xb_CXX_STANDARD})
 
 # ---------------------------------------------------------------------------
@@ -56,6 +69,14 @@ add_custom_command(
 
 add_custom_target(xb_bootstrap_generate DEPENDS "${xb_ENCODING_STAMP}")
 add_dependencies(xb_bootstrap_generate xb_bootstrap)
+
+# Make xb::header — the target that carries xb/wire/encoding.hpp's include
+# path — order-depend on the bootstrap generation. Every consumer of
+# xb::header (directly, or transitively through xb::library) now waits for
+# the header to be produced before compiling, so wire tests no longer race
+# with the bootstrap step. xb_bootstrap itself does not link xb::header, so
+# this does not create a cycle.
+add_dependencies(xb_header xb_bootstrap_generate)
 
 # ---------------------------------------------------------------------------
 # Stage 3: Full CLI (depends on generated encoding types)
