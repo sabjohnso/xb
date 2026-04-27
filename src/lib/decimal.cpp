@@ -1,5 +1,7 @@
 #include <xb/decimal.hpp>
 
+#include "parse_limits.hpp"
+
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -89,6 +91,12 @@ namespace xb {
       if (before_trimmed.empty() && after.empty()) {
         throw std::invalid_argument("decimal: no digits in '" +
                                     std::string(str) + "'");
+      }
+
+      if (before_trimmed.size() + after.size() > max_decimal_digits) {
+        throw std::length_error(
+            "decimal: digit count exceeds the configured limit (" +
+            std::to_string(max_decimal_digits) + ")");
       }
 
       for (char c : before_trimmed) {

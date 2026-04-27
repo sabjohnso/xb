@@ -1,6 +1,10 @@
 #include <xb/duration.hpp>
 
+#include "parse_limits.hpp"
+
+#include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace xb {
 
@@ -10,12 +14,42 @@ namespace xb {
     constexpr int64_t seconds_per_hour = 3600;
     constexpr int64_t seconds_per_day = 86400;
 
+    /// Multiply @p a by @p b with overflow detection.  Throws
+    /// @c std::out_of_range on overflow.
+    int64_t
+    checked_mul(int64_t a, int64_t b, const char* what) {
+      int64_t r;
+      if (__builtin_mul_overflow(a, b, &r)) {
+        throw std::out_of_range(std::string("duration: ") + what +
+                                " overflows int64_t");
+      }
+      return r;
+    }
+
+    /// Add @p a and @p b with overflow detection.  Throws
+    /// @c std::out_of_range on overflow.
+    int64_t
+    checked_add(int64_t a, int64_t b, const char* what) {
+      int64_t r;
+      if (__builtin_add_overflow(a, b, &r)) {
+        throw std::out_of_range(std::string("duration: ") + what +
+                                " overflows int64_t");
+      }
+      return r;
+    }
+
     int64_t
     parse_digits(std::string_view str, std::size_t& pos) {
       int64_t value = 0;
       std::size_t start = pos;
       while (pos < str.size() && str[pos] >= '0' && str[pos] <= '9') {
-        value = value * 10 + (str[pos] - '0');
+        if (pos - start >= max_decimal_digits) {
+          throw std::length_error(
+              "duration: digit count exceeds the configured limit");
+        }
+        int64_t digit = str[pos] - '0';
+        value = checked_mul(value, 10, "component");
+        value = checked_add(value, digit, "component");
         ++pos;
       }
       if (pos == start) {
@@ -86,15 +120,20 @@ namespace xb {
             throw std::invalid_argument("duration: expected designator");
           }
           if (str[pos] == 'Y') {
-            total_months += value * 12;
+            total_months =
+                checked_add(total_months, checked_mul(value, 12, "years × 12"),
+                            "total months");
             found_any = true;
             ++pos;
           } else if (str[pos] == 'M') {
-            total_months += value;
+            total_months = checked_add(total_months, value, "total months");
             found_any = true;
             ++pos;
           } else if (str[pos] == 'D') {
-            total_seconds += value * seconds_per_day;
+            total_seconds =
+                checked_add(total_seconds,
+                            checked_mul(value, seconds_per_day, "days × 86400"),
+                            "total seconds");
             found_any = true;
             ++pos;
           } else {
@@ -119,15 +158,21 @@ namespace xb {
             throw std::invalid_argument("duration: expected designator");
           }
           if (str[pos] == 'H') {
-            total_seconds += value * seconds_per_hour;
+            total_seconds = checked_add(
+                total_seconds,
+                checked_mul(value, seconds_per_hour, "hours × 3600"),
+                "total seconds");
             found_time = true;
             ++pos;
           } else if (str[pos] == 'M') {
-            total_seconds += value * seconds_per_minute;
+            total_seconds = checked_add(
+                total_seconds,
+                checked_mul(value, seconds_per_minute, "minutes × 60"),
+                "total seconds");
             found_time = true;
             ++pos;
           } else if (str[pos] == 'S' || str[pos] == '.') {
-            total_seconds += value;
+            total_seconds = checked_add(total_seconds, value, "total seconds");
             result.nanoseconds = parse_fractional(str, pos);
             if (pos >= str.size() || str[pos] != 'S') {
               throw std::invalid_argument("duration: expected 'S'");
@@ -153,6 +198,10 @@ namespace xb {
         throw std::invalid_argument("duration: trailing characters");
       }
 
+      if (total_months > std::numeric_limits<int32_t>::max() ||
+          total_months < std::numeric_limits<int32_t>::min()) {
+        throw std::out_of_range("duration: total months out of int32_t range");
+      }
       result.total_months = static_cast<int32_t>(total_months);
       result.total_seconds = total_seconds;
 

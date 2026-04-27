@@ -5,9 +5,26 @@
 #include <cmath>
 #include <compare>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
+
+TEST_CASE("integer rejects digit strings beyond the configured cap",
+          "[integer][security][DoS]") {
+  // Bounded-precision parser: hostile input must not allocate
+  // arbitrarily-large limb vectors. The cap is conservatively large
+  // (4096 decimal digits ≈ a 13 600-bit number) so legitimate XSD
+  // values are unaffected.
+  std::string huge(8000, '1');
+  REQUIRE_THROWS_AS(xb::integer{huge}, std::length_error);
+}
+
+TEST_CASE("integer accepts strings up to the configured digit cap",
+          "[integer][security]") {
+  std::string at_cap(4096, '9');
+  REQUIRE_NOTHROW(xb::integer{at_cap});
+}
 
 TEST_CASE("integer default construction is zero", "[integer]") {
   xb::integer i;

@@ -1,7 +1,10 @@
 #include <xb/integer.hpp>
 
+#include "parse_limits.hpp"
+
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace xb {
@@ -162,6 +165,12 @@ namespace xb {
     if (pos == str.size()) {
       throw std::invalid_argument("integer: no digits in '" + std::string(str) +
                                   "'");
+    }
+
+    if (str.size() - pos > max_decimal_digits) {
+      throw std::length_error(
+          "integer: digit count exceeds the configured limit (" +
+          std::to_string(max_decimal_digits) + ")");
     }
 
     for (std::size_t i = pos; i < str.size(); ++i) {

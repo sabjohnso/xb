@@ -17,10 +17,12 @@ namespace soap = xb::soap;
 
 TEST_CASE("http_listener_options: default values", "[http_listener]") {
   svc::http_listener_options opts;
-  CHECK(opts.bind_address == "0.0.0.0");
+  // Default to loopback; binding to all interfaces is opt-in.
+  CHECK(opts.bind_address == "127.0.0.1");
   CHECK(opts.port == 8080);
   CHECK(opts.path == "/");
   CHECK(opts.backlog == 16);
+  CHECK(opts.max_request_bytes == 16ULL * 1024ULL * 1024ULL);
 }
 
 TEST_CASE("http_listener_options: equality", "[http_listener]") {
@@ -220,6 +222,135 @@ TEST_CASE("http_listener: handler exception produces SOAP fault",
   CHECK(response.find("HTTP/1.1 500") != std::string::npos);
   CHECK(response.find("Fault") != std::string::npos);
   CHECK(response.find("something broke") != std::string::npos);
+}
+
+TEST_CASE("http_listener: oversized Content-Length is rejected with 413",
+          "[http_listener][security][DoS]") {
+  // Configure a tiny limit so the test does not have to construct a
+  // 16 MiB body.
+  svc::http_listener listener(
+      {.bind_address = "127.0.0.1", .port = 0, .max_request_bytes = 1024});
+  auto port = listener.listening_port();
+
+  std::thread t([&] {
+    listener.serve(
+        [](const std::string&, const soap::envelope& req) { return req; });
+  });
+
+  // Open a raw socket and send a request whose declared Content-Length
+  // exceeds the cap. We do not actually send the body — the listener
+  // must reject before reading.
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+  ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+  std::string req = "POST / HTTP/1.1\r\n"
+                    "Host: localhost\r\n"
+                    "Content-Type: text/xml\r\n"
+                    "Content-Length: 1000000000\r\n"
+                    "Connection: close\r\n"
+                    "\r\n";
+  ::send(fd, req.data(), req.size(), 0);
+
+  std::string response;
+  char buf[4096];
+  for (;;) {
+    auto n = ::recv(fd, buf, sizeof(buf), 0);
+    if (n <= 0) break;
+    response.append(buf, static_cast<std::size_t>(n));
+  }
+  ::close(fd);
+
+  listener.stop();
+  t.join();
+
+  CHECK(response.find("HTTP/1.1 413") != std::string::npos);
+}
+
+TEST_CASE("http_listener: Transfer-Encoding header is rejected with 501",
+          "[http_listener][security][Smuggling]") {
+  svc::http_listener listener({.bind_address = "127.0.0.1", .port = 0});
+  auto port = listener.listening_port();
+
+  std::thread t([&] {
+    listener.serve(
+        [](const std::string&, const soap::envelope& req) { return req; });
+  });
+
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+  ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+  // Both Content-Length and Transfer-Encoding present — classic smuggling
+  // shape; the listener must refuse rather than guess.
+  std::string req = "POST / HTTP/1.1\r\n"
+                    "Host: localhost\r\n"
+                    "Content-Type: text/xml\r\n"
+                    "Content-Length: 5\r\n"
+                    "Transfer-Encoding: chunked\r\n"
+                    "Connection: close\r\n"
+                    "\r\n"
+                    "0\r\n\r\n";
+  ::send(fd, req.data(), req.size(), 0);
+
+  std::string response;
+  char buf[4096];
+  for (;;) {
+    auto n = ::recv(fd, buf, sizeof(buf), 0);
+    if (n <= 0) break;
+    response.append(buf, static_cast<std::size_t>(n));
+  }
+  ::close(fd);
+
+  listener.stop();
+  t.join();
+
+  CHECK(response.find("HTTP/1.1 501") != std::string::npos);
+}
+
+TEST_CASE("http_listener: malformed Content-Length is rejected with 400",
+          "[http_listener][security]") {
+  svc::http_listener listener({.bind_address = "127.0.0.1", .port = 0});
+  auto port = listener.listening_port();
+
+  std::thread t([&] {
+    listener.serve(
+        [](const std::string&, const soap::envelope& req) { return req; });
+  });
+
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+  ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+
+  std::string req = "POST / HTTP/1.1\r\n"
+                    "Host: localhost\r\n"
+                    "Content-Length: not-a-number\r\n"
+                    "Connection: close\r\n"
+                    "\r\n";
+  ::send(fd, req.data(), req.size(), 0);
+
+  std::string response;
+  char buf[4096];
+  for (;;) {
+    auto n = ::recv(fd, buf, sizeof(buf), 0);
+    if (n <= 0) break;
+    response.append(buf, static_cast<std::size_t>(n));
+  }
+  ::close(fd);
+
+  listener.stop();
+  t.join();
+
+  CHECK(response.find("HTTP/1.1 400") != std::string::npos);
 }
 
 TEST_CASE("http_listener: non-POST request returns 405", "[http_listener]") {

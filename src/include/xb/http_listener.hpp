@@ -9,10 +9,19 @@
 namespace xb::service {
 
   struct http_listener_options {
-    std::string bind_address = "0.0.0.0";
+    /// Interface to bind. Defaults to loopback so that an
+    /// unconfigured listener is not reachable from the network.
+    /// Set to ="0.0.0.0"= explicitly to listen on all interfaces.
+    std::string bind_address = "127.0.0.1";
+
     std::uint16_t port = 8080;
     std::string path = "/";
     int backlog = 16;
+
+    /// Maximum permitted HTTP request body length in bytes. Requests
+    /// declaring a larger @c Content-Length are rejected with HTTP 413
+    /// before any body data is read. Defaults to 16 MiB.
+    std::size_t max_request_bytes = 16ULL * 1024ULL * 1024ULL;
 
     bool
     operator==(const http_listener_options&) const = default;

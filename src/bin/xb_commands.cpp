@@ -928,6 +928,12 @@ namespace {
 
     xb::fetch_options fetch_opts;
     fetch_opts.fail_fast = fail_fast;
+    // The CLI is invoked by an operator who chose the source URL or
+    // path, so we expand the default scheme allowlist to also accept
+    // bare HTTP and absolute local paths. Library callers handling
+    // attacker-influenced input should leave the default in place.
+    fetch_opts.scheme_allowlist = {"https", "http"};
+    fetch_opts.allow_local_paths = true;
 
     std::vector<xb::fetched_schema> schemas;
     try {

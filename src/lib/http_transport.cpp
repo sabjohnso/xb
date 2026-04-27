@@ -1,5 +1,7 @@
 #include <xb/http_transport.hpp>
 
+#include "curl_security.hpp"
+
 #include <xb/expat_reader.hpp>
 #include <xb/ostream_writer.hpp>
 #include <xb/soap_envelope.hpp>
@@ -36,13 +38,6 @@ namespace xb::service {
       expat_reader reader(xml);
       reader.read(); // advance to first element
       return soap::read_envelope(reader);
-    }
-
-    size_t
-    write_callback(char* ptr, size_t size, size_t nmemb, void* userdata) {
-      auto* response_body = static_cast<std::string*>(userdata);
-      response_body->append(ptr, size * nmemb);
-      return size * nmemb;
     }
 
   } // namespace
@@ -88,24 +83,17 @@ namespace xb::service {
                        static_cast<long>(opts.connect_timeout.count()));
       curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS,
                        static_cast<long>(opts.request_timeout.count()));
-      curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION,
-                       opts.follow_redirects ? 1L : 0L);
-      curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER,
-                       opts.verify_peer ? 1L : 0L);
 
-      if (!opts.ca_bundle.empty()) {
-        curl_easy_setopt(curl, CURLOPT_CAINFO, opts.ca_bundle.c_str());
-      }
-      if (!opts.client_cert.empty()) {
-        curl_easy_setopt(curl, CURLOPT_SSLCERT, opts.client_cert.c_str());
-      }
-      if (!opts.client_key.empty()) {
-        curl_easy_setopt(curl, CURLOPT_SSLKEY, opts.client_key.c_str());
+      try {
+        detail::apply_security_options(curl, opts);
+      } catch (...) {
+        curl_slist_free_all(headers);
+        throw;
       }
 
-      std::string response_body;
-      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-      curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
+      detail::write_sink sink{.body = {}, .max_bytes = opts.max_response_bytes};
+      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, detail::write_callback);
+      curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
 
       CURLcode res = curl_easy_perform(curl);
       curl_slist_free_all(headers);
@@ -124,7 +112,7 @@ namespace xb::service {
       http_response resp;
       resp.status_code = static_cast<int>(status_code);
       resp.content_type = ct_ptr ? ct_ptr : "";
-      resp.body = std::move(response_body);
+      resp.body = std::move(sink.body);
       return resp;
     }
   };

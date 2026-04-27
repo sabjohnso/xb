@@ -200,6 +200,72 @@ TEST_CASE("crawl_schemas: empty schemaLocation is skipped",
 }
 
 // ---------------------------------------------------------------------------
+// Security: scheme allowlist (SSRF mitigation)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("crawl_schemas: file:// URL is rejected by default",
+          "[schema_fetcher][security][SSRF]") {
+  // Default scheme allowlist is {"https"} — file:// must be refused
+  // before the transport is invoked, regardless of whether the file
+  // actually exists.
+  auto transport = make_mock_transport({{"file:///etc/passwd", "<r/>"}});
+  REQUIRE_THROWS_AS(crawl_schemas("file:///etc/passwd", transport),
+                    std::runtime_error);
+}
+
+TEST_CASE("crawl_schemas: bare local path is rejected by default",
+          "[schema_fetcher][security][SSRF]") {
+  auto transport = make_mock_transport({{"/etc/passwd", "<r/>"}});
+  REQUIRE_THROWS_AS(crawl_schemas("/etc/passwd", transport),
+                    std::runtime_error);
+}
+
+TEST_CASE("crawl_schemas: HTTPS URL accepted by default",
+          "[schema_fetcher][security]") {
+  auto transport = make_mock_transport(
+      {{"https://example.com/main.xsd", standalone_schema}});
+  REQUIRE_NOTHROW(crawl_schemas("https://example.com/main.xsd", transport));
+}
+
+TEST_CASE("crawl_schemas: opt-in allow_local_paths permits absolute paths",
+          "[schema_fetcher][security]") {
+  auto transport =
+      make_mock_transport({{"/path/to/main.xsd", standalone_schema}});
+  fetch_options opts;
+  opts.allow_local_paths = true;
+  REQUIRE_NOTHROW(crawl_schemas("/path/to/main.xsd", transport, opts));
+}
+
+TEST_CASE("crawl_schemas: HTTP scheme requires explicit opt-in",
+          "[schema_fetcher][security][SSRF]") {
+  auto transport =
+      make_mock_transport({{"http://example.com/main.xsd", standalone_schema}});
+  REQUIRE_THROWS_AS(crawl_schemas("http://example.com/main.xsd", transport),
+                    std::runtime_error);
+
+  fetch_options opts;
+  opts.scheme_allowlist = {"https", "http"};
+  REQUIRE_NOTHROW(
+      crawl_schemas("http://example.com/main.xsd", transport, opts));
+}
+
+TEST_CASE("crawl_schemas: allowlist is enforced on transitively-imported URLs",
+          "[schema_fetcher][security][SSRF]") {
+  // Root URL is HTTPS (allowed) but it imports a file:// schema. The
+  // import must be refused.
+  static const char* parent =
+      R"(<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:import namespace="x" schemaLocation="file:///etc/passwd"/>
+</xs:schema>)";
+  auto transport =
+      make_mock_transport({{"https://example.com/main.xsd", parent},
+                           {"file:///etc/passwd", "<r/>"}});
+  REQUIRE_THROWS_AS(crawl_schemas("https://example.com/main.xsd", transport),
+                    std::runtime_error);
+}
+
+// ---------------------------------------------------------------------------
 // Phase C: Local path computation (tests 12-15)
 // ---------------------------------------------------------------------------
 

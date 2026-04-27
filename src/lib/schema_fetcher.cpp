@@ -5,6 +5,7 @@
 #include <xb/rng_parser.hpp>
 #include <xb/schema_parser.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <deque>
 #include <fstream>
@@ -81,10 +82,57 @@ namespace xb {
       }
     }
 
+    /// Extract the URI scheme from @p url (everything before the first
+    /// ":"), or the empty string if @p url has no scheme.  The scheme
+    /// must be a valid RFC 3986 scheme (alpha[alpha|digit|+|-|.]*).
+    std::string
+    extract_scheme(const std::string& url) {
+      auto colon = url.find(':');
+      if (colon == std::string::npos || colon == 0) return "";
+      auto slash = url.find('/');
+      if (slash != std::string::npos && slash < colon) return "";
+      auto first = static_cast<unsigned char>(url[0]);
+      if (!std::isalpha(first)) return "";
+      for (std::size_t i = 1; i < colon; ++i) {
+        auto c = static_cast<unsigned char>(url[i]);
+        if (!std::isalnum(c) && c != '+' && c != '-' && c != '.') return "";
+      }
+      std::string s = url.substr(0, colon);
+      std::transform(s.begin(), s.end(), s.begin(),
+                     [](unsigned char c) { return std::tolower(c); });
+      return s;
+    }
+
     bool
     is_absolute_url(const std::string& url) {
-      return url.starts_with("http://") || url.starts_with("https://") ||
-             url.starts_with("/");
+      // Any URL with a recognised RFC 3986 scheme is absolute. Bare
+      // absolute paths (starting with "/") are also treated as
+      // absolute. This is broader than the original implementation
+      // (which only recognised http:// and https://); broadening it is
+      // the correct behaviour because @ref check_scheme_allowed is now
+      // the single point that decides which schemes are acceptable.
+      return !extract_scheme(url).empty() || (!url.empty() && url[0] == '/');
+    }
+
+    /// Validate @p url against the scheme allowlist in @p opts. Throws
+    /// @c std::runtime_error if the scheme is not permitted. Used as
+    /// the security gate before invoking the transport.
+    void
+    check_scheme_allowed(const std::string& url, const fetch_options& opts) {
+      auto scheme = extract_scheme(url);
+      if (scheme.empty()) {
+        // No scheme — only allowed when caller opts in to bare local
+        // paths AND the URL is an absolute path.
+        if (opts.allow_local_paths && !url.empty() && url[0] == '/') return;
+        throw std::runtime_error(
+            "xb fetch: refusing URL without an allowed scheme: " + url);
+      }
+      const auto& allow = opts.scheme_allowlist;
+      if (std::find(allow.begin(), allow.end(), scheme) == allow.end()) {
+        throw std::runtime_error("xb fetch: refusing URL with disallowed "
+                                 "scheme \"" +
+                                 scheme + "\": " + url);
+      }
     }
 
     // Split a URL into (authority_prefix, path) where authority_prefix is
@@ -170,6 +218,12 @@ namespace xb {
 
       if (visited.count(url)) continue;
       visited.insert(url);
+
+      // Security gate: refuse URLs whose scheme is not on the
+      // allow-list. Always thrown — a disallowed scheme is a
+      // configuration error, not a transient fetch failure, so
+      // ignoring it under !fail_fast would mask a real attack.
+      check_scheme_allowed(url, opts);
 
       std::string content;
       try {

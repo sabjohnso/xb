@@ -16,6 +16,20 @@ namespace xb {
 
   struct fetch_options {
     bool fail_fast = false;
+
+    /// URL schemes the fetcher is permitted to retrieve. URLs whose
+    /// scheme is not in this set raise @c std::runtime_error before the
+    /// transport is invoked.  Defaults to ={"https"}= so that an
+    /// attacker-supplied @c schemaLocation cannot redirect the fetcher
+    /// to @c file://, @c gopher://, etc.
+    std::vector<std::string> scheme_allowlist = {"https"};
+
+    /// When @c true, absolute local paths (URLs that begin with @c "/")
+    /// are accepted in addition to the schemes in
+    /// @ref scheme_allowlist.  Operators that intentionally pass a
+    /// local schema to the CLI set this; libraries handling untrusted
+    /// input should leave it @c false.
+    bool allow_local_paths = false;
   };
 
   struct schema_location_entry {

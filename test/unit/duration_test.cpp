@@ -3,7 +3,41 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
+
+TEST_CASE("duration rejects component values that overflow int64_t",
+          "[duration][security][DoS]") {
+  // 19 digits is enough to exceed INT64_MAX even before the * 12
+  // amplification on years.
+  REQUIRE_THROWS_AS(xb::duration{"P9999999999999999999Y"}, std::out_of_range);
+  REQUIRE_THROWS_AS(xb::duration{"P9999999999999999999D"}, std::out_of_range);
+  REQUIRE_THROWS_AS(xb::duration{"PT9999999999999999999S"}, std::out_of_range);
+}
+
+TEST_CASE("duration rejects component values that overflow during scaling",
+          "[duration][security][DoS]") {
+  // Fits in int64_t on its own, but * 12 (months/year) or
+  // * seconds_per_day overflows.
+  REQUIRE_THROWS_AS(xb::duration{"P800000000000000000Y"}, std::out_of_range);
+  REQUIRE_THROWS_AS(xb::duration{"P200000000000000D"}, std::out_of_range);
+}
+
+TEST_CASE("duration rejects total months that exceed int32_t storage",
+          "[duration][security][DoS]") {
+  // 2 000 000 000 years × 12 months/year = 24 000 000 000 months. Fits
+  // in int64_t but overflows the int32_t months storage of duration.
+  REQUIRE_THROWS_AS(xb::duration{"P2000000000Y"}, std::out_of_range);
+}
+
+TEST_CASE("duration rejects digit runs beyond the configured cap",
+          "[duration][security][DoS]") {
+  // Even a value that happens to fit in int64_t cannot be specified
+  // with a hostile number of leading zeros.
+  std::string padded = "P" + std::string(8000, '0') + "1Y";
+  REQUIRE_THROWS_AS(xb::duration{padded}, std::length_error);
+}
 
 // Step 9: Default ctor, string parse
 

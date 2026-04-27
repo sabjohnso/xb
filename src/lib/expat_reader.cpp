@@ -120,7 +120,45 @@ namespace xb {
     }
   };
 
+  namespace {
+
+    /// External entity reference handler that refuses every external
+    /// entity. Used as the default to mitigate XXE.
+    int XMLCALL
+    refuse_external_entity(XML_Parser /*parser*/, const XML_Char* /*context*/,
+                           const XML_Char* /*base*/,
+                           const XML_Char* /*system_id*/,
+                           const XML_Char* /*public_id*/) {
+      return XML_STATUS_ERROR;
+    }
+
+    /// Apply the security-relevant configuration to a freshly created
+    /// expat parser instance.
+    void
+    configure_security(XML_Parser parser, const expat_reader_options& opts) {
+      if (!opts.allow_external_entities) {
+        XML_SetExternalEntityRefHandler(parser, refuse_external_entity);
+        XML_SetParamEntityParsing(parser, XML_PARAM_ENTITY_PARSING_NEVER);
+        XML_UseForeignDTD(parser, XML_FALSE);
+      }
+
+#ifdef XB_HAS_EXPAT_AMPLIFICATION_API
+      XML_SetBillionLaughsAttackProtectionMaximumAmplification(
+          parser, static_cast<float>(opts.max_billion_laughs_amplification));
+      XML_SetBillionLaughsAttackProtectionActivationThreshold(
+          parser, static_cast<unsigned long long>(
+                      opts.billion_laughs_activation_threshold));
+      XML_SetReparseDeferralEnabled(parser, XML_TRUE);
+#endif
+    }
+
+  } // namespace
+
   expat_reader::expat_reader(std::string_view xml)
+      : expat_reader(xml, expat_reader_options{}) {}
+
+  expat_reader::expat_reader(std::string_view xml,
+                             const expat_reader_options& options)
       : impl_(std::make_unique<impl>()) {
     // '\n' as the namespace separator
     XML_Parser parser = XML_ParserCreateNS(nullptr, '\n');
@@ -133,6 +171,8 @@ namespace xb {
     XML_SetElementHandler(parser, impl::on_start_element, impl::on_end_element);
     XML_SetCharacterDataHandler(parser, impl::on_character_data);
     XML_SetNamespaceDeclHandler(parser, impl::on_start_ns_decl, nullptr);
+
+    configure_security(parser, options);
 
     XML_Status status =
         XML_Parse(parser, xml.data(), static_cast<int>(xml.size()), XML_TRUE);

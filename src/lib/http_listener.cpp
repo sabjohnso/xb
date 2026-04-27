@@ -123,10 +123,20 @@ namespace xb::service {
       std::string body;
     };
 
-    // Read an HTTP request from a socket fd.
-    // Returns false if the connection was closed or the request is malformed.
-    bool
-    read_http_request(int fd, http_request& req) {
+    /// Outcome of @ref read_http_request. Distinguishes "ok" from each
+    /// rejection reason so the caller can map to the correct HTTP status.
+    enum class read_status {
+      ok,
+      malformed,         // 400
+      payload_too_large, // 413
+      not_implemented,   // 501 (e.g. Transfer-Encoding)
+    };
+
+    /// Read and parse an HTTP request from @p fd into @p req. Honours the
+    /// @p max_body_bytes cap. Returns a status indicating whether the
+    /// request is well-formed and whether the body fits.
+    read_status
+    read_http_request(int fd, std::size_t max_body_bytes, http_request& req) {
       // Read until we have the header/body separator.
       std::string raw;
       char buf[4096];
@@ -134,23 +144,31 @@ namespace xb::service {
 
       while (header_end == std::string::npos) {
         auto n = ::recv(fd, buf, sizeof(buf), 0);
-        if (n <= 0) return false;
+        if (n <= 0) return read_status::malformed;
         raw.append(buf, static_cast<std::size_t>(n));
         header_end = raw.find("\r\n\r\n");
+        // Cap header section so a malicious peer cannot make us
+        // accumulate gigabytes before the separator arrives.
+        if (raw.size() > 64UL * 1024UL && header_end == std::string::npos) {
+          return read_status::malformed;
+        }
       }
 
       // Parse request line
       auto first_line_end = raw.find("\r\n");
-      if (first_line_end == std::string::npos) return false;
+      if (first_line_end == std::string::npos) return read_status::malformed;
       auto line = raw.substr(0, first_line_end);
       auto sp1 = line.find(' ');
       auto sp2 = line.find(' ', sp1 + 1);
-      if (sp1 == std::string::npos || sp2 == std::string::npos) return false;
+      if (sp1 == std::string::npos || sp2 == std::string::npos)
+        return read_status::malformed;
       req.method = line.substr(0, sp1);
       req.path = line.substr(sp1 + 1, sp2 - sp1 - 1);
 
       // Parse headers
       std::size_t content_length = 0;
+      bool has_content_length = false;
+      bool has_transfer_encoding = false;
       auto headers_str =
           raw.substr(first_line_end + 2, header_end - first_line_end - 2);
       std::istringstream hdr_stream(headers_str);
@@ -172,7 +190,17 @@ namespace xb::service {
                        [](unsigned char c) { return std::tolower(c); });
 
         if (lower_name == "content-length") {
-          content_length = std::stoull(value);
+          try {
+            std::size_t consumed = 0;
+            content_length = std::stoull(value, &consumed);
+            // Reject any trailing garbage after the number.
+            while (consumed < value.size() && value[consumed] == ' ')
+              ++consumed;
+            if (consumed != value.size()) return read_status::malformed;
+          } catch (const std::exception&) { return read_status::malformed; }
+          has_content_length = true;
+        } else if (lower_name == "transfer-encoding") {
+          has_transfer_encoding = true;
         } else if (lower_name == "content-type") {
           req.content_type = value;
         } else if (lower_name == "soapaction") {
@@ -186,16 +214,33 @@ namespace xb::service {
         }
       }
 
+      // RFC 7230 §3.3.1: a request that includes Transfer-Encoding is
+      // not supported here (chunked decoding is unimplemented), and a
+      // request with both is a smuggling shape. Either way: refuse.
+      if (has_transfer_encoding) return read_status::not_implemented;
+
+      if (has_content_length && content_length > max_body_bytes) {
+        return read_status::payload_too_large;
+      }
+
       // Read body
       auto body_start = header_end + 4;
       req.body = raw.substr(body_start);
+      // Defensive: even if the already-buffered prefix exceeded the cap,
+      // refuse rather than truncate.
+      if (req.body.size() > max_body_bytes) {
+        return read_status::payload_too_large;
+      }
       while (req.body.size() < content_length) {
         auto n = ::recv(fd, buf, sizeof(buf), 0);
         if (n <= 0) break;
         req.body.append(buf, static_cast<std::size_t>(n));
+        if (req.body.size() > max_body_bytes) {
+          return read_status::payload_too_large;
+        }
       }
 
-      return true;
+      return read_status::ok;
     }
 
     void
@@ -330,10 +375,22 @@ namespace xb::service {
     void
     handle_connection(int client_fd, const soap_handler& handler) {
       http_request req;
-      if (!read_http_request(client_fd, req)) {
-        send_http_response(client_fd, 400, "Bad Request", "text/plain",
-                           "Malformed HTTP request");
-        return;
+      switch (read_http_request(client_fd, opts.max_request_bytes, req)) {
+        case read_status::ok:
+          break;
+        case read_status::payload_too_large:
+          send_http_response(client_fd, 413, "Payload Too Large", "text/plain",
+                             "Request body exceeds the configured limit");
+          return;
+        case read_status::not_implemented:
+          send_http_response(
+              client_fd, 501, "Not Implemented", "text/plain",
+              "Transfer-Encoding requests are not supported by this listener");
+          return;
+        case read_status::malformed:
+          send_http_response(client_fd, 400, "Bad Request", "text/plain",
+                             "Malformed HTTP request");
+          return;
       }
 
       if (req.method != "POST") {

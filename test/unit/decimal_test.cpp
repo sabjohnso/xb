@@ -5,9 +5,25 @@
 #include <cmath>
 #include <compare>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
+
+TEST_CASE("decimal rejects digit strings beyond the configured cap",
+          "[decimal][security][DoS]") {
+  // Total digit count (across the integer and fractional parts) is
+  // bounded so a hostile element body cannot allocate megabytes inside
+  // the parser.
+  std::string huge = "0." + std::string(8000, '1');
+  REQUIRE_THROWS_AS(xb::decimal{huge}, std::length_error);
+}
+
+TEST_CASE("decimal accepts a value at exactly the digit cap",
+          "[decimal][security]") {
+  std::string at_cap = std::string(2048, '1') + "." + std::string(2048, '1');
+  REQUIRE_NOTHROW(xb::decimal{at_cap});
+}
 
 TEST_CASE("decimal default construction is zero", "[decimal]") {
   xb::decimal d;
