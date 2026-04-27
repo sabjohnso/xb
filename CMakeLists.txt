@@ -6,6 +6,7 @@ option(xb_BUILD_TESTING "Build the xb tests" ${PROJECT_IS_TOP_LEVEL})
 option(xb_BUILD_EXAMPLES "Build the xb examples" ${PROJECT_IS_TOP_LEVEL})
 option(xb_BUILD_INTEGRATION_TESTS "Build the xb integration tests" OFF)
 option(xb_BUILD_DOCS "Build the documentation site" OFF)
+option(xb_BUILD_FUZZERS "Build the libFuzzer-based fuzz harnesses" OFF)
 set(xb_CXX_STANDARD 20 CACHE STRING "C++ standard for xb")
 
 include(GNUInstallDirs)
@@ -19,12 +20,26 @@ list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake)
 include(xb_deps)
 
 # GCC 12–13 emit a false -Wmaybe-uninitialized for std::variant containing
-# std::unique_ptr at -O2/-O3 (particle::term_type).
+# std::unique_ptr at -O2/-O3 (particle::term_type).  Fixed upstream in GCC 14.
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80635
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12
    AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
   add_compile_options(-Wno-maybe-uninitialized)
+endif()
+
+# GCC 12–14 emit a false -Wstringop-overflow on
+# std::vector<std::byte>::insert() under -O3 + -D_FORTIFY_SOURCE=3.  The
+# FORTIFY=3 path enables additional interprocedural analysis whose range
+# tracking degrades for byte-typed vectors and reports a non-existent
+# overflow into the freshly-allocated insertion region.  Affects xb here
+# in mime_multipart::serialize_multipart but is broadly reported on
+# vector<byte> code.  Re-evaluate when bumping to GCC 15+.
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=110014
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
+  add_compile_options(-Wno-stringop-overflow)
 endif()
 
 add_subdirectory(src)
