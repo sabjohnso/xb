@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <span>
 #include <type_traits>
 
@@ -24,29 +25,47 @@ namespace xb::wire {
 
   namespace detail {
 
-    template <unsigned Width>
+    template <std::size_t Width>
     using uint_for_width_t = std::conditional_t<
         (Width <= 8), std::uint8_t,
         std::conditional_t<
             (Width <= 16), std::uint16_t,
             std::conditional_t<(Width <= 32), std::uint32_t, std::uint64_t>>>;
 
-    template <unsigned Offset, unsigned Width>
+    /// Defensive bounds-check shared by every extract/insert helper
+    /// below.  Offset and Width are template parameters chosen by the
+    /// codegen, but the buffer length is attacker-influenced for any
+    /// view constructed via @c from_trusted or for variable-length
+    /// messages whose constructor does not validate. A short buffer
+    /// would otherwise cause an out-of-bounds read.  We refuse to
+    /// proceed by aborting, which is compatible with @c noexcept and
+    /// turns a UB read into a clean termination.
+    template <std::size_t EndByte>
+    constexpr void
+    require_buffer_size(std::size_t size) noexcept {
+      if (size < EndByte) { std::abort(); }
+    }
+
+    template <std::size_t Offset, std::size_t Width>
     constexpr auto
     extract_msb(std::span<const std::byte> buf) noexcept
         -> uint_for_width_t<Width> {
+      static_assert(Offset + Width >= Offset,
+                    "Offset + Width overflows std::size_t");
       using R = uint_for_width_t<Width>;
       R result = 0;
 
-      constexpr unsigned start_byte = Offset / 8;
-      constexpr unsigned start_bit = Offset % 8;
+      constexpr std::size_t start_byte = Offset / 8;
+      constexpr std::size_t start_bit = Offset % 8;
 
       // Accumulate bits from each byte that overlaps the field
-      constexpr unsigned end_bit = Offset + Width;
-      constexpr unsigned end_byte = (end_bit + 7) / 8;
+      constexpr std::size_t end_bit = Offset + Width;
+      constexpr std::size_t end_byte = (end_bit + 7) / 8;
 
-      unsigned bits_remaining = Width;
-      for (unsigned i = start_byte; i < end_byte; ++i) {
+      require_buffer_size<end_byte>(buf.size());
+
+      std::size_t bits_remaining = Width;
+      for (std::size_t i = start_byte; i < end_byte; ++i) {
         auto byte_val = static_cast<unsigned>(buf[i]);
 
         unsigned lo = (i == start_byte) ? start_bit : 0;
@@ -63,20 +82,24 @@ namespace xb::wire {
       return result;
     }
 
-    template <unsigned Offset, unsigned Width>
+    template <std::size_t Offset, std::size_t Width>
     constexpr auto
     extract_lsb(std::span<const std::byte> buf) noexcept
         -> uint_for_width_t<Width> {
+      static_assert(Offset + Width >= Offset,
+                    "Offset + Width overflows std::size_t");
       using R = uint_for_width_t<Width>;
       R result = 0;
 
-      constexpr unsigned start_byte = Offset / 8;
-      constexpr unsigned start_bit = Offset % 8;
-      constexpr unsigned end_bit = Offset + Width;
-      constexpr unsigned end_byte = (end_bit + 7) / 8;
+      constexpr std::size_t start_byte = Offset / 8;
+      constexpr std::size_t start_bit = Offset % 8;
+      constexpr std::size_t end_bit = Offset + Width;
+      constexpr std::size_t end_byte = (end_bit + 7) / 8;
 
-      unsigned bits_collected = 0;
-      for (unsigned i = start_byte; i < end_byte; ++i) {
+      require_buffer_size<end_byte>(buf.size());
+
+      std::size_t bits_collected = 0;
+      for (std::size_t i = start_byte; i < end_byte; ++i) {
         auto byte_val = static_cast<unsigned>(buf[i]);
 
         unsigned lo = (i == start_byte) ? start_bit : 0;
@@ -93,17 +116,21 @@ namespace xb::wire {
       return result;
     }
 
-    template <unsigned Offset, unsigned Width>
+    template <std::size_t Offset, std::size_t Width>
     constexpr void
     insert_msb(std::span<std::byte> buf,
                uint_for_width_t<Width> value) noexcept {
-      constexpr unsigned start_byte = Offset / 8;
-      constexpr unsigned start_bit = Offset % 8;
-      constexpr unsigned end_bit = Offset + Width;
-      constexpr unsigned end_byte = (end_bit + 7) / 8;
+      static_assert(Offset + Width >= Offset,
+                    "Offset + Width overflows std::size_t");
+      constexpr std::size_t start_byte = Offset / 8;
+      constexpr std::size_t start_bit = Offset % 8;
+      constexpr std::size_t end_bit = Offset + Width;
+      constexpr std::size_t end_byte = (end_bit + 7) / 8;
 
-      unsigned bits_remaining = Width;
-      for (unsigned i = start_byte; i < end_byte; ++i) {
+      require_buffer_size<end_byte>(buf.size());
+
+      std::size_t bits_remaining = Width;
+      for (std::size_t i = start_byte; i < end_byte; ++i) {
         unsigned lo = (i == start_byte) ? start_bit : 0;
         unsigned hi =
             (i + 1 == end_byte && end_bit % 8 != 0) ? (end_bit % 8) : 8;
@@ -121,17 +148,21 @@ namespace xb::wire {
       }
     }
 
-    template <unsigned Offset, unsigned Width>
+    template <std::size_t Offset, std::size_t Width>
     constexpr void
     insert_lsb(std::span<std::byte> buf,
                uint_for_width_t<Width> value) noexcept {
-      constexpr unsigned start_byte = Offset / 8;
-      constexpr unsigned start_bit = Offset % 8;
-      constexpr unsigned end_bit = Offset + Width;
-      constexpr unsigned end_byte = (end_bit + 7) / 8;
+      static_assert(Offset + Width >= Offset,
+                    "Offset + Width overflows std::size_t");
+      constexpr std::size_t start_byte = Offset / 8;
+      constexpr std::size_t start_bit = Offset % 8;
+      constexpr std::size_t end_bit = Offset + Width;
+      constexpr std::size_t end_byte = (end_bit + 7) / 8;
 
-      unsigned bits_consumed = 0;
-      for (unsigned i = start_byte; i < end_byte; ++i) {
+      require_buffer_size<end_byte>(buf.size());
+
+      std::size_t bits_consumed = 0;
+      for (std::size_t i = start_byte; i < end_byte; ++i) {
         unsigned lo = (i == start_byte) ? start_bit : 0;
         unsigned hi =
             (i + 1 == end_byte && end_bit % 8 != 0) ? (end_bit % 8) : 8;
@@ -151,7 +182,7 @@ namespace xb::wire {
 
   } // namespace detail
 
-  template <unsigned Offset, unsigned Width,
+  template <std::size_t Offset, std::size_t Width,
             bit_order Order = bit_order::msb_first>
   constexpr auto
   extract_bits(std::span<const std::byte> buf) noexcept
@@ -163,7 +194,7 @@ namespace xb::wire {
     }
   }
 
-  template <unsigned Offset, unsigned Width,
+  template <std::size_t Offset, std::size_t Width,
             bit_order Order = bit_order::msb_first>
   constexpr void
   insert_bits(std::span<std::byte> buf,

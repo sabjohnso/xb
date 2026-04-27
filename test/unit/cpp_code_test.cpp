@@ -828,6 +828,60 @@ TEST_CASE("struct doc comment uses doxygen block format", "[cpp_writer]") {
   CHECK(result.find("///") == std::string::npos);
 }
 
+TEST_CASE("struct doc comment escapes embedded comment terminators",
+          "[cpp_writer][security]") {
+  // A schema annotation that contains "*/" must not be allowed to
+  // close the surrounding /** ... */ block in the generated header.
+  // If unescaped, an attacker who controls the schema text can inject
+  // arbitrary C++ tokens into the codegen output.
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_struct s;
+  s.name = "point";
+  s.doc_comment = "harmless prefix */ int evil_injection; /*";
+  s.fields = {{"int", "x", ""}};
+  file.namespaces.push_back({"ns", {std::move(s)}});
+
+  auto result = writer.write(file);
+  // After sanitisation, "*/" becomes "* /" inside the comment text,
+  // so the injected sequence "*/ int evil_injection;" no longer
+  // appears verbatim in the output.
+  CHECK(result.find("*/ int evil_injection") == std::string::npos);
+  // The annotation text itself is still emitted (as a benign comment),
+  // but split so the "*/" cannot close the Doxygen block.
+  CHECK(result.find("* / int evil_injection") != std::string::npos);
+  // Exactly one comment block was opened and closed.
+  std::size_t opens = 0;
+  for (std::size_t p = result.find("/**"); p != std::string::npos;
+       p = result.find("/**", p + 1)) {
+    ++opens;
+  }
+  std::size_t closes = 0;
+  for (std::size_t p = result.find("*/"); p != std::string::npos;
+       p = result.find("*/", p + 1)) {
+    ++closes;
+  }
+  CHECK(opens == closes);
+}
+
+TEST_CASE("class doc comment escapes embedded comment terminators",
+          "[cpp_writer][security]") {
+  cpp_file file;
+  file.filename = "test.hpp";
+
+  cpp_class cls;
+  cls.name = "order";
+  cls.raw_struct_name = "order_data";
+  cls.doc_comment = "details */ int evil_class_injection; /*";
+  cls.fields = {{"int", "id", ""}};
+  file.namespaces.push_back({"ns", {cls}});
+
+  auto result = writer.write(file);
+  CHECK(result.find("*/ int evil_class_injection") == std::string::npos);
+  CHECK(result.find("* / int evil_class_injection") != std::string::npos);
+}
+
 TEST_CASE("class without doc comment gets generated brief", "[cpp_writer]") {
   cpp_file file;
   file.filename = "test.hpp";

@@ -14,6 +14,7 @@
 #include <xb/cpp_writer.hpp>
 #include <xb/expat_reader.hpp>
 #include <xb/naming.hpp>
+#include <xb/safe_output.hpp>
 #include <xb/schema_parser.hpp>
 #include <xb/schema_set.hpp>
 #include <xb/type_map.hpp>
@@ -143,14 +144,18 @@ main(int argc, char* argv[]) {
   xb::cpp_writer writer;
   for (const auto& file : files) {
     auto path = fs::path(output_dir) / file.filename;
-    std::ofstream out(path);
-    if (!out) {
+    std::string code = writer.write(file);
+    if (!no_format) code = xb::format_cpp_code(code, path.string(), style_file);
+    auto outcome = xb::write_text_file_no_follow(path, code);
+    if (outcome == xb::write_outcome::refused_symlink) {
+      std::cerr << "xb-bootstrap: refusing to follow symlink at output path: "
+                << path.string() << "\n";
+      return 2;
+    }
+    if (outcome != xb::write_outcome::ok) {
       std::cerr << "xb-bootstrap: cannot write file: " << path.string() << "\n";
       return 2;
     }
-    std::string code = writer.write(file);
-    if (!no_format) code = xb::format_cpp_code(code, path.string(), style_file);
-    out << code;
   }
 
   return 0;

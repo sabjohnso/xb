@@ -20,6 +20,7 @@
 #include <xb/rng_simplify.hpp>
 #include <xb/rng_translator.hpp>
 #include <xb/rng_writer.hpp>
+#include <xb/safe_output.hpp>
 #include <xb/schema_fetcher.hpp>
 #include <xb/schema_parser.hpp>
 #include <xb/schema_set.hpp>
@@ -705,29 +706,37 @@ namespace {
     xb::cpp_writer writer;
     for (const auto& file : files) {
       auto path = fs::path(output_dir) / file.filename;
-      std::ofstream out(path);
-      if (!out) {
-        std::cerr << "xb: cannot write file: " << path.string() << "\n";
-        return exit_io;
-      }
       std::string code = writer.write(file);
       if (!no_format)
         code = xb::format_cpp_code(code, path.string(), style_file);
-      out << code;
+      auto outcome = xb::write_text_file_no_follow(path, code);
+      if (outcome == xb::write_outcome::refused_symlink) {
+        std::cerr << "xb: refusing to follow symlink at output path: "
+                  << path.string() << "\n";
+        return exit_io;
+      }
+      if (outcome != xb::write_outcome::ok) {
+        std::cerr << "xb: cannot write file: " << path.string() << "\n";
+        return exit_io;
+      }
     }
 
     // Write binary header directly (not through cpp_writer)
     if (!binary_header_text.empty()) {
       auto path = fs::path(output_dir) / "wire_types.hpp";
-      std::ofstream out(path);
-      if (!out) {
-        std::cerr << "xb: cannot write file: " << path.string() << "\n";
-        return exit_io;
-      }
       if (!no_format)
         binary_header_text =
             xb::format_cpp_code(binary_header_text, path.string(), style_file);
-      out << binary_header_text;
+      auto outcome = xb::write_text_file_no_follow(path, binary_header_text);
+      if (outcome == xb::write_outcome::refused_symlink) {
+        std::cerr << "xb: refusing to follow symlink at output path: "
+                  << path.string() << "\n";
+        return exit_io;
+      }
+      if (outcome != xb::write_outcome::ok) {
+        std::cerr << "xb: cannot write file: " << path.string() << "\n";
+        return exit_io;
+      }
     }
 
     return exit_success;
@@ -1453,16 +1462,21 @@ namespace {
       auto type_files = gen.generate();
       for (const auto& file : type_files) {
         auto path = fs::path(output_dir) / file.filename;
-        std::ofstream out(path);
-        if (!out) {
+        std::string code = writer.write(file);
+        if (!no_format)
+          code = xb::format_cpp_code(code, path.string(), style_file);
+        auto outcome = xb::write_text_file_no_follow(path, code);
+        if (outcome == xb::write_outcome::refused_symlink) {
+          std::cerr
+              << "xb generate-wsdl: refusing to follow symlink at output path: "
+              << path.string() << "\n";
+          return exit_io;
+        }
+        if (outcome != xb::write_outcome::ok) {
           std::cerr << "xb generate-wsdl: cannot write file: " << path.string()
                     << "\n";
           return exit_io;
         }
-        std::string code = writer.write(file);
-        if (!no_format)
-          code = xb::format_cpp_code(code, path.string(), style_file);
-        out << code;
       }
     } catch (const std::exception& e) {
       std::cerr << "xb generate-wsdl: type generation error: " << e.what()
@@ -1491,16 +1505,21 @@ namespace {
 
       for (const auto& file : wsdl_files) {
         auto path = fs::path(output_dir) / file.filename;
-        std::ofstream out(path);
-        if (!out) {
+        std::string code = writer.write(file);
+        if (!no_format)
+          code = xb::format_cpp_code(code, path.string(), style_file);
+        auto outcome = xb::write_text_file_no_follow(path, code);
+        if (outcome == xb::write_outcome::refused_symlink) {
+          std::cerr
+              << "xb generate-wsdl: refusing to follow symlink at output path: "
+              << path.string() << "\n";
+          return exit_io;
+        }
+        if (outcome != xb::write_outcome::ok) {
           std::cerr << "xb generate-wsdl: cannot write file: " << path.string()
                     << "\n";
           return exit_io;
         }
-        std::string code = writer.write(file);
-        if (!no_format)
-          code = xb::format_cpp_code(code, path.string(), style_file);
-        out << code;
       }
     } catch (const std::exception& e) {
       std::cerr << "xb generate-wsdl: codegen error: " << e.what() << "\n";

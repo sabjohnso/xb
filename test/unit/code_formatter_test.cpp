@@ -2,6 +2,9 @@
 
 #include <xb/code_formatter.hpp>
 
+#include <filesystem>
+#include <string>
+
 TEST_CASE("format_cpp_code returns formatted code", "[code_formatter]") {
   // Deliberately ugly code that clang-format would fix
   std::string ugly = "struct foo{int x;std::string y;bool z;};";
@@ -50,6 +53,30 @@ TEST_CASE("format_cpp_code preserves already-formatted code",
   auto result = xb::format_cpp_code(code, "test.hpp");
   // Already well-formatted, should be unchanged or very similar
   REQUIRE(result.find("struct foo") != std::string::npos);
+}
+
+TEST_CASE("format_cpp_code does not interpret filename via shell",
+          "[code_formatter][security]") {
+  if (!xb::clang_format_available()) return;
+
+  // Use a filename whose value contains a shell command substitution.
+  // The popen()-based implementation embeds the filename in a string
+  // passed to /bin/sh -c, which interprets ";" as a command separator
+  // and runs `touch <sentinel>`. The posix_spawnp implementation
+  // passes argv unmolested, so the filename is treated as a literal
+  // value by clang-format and the sentinel is never created.
+  auto sentinel =
+      std::filesystem::temp_directory_path() / "xb-shell-injection-canary";
+  std::error_code ec;
+  std::filesystem::remove(sentinel, ec);
+
+  std::string filename = "x.hpp;touch " + sentinel.string() + ";echo ";
+  std::string code = "int main(){return 0;}";
+  xb::format_cpp_code(code, filename);
+
+  bool created = std::filesystem::exists(sentinel);
+  std::filesystem::remove(sentinel, ec);
+  CHECK_FALSE(created);
 }
 
 TEST_CASE("clang_format_available returns bool", "[code_formatter]") {

@@ -3,6 +3,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace {
   bool
@@ -92,11 +93,28 @@ namespace xb {
       os << ";\n";
     }
 
+    /// Replace any embedded "*/" with "* /" so a schema annotation
+    /// cannot close the surrounding Doxygen block and inject C++.
+    std::string
+    sanitize_for_block_comment(std::string_view text) {
+      std::string out;
+      out.reserve(text.size());
+      for (std::size_t i = 0; i < text.size(); ++i) {
+        if (i + 1 < text.size() && text[i] == '*' && text[i + 1] == '/') {
+          out += "* /";
+          ++i;
+        } else {
+          out += text[i];
+        }
+      }
+      return out;
+    }
+
     void
     write_doc_comment(std::ostream& os, const std::string& doc) {
       if (doc.empty()) return;
       os << "/**\n";
-      std::istringstream iss(doc);
+      std::istringstream iss(sanitize_for_block_comment(doc));
       std::string line;
       bool first = true;
       while (std::getline(iss, line)) {
@@ -121,7 +139,7 @@ namespace xb {
       if (!doc.empty()) {
         os << " *\n";
         os << " * @details ";
-        std::istringstream iss(doc);
+        std::istringstream iss(sanitize_for_block_comment(doc));
         std::string line;
         bool first = true;
         while (std::getline(iss, line)) {

@@ -23,6 +23,11 @@ target_link_libraries(xb_expat_reader_test PRIVATE Catch2::Catch2WithMain xb::li
 target_compile_features(xb_expat_reader_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_expat_reader_test TARGET xb_expat_reader_test)
 
+add_executable(xb_safe_output_test safe_output_test.cpp)
+target_link_libraries(xb_safe_output_test PRIVATE Catch2::Catch2WithMain xb::header)
+target_compile_features(xb_safe_output_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_safe_output_test TARGET xb_safe_output_test)
+
 add_executable(xb_xml_writer_test xml_writer_test.cpp)
 target_link_libraries(xb_xml_writer_test PRIVATE Catch2::Catch2WithMain xb::library)
 target_compile_features(xb_xml_writer_test PRIVATE cxx_std_${xb_CXX_STANDARD})

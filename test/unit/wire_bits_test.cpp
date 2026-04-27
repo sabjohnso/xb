@@ -5,6 +5,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
+#include <vector>
+
+#ifdef __unix__
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 // Helper: create a span from a std::array
 template <std::size_t N>
@@ -234,3 +242,51 @@ TEST_CASE("insert_bits/extract_bits: 48-bit round-trip (LSB)", "[wire][bits]") {
 
   CHECK(result == value);
 }
+
+// ---------------------------------------------------------------------------
+// Security: offset/width widened to size_t (no 32-bit overflow)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("extract_bits offset+width does not overflow at codegen time",
+          "[wire][bits][security]") {
+  // Use a moderately large offset that would still be representable as
+  // unsigned but easily exceeds the 4 GiB threshold a bit-level field
+  // could hit on a multi-MiB message frame. Verify the templates
+  // accept size_t-class offsets.
+  constexpr std::size_t kOffset = std::size_t{1} << 20; // 1 Mi bits
+  constexpr std::size_t kBufBytes = (kOffset / 8) + 1;
+  std::vector<std::byte> big(kBufBytes, B(0));
+  big[kOffset / 8] = B(0xAB);
+  std::span<const std::byte> sp{big};
+  CHECK(xb::wire::extract_bits<kOffset, 8>(sp) == 0xAB);
+}
+
+// ---------------------------------------------------------------------------
+// Security: defensive bounds check on undersized buffers
+// ---------------------------------------------------------------------------
+
+#ifdef __unix__
+TEST_CASE("extract_bits aborts on undersized buffer",
+          "[wire][bits][security]") {
+  // The bounds check in detail::extract_msb refuses to read past the
+  // span; rather than emit UB, it aborts the program. Verified via a
+  // forked child so the parent process survives.
+  auto pid = ::fork();
+  REQUIRE(pid >= 0);
+  if (pid == 0) {
+    // Child process: ask for 16 bits from a 1-byte buffer. This must
+    // not return — the bounds check aborts instead of reading past
+    // the end.
+    std::array<std::byte, 1> buf = {B(0xAB)};
+    auto v = xb::wire::extract_bits<0, 16>(std::span<const std::byte>{buf});
+    // Use the value to prevent dead-code elimination, then exit with
+    // a sentinel so the parent can distinguish "fell through" from
+    // "aborted".
+    ::_exit(v == 0 ? 99 : 100);
+  }
+  int status = 0;
+  ::waitpid(pid, &status, 0);
+  CHECK(WIFSIGNALED(status));
+  if (WIFSIGNALED(status)) { CHECK(WTERMSIG(status) == SIGABRT); }
+}
+#endif
