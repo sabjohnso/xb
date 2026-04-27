@@ -116,6 +116,8 @@ if(XB_HAS_SYS_SOCKET)
   target_sources(xb_library PRIVATE http_listener.cpp)
 endif()
 
+target_sources(xb_library PRIVATE wss_validate.cpp)
+
 if(OPENSSL_FOUND)
   target_sources(xb_library PRIVATE wss_crypto.cpp)
   target_link_libraries(xb_library PRIVATE $<BUILD_INTERFACE:OpenSSL::Crypto>)

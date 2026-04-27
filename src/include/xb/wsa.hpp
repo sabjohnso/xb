@@ -41,4 +41,19 @@ namespace xb::wsa {
     operator==(const addressing_headers&) const = default;
   };
 
+  /// Options applied when extracting WS-Addressing headers from an
+  /// incoming envelope.  An attacker who can place arbitrary URIs in
+  /// @c ReplyTo / @c FaultTo / @c From can otherwise turn any service
+  /// that honours those headers into an SSRF gadget.
+  struct endpoint_validation_options {
+    /// Endpoint addresses (URIs) the receiver is willing to route
+    /// asynchronous responses or faults to.  When empty, no validation
+    /// is performed (legacy permissive mode).  When non-empty, an
+    /// extracted @c ReplyTo / @c FaultTo / @c From address must either
+    /// equal one of these strings or be the WS-Addressing
+    /// @c anonymous URI (which means "respond on the request
+    /// connection" and is always benign).
+    std::vector<std::string> address_allowlist;
+  };
+
 } // namespace xb::wsa

@@ -110,15 +110,36 @@ TEST_CASE("wss crypto: random_bytes zero length", "[wss_crypto]") {
 
 // -- compute_password_digest --------------------------------------------------
 
-TEST_CASE("wss crypto: compute_password_digest matches OASIS known value",
+TEST_CASE("wss crypto: compute_password_digest defaults to SHA-256",
+          "[wss_crypto][security]") {
+  // The OASIS UsernameToken Profile 1.0 mandates SHA-1, but xb defaults
+  // to SHA-256 because SHA-1 is no longer acceptable for new
+  // deployments.  The two algorithms must produce different outputs.
+  auto sha256_default = crypto::compute_password_digest(
+      "LKqI6G/AikKCQrN0zqZFlg==", "2003-07-16T01:24:32Z", "taadtaadpstcsm");
+  auto sha256_explicit = crypto::compute_password_digest(
+      "LKqI6G/AikKCQrN0zqZFlg==", "2003-07-16T01:24:32Z", "taadtaadpstcsm",
+      crypto::hash_algorithm::sha256);
+  CHECK(sha256_default == sha256_explicit);
+  // Different from the SHA-1 result.
+  auto sha1 = crypto::compute_password_digest(
+      "LKqI6G/AikKCQrN0zqZFlg==", "2003-07-16T01:24:32Z", "taadtaadpstcsm",
+      crypto::hash_algorithm::sha1);
+  CHECK(sha256_default != sha1);
+}
+
+TEST_CASE("wss crypto: compute_password_digest with explicit SHA-1 matches "
+          "OASIS known value",
           "[wss_crypto]") {
+  // Available for OASIS UsernameToken Profile 1.0 interop.
   // Password_Digest = Base64(SHA-1(nonce_bytes + created_utf8 + password_utf8))
   // Verified with: python3 -c "import base64,hashlib;
   //   print(base64.b64encode(hashlib.sha1(
   //     base64.b64decode('LKqI6G/AikKCQrN0zqZFlg==')
   //     + b'2003-07-16T01:24:32Z' + b'taadtaadpstcsm').digest()).decode())"
   auto result = crypto::compute_password_digest(
-      "LKqI6G/AikKCQrN0zqZFlg==", "2003-07-16T01:24:32Z", "taadtaadpstcsm");
+      "LKqI6G/AikKCQrN0zqZFlg==", "2003-07-16T01:24:32Z", "taadtaadpstcsm",
+      crypto::hash_algorithm::sha1);
   CHECK(result == "vjwUgK9DkI4e3lonFkyGHvQPKlE=");
 }
 

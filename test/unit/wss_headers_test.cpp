@@ -45,6 +45,8 @@ TEST_CASE("wss headers: add UsernameToken with text password",
   wss::username_token ut;
   ut.username = "alice";
   ut.password = "secret";
+  // Plaintext is no longer the default — opt in explicitly.
+  ut.password_type = std::string(wss::password_text_type);
   sh.username = ut;
 
   wss::add_security_header(env, sh);

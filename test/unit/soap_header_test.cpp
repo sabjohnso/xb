@@ -159,3 +159,73 @@ TEST_CASE("soap header: handler returning false leaves mustUnderstand "
 
   CHECK_THROWS_AS(pipeline.process(env), soap::soap_fault_exception);
 }
+
+// -- Role-based filtering (SOAP 1.2 §2.7, SOAP 1.1 actor) ---------------------
+
+TEST_CASE("soap header: mustUnderstand on header targeted at another role "
+          "is ignored",
+          "[soap_header][security]") {
+  // Per SOAP 1.2 §2.7 (and the analogous SOAP 1.1 actor rule), a
+  // mustUnderstand header whose role does not match the current node
+  // is not the current node's responsibility.  The header pipeline
+  // must skip it rather than fault on it.
+  soap::envelope env;
+  env.version = soap::soap_version::v1_2;
+
+  soap::header_block hb;
+  hb.content = xb::any_element(xb::qname("urn:auth", "Token"), {}, {});
+  hb.must_understand = true;
+  hb.role = "http://example.com/some-other-role";
+  env.headers.push_back(std::move(hb));
+
+  soap::header_pipeline pipeline;
+  // No handler — but the header is targeted at another role, so this
+  // node must not raise mustUnderstand.
+  CHECK_NOTHROW(pipeline.process(env));
+}
+
+TEST_CASE("soap header: handler is not invoked for headers targeted at "
+          "another role",
+          "[soap_header]") {
+  soap::envelope env;
+  env.version = soap::soap_version::v1_2;
+
+  soap::header_block hb;
+  hb.content = xb::any_element(xb::qname("urn:auth", "Token"), {}, {});
+  hb.must_understand = false;
+  hb.role = "http://example.com/some-other-role";
+  env.headers.push_back(std::move(hb));
+
+  bool called = false;
+  soap::header_pipeline pipeline;
+  pipeline.add_handler(xb::qname("urn:auth", "Token"),
+                       [&](const soap::header_block&) {
+                         called = true;
+                         return true;
+                       });
+  pipeline.process(env);
+  CHECK_FALSE(called);
+}
+
+TEST_CASE("soap header: pipeline can be configured for a specific role",
+          "[soap_header]") {
+  soap::envelope env;
+  env.version = soap::soap_version::v1_2;
+
+  soap::header_block hb;
+  hb.content = xb::any_element(xb::qname("urn:auth", "Token"), {}, {});
+  hb.must_understand = true;
+  hb.role = "http://example.com/cache";
+  env.headers.push_back(std::move(hb));
+
+  bool called = false;
+  soap::header_pipeline pipeline;
+  pipeline.set_current_role("http://example.com/cache");
+  pipeline.add_handler(xb::qname("urn:auth", "Token"),
+                       [&](const soap::header_block&) {
+                         called = true;
+                         return true;
+                       });
+  pipeline.process(env);
+  CHECK(called);
+}

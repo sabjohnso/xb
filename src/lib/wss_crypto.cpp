@@ -142,7 +142,7 @@ namespace xb::wss::crypto {
   std::string
   compute_password_digest(const std::string& nonce_base64,
                           const std::string& created,
-                          const std::string& password) {
+                          const std::string& password, hash_algorithm algo) {
     // Decode nonce from base64
     auto nonce_bytes = parse_base64_binary(nonce_base64);
 
@@ -157,8 +157,11 @@ namespace xb::wss::crypto {
       input.push_back(static_cast<std::byte>(c));
     }
 
-    // SHA-1 digest per OASIS UsernameToken Profile 1.0 Section 3.1
-    auto hash = digest(hash_algorithm::sha1, input);
+    // OASIS UsernameToken Profile 1.0 specifies SHA-1.  xb defaults to
+    // SHA-256 because SHA-1 is no longer acceptable for new deployments;
+    // SHA-1 remains available as an explicit opt-in for OASIS-1.0 wire
+    // interop.
+    auto hash = digest(algo, input);
 
     // Zero sensitive intermediate
     OPENSSL_cleanse(input.data(), input.size());

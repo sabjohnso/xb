@@ -329,6 +329,97 @@ TEST_CASE("wsa headers: non-WS-A headers are ignored by extract",
   CHECK_FALSE(extracted.to.has_value());
 }
 
+// -- Endpoint allowlist (SSRF mitigation) -------------------------------------
+
+TEST_CASE("wsa headers: extract permits all addresses when allowlist empty",
+          "[wsa_headers][security]") {
+  // Default behaviour is unchanged — no allowlist means legacy
+  // permissive extraction.  This documents the contract.
+  wsa::addressing_headers in;
+  in.reply_to = wsa::endpoint_reference{"http://attacker.example/replies"};
+  in.fault_to = wsa::endpoint_reference{"http://attacker.example/faults"};
+
+  soap::envelope env;
+  wsa::add_addressing_headers(env, in);
+
+  wsa::endpoint_validation_options opts;
+  // empty allowlist
+  CHECK_NOTHROW(wsa::extract_addressing_headers(env, opts));
+}
+
+TEST_CASE("wsa headers: extract refuses ReplyTo outside allowlist",
+          "[wsa_headers][security][SSRF]") {
+  wsa::addressing_headers in;
+  in.reply_to = wsa::endpoint_reference{"http://attacker.example/replies"};
+
+  soap::envelope env;
+  wsa::add_addressing_headers(env, in);
+
+  wsa::endpoint_validation_options opts;
+  opts.address_allowlist = {"http://trusted.example/replies"};
+  CHECK_THROWS_AS(wsa::extract_addressing_headers(env, opts),
+                  std::runtime_error);
+}
+
+TEST_CASE("wsa headers: extract refuses FaultTo outside allowlist",
+          "[wsa_headers][security][SSRF]") {
+  wsa::addressing_headers in;
+  in.fault_to = wsa::endpoint_reference{"http://attacker.example/fault"};
+
+  soap::envelope env;
+  wsa::add_addressing_headers(env, in);
+
+  wsa::endpoint_validation_options opts;
+  opts.address_allowlist = {"http://trusted.example/replies"};
+  CHECK_THROWS_AS(wsa::extract_addressing_headers(env, opts),
+                  std::runtime_error);
+}
+
+TEST_CASE("wsa headers: extract refuses From outside allowlist",
+          "[wsa_headers][security][SSRF]") {
+  wsa::addressing_headers in;
+  in.from = wsa::endpoint_reference{"http://attacker.example/sender"};
+
+  soap::envelope env;
+  wsa::add_addressing_headers(env, in);
+
+  wsa::endpoint_validation_options opts;
+  opts.address_allowlist = {"http://trusted.example/replies"};
+  CHECK_THROWS_AS(wsa::extract_addressing_headers(env, opts),
+                  std::runtime_error);
+}
+
+TEST_CASE("wsa headers: extract permits anonymous URI by default",
+          "[wsa_headers][security]") {
+  // The WSA anonymous URI is the legacy way to say "respond on this
+  // same connection" and is benign — treat it as always-allowed.
+  wsa::addressing_headers in;
+  in.reply_to = wsa::endpoint_reference{std::string(wsa::anonymous_uri)};
+
+  soap::envelope env;
+  wsa::add_addressing_headers(env, in);
+
+  wsa::endpoint_validation_options opts;
+  opts.address_allowlist = {"http://trusted.example/replies"};
+  CHECK_NOTHROW(wsa::extract_addressing_headers(env, opts));
+}
+
+TEST_CASE("wsa headers: extract permits addresses in allowlist",
+          "[wsa_headers][security]") {
+  wsa::addressing_headers in;
+  in.reply_to = wsa::endpoint_reference{"http://trusted.example/replies"};
+  in.fault_to = wsa::endpoint_reference{"http://trusted.example/replies"};
+
+  soap::envelope env;
+  wsa::add_addressing_headers(env, in);
+
+  wsa::endpoint_validation_options opts;
+  opts.address_allowlist = {"http://trusted.example/replies"};
+  CHECK_NOTHROW(wsa::extract_addressing_headers(env, opts));
+}
+
+// -----------------------------------------------------------------------------
+
 TEST_CASE("wsa headers: all WS-A headers have must_understand true",
           "[wsa_headers]") {
   wsa::addressing_headers h;

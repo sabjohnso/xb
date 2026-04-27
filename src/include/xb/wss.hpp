@@ -1,5 +1,7 @@
 #pragma once
 
+#include <xb/wss_crypto.hpp>
+
 #include <optional>
 #include <string>
 
@@ -30,7 +32,17 @@ namespace xb::wss {
   struct username_token {
     std::string username;
     std::string password;
-    std::string password_type = std::string(password_text_type);
+
+    /// Wire URI for the password type.  Defaults to digest mode so an
+    /// unconfigured caller never sends the password in the clear.
+    std::string password_type = std::string(password_digest_type);
+
+    /// Hash algorithm used to compute the digest.  Defaults to
+    /// @c sha256; SHA-1 is available as an opt-in for OASIS
+    /// UsernameToken Profile 1.0 wire interop, but is otherwise no
+    /// longer acceptable.
+    crypto::hash_algorithm digest_algorithm = crypto::hash_algorithm::sha256;
+
     std::optional<std::string> nonce;
     std::optional<std::string> created;
 

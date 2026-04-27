@@ -48,7 +48,12 @@ TEST_CASE("wss: username_token default construction", "[wss]") {
   wss::username_token ut;
   CHECK(ut.username.empty());
   CHECK(ut.password.empty());
-  CHECK(ut.password_type == wss::password_text_type);
+  // Default is digest mode, not plaintext, so an unconfigured caller
+  // never sends the password in clear.
+  CHECK(ut.password_type == wss::password_digest_type);
+  // Default digest algorithm is SHA-256, not the OASIS-1.0 spec's
+  // SHA-1.  Callers needing OASIS-1.0 wire interop must opt in.
+  CHECK(ut.digest_algorithm == wss::crypto::hash_algorithm::sha256);
   CHECK_FALSE(ut.nonce.has_value());
   CHECK_FALSE(ut.created.has_value());
 }
@@ -72,7 +77,9 @@ TEST_CASE("wss: username_token equality", "[wss]") {
   CHECK_FALSE(a == b);
 
   b = a;
-  b.password_type = std::string(wss::password_digest_type);
+  // Flip from the default (digest) to plaintext to verify password_type
+  // contributes to equality.
+  b.password_type = std::string(wss::password_text_type);
   CHECK_FALSE(a == b);
 
   b = a;

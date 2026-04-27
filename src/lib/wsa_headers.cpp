@@ -2,6 +2,8 @@
 
 #include <xb/any_element.hpp>
 
+#include <stdexcept>
+
 namespace xb::wsa {
 
   namespace {
@@ -83,8 +85,32 @@ namespace xb::wsa {
     }
   }
 
+  namespace {
+
+    /// Validate one EPR address against the allowlist. Empty allowlist =
+    /// permissive mode; the WSA anonymous URI is always permitted.
+    void
+    validate_address(const std::string& field_name, const std::string& address,
+                     const endpoint_validation_options& opts) {
+      if (opts.address_allowlist.empty()) return;
+      if (address == anonymous_uri) return;
+      for (const auto& allowed : opts.address_allowlist) {
+        if (address == allowed) return;
+      }
+      throw std::runtime_error("wsa: refusing " + field_name +
+                               " address not in allowlist: " + address);
+    }
+
+  } // namespace
+
   addressing_headers
   extract_addressing_headers(const soap::envelope& env) {
+    return extract_addressing_headers(env, endpoint_validation_options{});
+  }
+
+  addressing_headers
+  extract_addressing_headers(const soap::envelope& env,
+                             const endpoint_validation_options& opts) {
     addressing_headers result;
 
     for (const auto& hb : env.headers) {
@@ -99,11 +125,17 @@ namespace xb::wsa {
       } else if (local == "MessageID") {
         result.message_id = text_content(hb.content);
       } else if (local == "ReplyTo") {
-        result.reply_to = extract_epr(hb.content);
+        auto epr = extract_epr(hb.content);
+        if (epr) validate_address("ReplyTo", epr->address, opts);
+        result.reply_to = std::move(epr);
       } else if (local == "FaultTo") {
-        result.fault_to = extract_epr(hb.content);
+        auto epr = extract_epr(hb.content);
+        if (epr) validate_address("FaultTo", epr->address, opts);
+        result.fault_to = std::move(epr);
       } else if (local == "From") {
-        result.from = extract_epr(hb.content);
+        auto epr = extract_epr(hb.content);
+        if (epr) validate_address("From", epr->address, opts);
+        result.from = std::move(epr);
       } else if (local == "RelatesTo") {
         relates_to rt;
         rt.uri = text_content(hb.content);
