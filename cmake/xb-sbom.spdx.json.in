@@ -1,0 +1,162 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "xb-@xb_SBOM_VERSION@",
+  "documentNamespace": "https://github.com/sabjohnso/xb/sbom/xb-@xb_SBOM_VERSION@-@xb_SBOM_TIMESTAMP@",
+  "creationInfo": {
+    "created": "@xb_SBOM_TIMESTAMP@",
+    "creators": [
+      "Tool: xb-cmake-sbom-emitter",
+      "Organization: sabjohnso/xb"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-xb",
+      "name": "xb",
+      "versionInfo": "@xb_SBOM_VERSION@",
+      "downloadLocation": "https://github.com/sabjohnso/xb",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "xb XML / WSDL / BES toolchain"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-catch2",
+      "name": "catch2",
+      "versionInfo": "@xb_SBOM_CATCH2_VERSION@",
+      "downloadLocation": "https://github.com/catchorg/Catch2.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSL-1.0",
+      "licenseDeclared": "BSL-1.0",
+      "copyrightText": "NOASSERTION",
+      "comment": "Pinned via CACHE variable in cmake/xb_deps.cmake. Build- and test-time only."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-json-schema-validator",
+      "name": "nlohmann_json_schema_validator",
+      "versionInfo": "@xb_SBOM_VALIDATOR_VERSION@",
+      "downloadLocation": "https://github.com/pboettch/json-schema-validator.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "comment": "Pinned via CACHE variable in cmake/xb_deps.cmake. Build-time only (consumed by json-commander)."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-json-commander",
+      "name": "json-commander",
+      "versionInfo": "@xb_SBOM_JSON_COMMANDER_VERSION@",
+      "downloadLocation": "https://github.com/JSON-Commander/json-commander.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "Pinned via CACHE variable in cmake/xb_deps.cmake to a specific commit hash (no upstream tags yet). Build-time only."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ctest-deps",
+      "name": "ctest_deps",
+      "versionInfo": "@xb_SBOM_CTEST_DEPS_VERSION@",
+      "downloadLocation": "https://github.com/sabjohnso/ctest_deps.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "Pinned via CACHE variable in cmake/xb_deps.cmake to a specific commit hash. Build- and test-time only."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-cmake-utilities",
+      "name": "cmake_utilities",
+      "versionInfo": "@xb_SBOM_CMAKE_UTILITIES_VERSION@",
+      "downloadLocation": "https://github.com/sabjohnso/cmake_utilities.git",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "comment": "Git submodule pinned at a specific commit. Provides Find* modules consumed by xb_deps.cmake. Build-time only."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-expat",
+      "name": "expat",
+      "versionInfo": "@xb_SBOM_EXPAT_VERSION@",
+      "downloadLocation": "https://github.com/libexpat/libexpat",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "comment": "Runtime dependency.  Consumed via system package; the version recorded here is what was resolved by find_package(EXPAT) at configure time."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libcurl",
+      "name": "libcurl",
+      "versionInfo": "@xb_SBOM_CURL_VERSION@",
+      "downloadLocation": "https://github.com/curl/curl",
+      "filesAnalyzed": false,
+      "licenseConcluded": "curl",
+      "licenseDeclared": "curl",
+      "copyrightText": "NOASSERTION",
+      "comment": "Runtime dependency.  Optional — present only when @xb_SBOM_HAS_CURL@.  Consumed via system package."
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openssl",
+      "name": "openssl",
+      "versionInfo": "@xb_SBOM_OPENSSL_VERSION@",
+      "downloadLocation": "https://github.com/openssl/openssl",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "comment": "Runtime dependency.  Optional — present only when @xb_SBOM_HAS_OPENSSL@.  Consumed via system package."
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-xb"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "BUILD_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-catch2"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "BUILD_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-json-schema-validator"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "BUILD_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-json-commander"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "BUILD_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-ctest-deps"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "BUILD_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-cmake-utilities"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-expat"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "OPTIONAL_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-libcurl"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "OPTIONAL_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-openssl"
+    }
+  ]
+}

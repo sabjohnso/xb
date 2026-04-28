@@ -69,6 +69,8 @@ endif()
 install(FILES schema/xb-typemap.xsd
   DESTINATION ${xb_INSTALL_DATADIR}/xb/schema)
 
+include(${PROJECT_SOURCE_DIR}/cmake/xb_sbom.cmake)
+
 install(EXPORT xb_EXPORTS
   NAMESPACE xb::
   FILE xb-exports.cmake

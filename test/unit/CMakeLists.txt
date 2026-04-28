@@ -38,6 +38,11 @@ target_link_libraries(xb_replay_cache_test PRIVATE Catch2::Catch2WithMain xb::he
 target_compile_features(xb_replay_cache_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_replay_cache_test TARGET xb_replay_cache_test)
 
+add_executable(xb_soap_fault_sanitize_test soap_fault_sanitize_test.cpp)
+target_link_libraries(xb_soap_fault_sanitize_test PRIVATE Catch2::Catch2WithMain xb::library)
+target_compile_features(xb_soap_fault_sanitize_test PRIVATE cxx_std_${xb_CXX_STANDARD})
+ctest_deps_add_test(NAME xb_soap_fault_sanitize_test TARGET xb_soap_fault_sanitize_test)
+
 add_executable(xb_xml_writer_test xml_writer_test.cpp)
 target_link_libraries(xb_xml_writer_test PRIVATE Catch2::Catch2WithMain xb::library)
 target_compile_features(xb_xml_writer_test PRIVATE cxx_std_${xb_CXX_STANDARD})

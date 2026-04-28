@@ -46,6 +46,7 @@ add_library(xb_objects OBJECT
   schematron_overlay.cpp
   soap_envelope.cpp
   soap_fault.cpp
+  soap_fault_sanitize.cpp
   wsdl_parser.cpp
   wsdl_resolver.cpp
   wsdl_codegen.cpp
