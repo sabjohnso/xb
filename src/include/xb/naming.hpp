@@ -15,6 +15,13 @@ namespace xb {
   enum class encapsulation_mode { raw_struct, wrapped };
   enum class namespace_style { short_name, full_uri };
 
+  /// Pattern-matching engine used by xs:pattern facet validation in
+  /// generated code.  Defaults to @c std_regex for backwards
+  /// compatibility — switching to @c re2 would force every downstream
+  /// consumer to link RE2.  The next major version bump will flip the
+  /// default to @c re2.
+  enum class validation_engine { std_regex, re2 };
+
   enum class naming_style {
     snake_case,
     pascal_case,
@@ -47,6 +54,12 @@ namespace xb {
     bool generate_docs = false;
     encapsulation_mode encapsulation = encapsulation_mode::raw_struct;
     namespace_style ns_style = namespace_style::short_name;
+
+    /// Engine for xs:pattern facet checks in generated code.  Defaults
+    /// to @c std_regex; opt-in to @c re2 when the consumer is willing
+    /// to link RE2 to gain linear-time matching guarantees against
+    /// hostile inputs.
+    validation_engine pattern_engine = validation_engine::std_regex;
   };
 
   // -- Naming style conversions --

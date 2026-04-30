@@ -17,6 +17,13 @@ target_include_directories(xb_bootstrap PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/include>
   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/src/include>)
 target_link_libraries(xb_bootstrap PRIVATE EXPAT::EXPAT)
+if(xb_HAVE_RE2)
+  # xb_bootstrap consumes xb_objects' object files directly (not the
+  # xb_library archive), so xb_objects' BUILD_INTERFACE link to RE2
+  # does not propagate.  Link RE2 here for the symbols pulled in via
+  # naming.cpp.
+  target_link_libraries(xb_bootstrap PRIVATE re2::re2)
+endif()
 target_compile_features(xb_bootstrap PRIVATE cxx_std_${xb_CXX_STANDARD})
 
 # ---------------------------------------------------------------------------

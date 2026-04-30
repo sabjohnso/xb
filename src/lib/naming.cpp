@@ -2,9 +2,14 @@
 
 #include <cctype>
 #include <cstdio>
-#include <regex>
 #include <unordered_set>
 #include <vector>
+
+#ifdef XB_HAS_RE2
+#include <re2/re2.h>
+#else
+#include <regex>
+#endif
 
 namespace xb {
 
@@ -266,11 +271,29 @@ namespace xb {
 
     std::string result = apply_naming_style(name, style);
 
-    // Apply regex rules if any
+    // Apply regex rules if any.  We prefer RE2 here because the
+    // patterns come from a caller-supplied configuration: even though
+    // xb's threat model treats those as operator-trusted today, the
+    // linear-time guarantee defends against accidental catastrophic
+    // backtracking in legitimate-looking patterns.  std::regex is the
+    // fallback when RE2 is not available (xb_USE_RE2=OFF or RE2 not
+    // installed).
     if (rules) {
       for (const auto& [pattern, replacement] : *rules) {
+#ifdef XB_HAS_RE2
+        re2::RE2 re(pattern);
+        if (!re.ok()) {
+          // Match std::regex's behaviour by skipping silently — the
+          // caller's pattern is malformed; alternatives (throwing,
+          // logging) would change xb's CLI semantics.  A future
+          // iteration may surface this through a diagnostic.
+          continue;
+        }
+        re2::RE2::GlobalReplace(&result, re, replacement);
+#else
         std::regex re(pattern);
         result = std::regex_replace(result, re, replacement);
+#endif
       }
     }
 

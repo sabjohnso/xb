@@ -1377,6 +1377,15 @@ namespace xb {
           });
     }
 
+    bool
+    has_re2_usage(const std::vector<cpp_decl>& declarations) {
+      return std::any_of(
+          declarations.begin(), declarations.end(), [](const cpp_decl& d) {
+            auto* fn = std::get_if<cpp_function>(&d);
+            return fn && fn->body.find("re2::RE2") != std::string::npos;
+          });
+    }
+
     std::vector<cpp_include>
     compute_includes(const std::set<std::string>& referenced_namespaces,
                      const std::vector<schema>& schemas,
@@ -1396,6 +1405,7 @@ namespace xb {
           includes.insert("\"xb/xml_writer.hpp\"");
         }
         if (has_regex_usage(declarations)) includes.insert("<regex>");
+        if (has_re2_usage(declarations)) includes.insert("<re2/re2.h>");
         if (has_json_functions(declarations)) {
           includes.insert("<nlohmann/json.hpp>");
           includes.insert("\"xb/json_value.hpp\"");
@@ -1449,6 +1459,7 @@ namespace xb {
         }
 
         if (has_regex_usage(declarations)) includes.insert("<regex>");
+        if (has_re2_usage(declarations)) includes.insert("<re2/re2.h>");
 
         // JSON includes when to_json/from_json functions are present
         if (has_json_functions(declarations)) {
@@ -3576,10 +3587,55 @@ namespace xb {
     // Generate C++ boolean expressions for facet checks.
     // value_expr: the C++ expression for the value being validated
     // cpp_type: the resolved C++ type name (for xb::parse<T>)
+    /// Translate the XSD-flavour subset of regular-expression syntax to
+    /// the PCRE-flavour subset RE2 understands.  Pass-through for the
+    /// vast majority of patterns; the visible differences are XSD's
+    /// =\i= / =\I= (XML name-start characters) and =\c= / =\C= (XML
+    /// name characters), which RE2 does not have.  We translate to an
+    /// ASCII approximation; schemas needing full Unicode XML name
+    /// classes should mark themselves out (a future iteration may
+    /// emit full =[\p{L}_:...]= classes).  Character-class
+    /// subtraction (=[a-z-[aeiou]]=) is XSD-only and is left untranslated;
+    /// RE2 will reject it at compile time and the consumer's build
+    /// will fail with a clear pattern-compile error.
+    std::string
+    translate_xsd_pattern_for_re2(std::string_view xsd_pattern) {
+      std::string out;
+      out.reserve(xsd_pattern.size() + 8);
+      for (std::size_t i = 0; i < xsd_pattern.size(); ++i) {
+        if (xsd_pattern[i] == '\\' && i + 1 < xsd_pattern.size()) {
+          char next = xsd_pattern[i + 1];
+          switch (next) {
+            case 'i':
+              out += "[A-Z_a-z]";
+              break;
+            case 'I':
+              out += "[^A-Z_a-z]";
+              break;
+            case 'c':
+              out += "[A-Z_a-z0-9.-]";
+              break;
+            case 'C':
+              out += "[^A-Z_a-z0-9.-]";
+              break;
+            default:
+              out += '\\';
+              out += next;
+              break;
+          }
+          ++i;
+          continue;
+        }
+        out += xsd_pattern[i];
+      }
+      return out;
+    }
+
     std::vector<std::string>
-    generate_facet_checks(const facet_set& facets,
-                          const std::string& value_expr,
-                          const std::string& cpp_type) {
+    generate_facet_checks(
+        const facet_set& facets, const std::string& value_expr,
+        const std::string& cpp_type,
+        validation_engine engine = validation_engine::std_regex) {
       std::vector<std::string> checks;
 
       if (facets.min_inclusive.has_value())
@@ -3624,19 +3680,31 @@ namespace xb {
       if (facets.pattern.has_value()) {
         std::string format_expr =
             is_string ? value_expr : "xb::format(" + value_expr + ")";
+        std::string raw_pat = facets.pattern.value();
+        std::string emit_pat;
+        if (engine == validation_engine::re2) {
+          emit_pat = translate_xsd_pattern_for_re2(raw_pat);
+        } else {
+          emit_pat = raw_pat;
+        }
         // Escape backslashes for C++ string literal (XSD patterns use \d,
         // \s etc. which must become \\d, \\s in C++)
-        std::string pat;
-        for (char c : facets.pattern.value()) {
+        std::string esc_pat;
+        for (char c : emit_pat) {
           if (c == '\\')
-            pat += "\\\\";
+            esc_pat += "\\\\";
           else if (c == '"')
-            pat += "\\\"";
+            esc_pat += "\\\"";
           else
-            pat += c;
+            esc_pat += c;
         }
-        checks.push_back("std::regex_match(" + format_expr +
-                         ", std::regex(\"^" + pat + "$\"))");
+        if (engine == validation_engine::re2) {
+          checks.push_back("re2::RE2::FullMatch(" + format_expr + ", \"" +
+                           esc_pat + "\")");
+        } else {
+          checks.push_back("std::regex_match(" + format_expr +
+                           ", std::regex(\"^" + esc_pat + "$\"))");
+        }
       }
 
       return checks;
@@ -3713,8 +3781,9 @@ namespace xb {
     // simple content facets, or cardinality constraints.
     // Returns nullopt if none are present.
     std::optional<cpp_function>
-    generate_validate_function(const complex_type& ct,
-                               const type_resolver& resolver) {
+    generate_validate_function(
+        const complex_type& ct, const type_resolver& resolver,
+        validation_engine engine = validation_engine::std_regex) {
       // Check for simple content facets
       bool has_sc_facets = false;
       const simple_content* sc = nullptr;
@@ -3769,8 +3838,8 @@ namespace xb {
       if (sc && has_sc_facets) {
         std::string cpp_type = resolver.resolve(sc->base_type_name);
         for (const auto& check : generate_facet_checks(
-                 sc->facets, resolver.field_access("value", "value"),
-                 cpp_type)) {
+                 sc->facets, resolver.field_access("value", "value"), cpp_type,
+                 engine)) {
           if (!first) body += "\n      && ";
           body += check;
           first = false;
@@ -3795,8 +3864,9 @@ namespace xb {
     // Generate a validate_<type>() function for a simple type with assertions
     // and/or constraining facets. Returns nullopt if neither is present.
     std::optional<cpp_function>
-    generate_simple_validate_function(const simple_type& st,
-                                      const type_resolver& resolver) {
+    generate_simple_validate_function(
+        const simple_type& st, const type_resolver& resolver,
+        validation_engine engine = validation_engine::std_regex) {
       bool has_facets = has_constraining_facets(st.facets());
       if (st.assertions().empty() && !has_facets) return std::nullopt;
 
@@ -3826,7 +3896,7 @@ namespace xb {
       }
 
       for (const auto& check :
-           generate_facet_checks(st.facets(), "value", cpp_type)) {
+           generate_facet_checks(st.facets(), "value", cpp_type, engine)) {
         if (!first) body += "\n      && ";
         body += check;
         first = false;
@@ -4098,11 +4168,13 @@ namespace xb {
       // Generate validate_ functions (unless validation is disabled)
       if (options_.validation != validation_mode::none) {
         for (const auto* ct_ptr : ordered_cts) {
-          if (auto vf = generate_validate_function(*ct_ptr, resolver))
+          if (auto vf = generate_validate_function(*ct_ptr, resolver,
+                                                   options_.pattern_engine))
             ordered_types.push_back(std::move(*vf));
         }
         for (const auto& st : s.simple_types()) {
-          if (auto vf = generate_simple_validate_function(st, resolver))
+          if (auto vf = generate_simple_validate_function(
+                  st, resolver, options_.pattern_engine))
             ordered_types.push_back(std::move(*vf));
         }
       }

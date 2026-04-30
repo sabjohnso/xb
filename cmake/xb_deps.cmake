@@ -69,6 +69,40 @@ endif()
 
 find_package(CURL QUIET)
 find_package(OpenSSL QUIET)
+
+# Optional RE2 — used to replace std::regex in code paths where the
+# pattern or input is, or may become, attacker-influenced.  Default ON,
+# user-disable via -Dxb_USE_RE2=OFF.  We prefer the upstream CMake
+# config (re2 built from source ships re2-config.cmake) and fall back
+# to pkg-config for distro packages that don't.
+set(xb_HAVE_RE2 FALSE)
+if(xb_USE_RE2)
+  find_package(re2 CONFIG QUIET)
+  if(re2_FOUND)
+    set(xb_HAVE_RE2 TRUE)
+  else()
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(xb_re2_pc IMPORTED_TARGET QUIET re2)
+      if(xb_re2_pc_FOUND)
+        # Alias PkgConfig::xb_re2_pc to a friendlier name so callers
+        # always link `re2::re2` regardless of how it was discovered.
+        if(NOT TARGET re2::re2)
+          add_library(re2::re2 INTERFACE IMPORTED)
+          target_link_libraries(re2::re2 INTERFACE PkgConfig::xb_re2_pc)
+        endif()
+        set(xb_HAVE_RE2 TRUE)
+      endif()
+    endif()
+  endif()
+  if(NOT xb_HAVE_RE2)
+    message(FATAL_ERROR
+      "xb_USE_RE2 is ON but RE2 was not found via find_package(re2 CONFIG) "
+      "or pkg-config.  Install libre2-dev (Debian/Ubuntu), re2 (Homebrew), "
+      "or build RE2 from source; or pass -Dxb_USE_RE2=OFF to fall back to "
+      "std::regex.")
+  endif()
+endif()
 # Validator 2.4.0 bug: the option is JSON_VALIDATOR_SHARED_LIBS but the code
 # reads nlohmann_json_schema_validator_SHARED_LIBS, so we must set both to
 # ensure a static library.

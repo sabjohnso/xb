@@ -91,19 +91,28 @@ xb provides today is UsernameToken digest + Timestamp / Created
 window — see `xb::wss::verify_username_token` and
 `xb::wss::validate_timestamp`.
 
-### `std::regex` on operator-controlled patterns
+### Pattern-engine choice
 
-Two call sites compile regular expressions via `std::regex`, which
-has worst-case exponential backtracking on adversarial patterns:
+xb defaults to **RE2** for pattern matching wherever the engine
+choice is xb's to make.  RE2 guarantees linear-time matching and is
+not vulnerable to catastrophic backtracking even on hostile patterns
+or inputs.  The fallback to `std::regex` is gated on `xb_USE_RE2`
+(default `ON`) so consumers without RE2 still build.
 
-- `src/lib/codegen.cpp:3639` — emits `std::regex_match(value, std::regex(pat))` into generated code. The pattern comes from XSD `xs:pattern` facets in the schema the operator chose. Generated code's runtime is the consumer's compile boundary, not xb's; the consumer's own threat model determines whether to swap the engine.
-- `src/lib/naming.cpp:271-273` — applies regex rewrite rules from a naming-config file. The config is operator-supplied alongside the schema.
+- `src/lib/naming.cpp` — applies regex rewrite rules from the
+  naming-config file using `re2::RE2::GlobalReplace` when xb is
+  built with RE2.  Falls back to `std::regex_replace` when RE2 is
+  not available.
 
-xb's threat model treats both as operator-trusted inputs. We accept
-`std::regex` here because the patterns are not attacker-influenced.
-A future RE2 substitution is recorded in `PLAN.org` as deferred work
-that becomes worthwhile if the trust profile shifts (e.g., naming
-configs become network-shareable).
+A second call site in `src/lib/codegen.cpp` emits regex calls into
+*generated* code, which then runs at the consumer's runtime.  By
+default xb still emits `std::regex_match` there for backwards
+compatibility — that path's threat model is the consumer's, not
+xb's, and changing it forces a downstream link dependency on RE2.
+A future major version bump will flip the default.  Today, an
+operator who wants RE2-based validation in generated code can opt
+in via the `--validation-engine=re2` flag to `xb generate` (see
+`PLAN.org` Step 5b.3).
 
 ### Plaintext password mode in `wss::username_token`
 

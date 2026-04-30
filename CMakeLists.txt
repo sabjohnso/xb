@@ -7,6 +7,12 @@ option(xb_BUILD_EXAMPLES "Build the xb examples" ${PROJECT_IS_TOP_LEVEL})
 option(xb_BUILD_INTEGRATION_TESTS "Build the xb integration tests" OFF)
 option(xb_BUILD_DOCS "Build the documentation site" OFF)
 option(xb_BUILD_FUZZERS "Build the libFuzzer-based fuzz harnesses" OFF)
+option(xb_USE_RE2
+  "Use RE2 for pattern matching that would otherwise use std::regex.\
+ Provides linear-time matching and avoids catastrophic backtracking on\
+ hostile patterns or inputs.  Requires re2 (system package or built\
+ from source) to be available via find_package or pkg-config."
+  ON)
 set(xb_CXX_STANDARD 20 CACHE STRING "C++ standard for xb")
 
 include(GNUInstallDirs)

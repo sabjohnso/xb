@@ -3882,6 +3882,100 @@ TEST_CASE("pattern facet adds regex include to generated file",
   CHECK(has_regex_include);
 }
 
+TEST_CASE("pattern facet emits RE2 calls when validation_engine is re2",
+          "[codegen][facet][security]") {
+  // The default std::regex path is exercised above.  This case opts
+  // into RE2-based validation and verifies (a) the generated body
+  // calls re2::RE2::FullMatch, (b) the file includes <re2/re2.h>,
+  // and (c) the file does NOT include <regex>.
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.pattern = "[A-Z]+";
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "UpperOnly"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen_options opts;
+  opts.pattern_engine = validation_engine::re2;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  // Locate the validate_ function in the emitted declarations.
+  const cpp_function* validate_fn = nullptr;
+  for (const auto& ns : files[0].namespaces) {
+    for (const auto& decl : ns.declarations) {
+      if (auto* fn = std::get_if<cpp_function>(&decl)) {
+        if (fn->name.starts_with("validate_")) {
+          validate_fn = fn;
+          break;
+        }
+      }
+    }
+  }
+  REQUIRE(validate_fn != nullptr);
+  CHECK(validate_fn->body.find("re2::RE2::FullMatch") != std::string::npos);
+  CHECK(validate_fn->body.find("std::regex") == std::string::npos);
+
+  bool has_re2_include = false;
+  bool has_regex_include = false;
+  for (const auto& inc : files[0].includes) {
+    if (inc.path == "<re2/re2.h>") has_re2_include = true;
+    if (inc.path == "<regex>") has_regex_include = true;
+  }
+  CHECK(has_re2_include);
+  CHECK_FALSE(has_regex_include);
+}
+
+TEST_CASE("translate_xsd_pattern_for_re2 maps XSD escapes to RE2-friendly form",
+          "[codegen][facet][security]") {
+  // The translator is a private detail of codegen.cpp; here we
+  // exercise it indirectly through the codegen pipeline.  An XSD
+  // pattern using \i (XML name-start chars) or \c (XML name chars)
+  // should compile under RE2 — the translator maps them to ASCII
+  // approximations that RE2 accepts.
+  schema s;
+  s.set_target_namespace("http://example.com/test");
+
+  facet_set facets;
+  facets.pattern = R"(\i\c*)"; // legitimate XSD pattern for an XML name
+
+  s.add_simple_type(simple_type(qname{"http://example.com/test", "Name"},
+                                simple_type_variety::atomic,
+                                qname{xs_ns, "string"}, facets));
+
+  auto ss = make_schema_set(std::move(s));
+  auto types = default_types();
+  codegen_options opts;
+  opts.pattern_engine = validation_engine::re2;
+
+  codegen gen(ss, types, opts);
+  auto files = gen.generate();
+
+  const cpp_function* validate_fn = nullptr;
+  for (const auto& ns : files[0].namespaces) {
+    for (const auto& decl : ns.declarations) {
+      if (auto* fn = std::get_if<cpp_function>(&decl)) {
+        if (fn->name.starts_with("validate_")) {
+          validate_fn = fn;
+          break;
+        }
+      }
+    }
+  }
+  REQUIRE(validate_fn != nullptr);
+  // The translator replaces \i and \c with bracket character classes;
+  // the raw XSD escapes must NOT survive into the emitted code.
+  CHECK(validate_fn->body.find("\\\\i") == std::string::npos);
+  CHECK(validate_fn->body.find("\\\\c") == std::string::npos);
+  CHECK(validate_fn->body.find("[A-Z_a-z]") != std::string::npos);
+}
+
 // ===== Facet validation: complex type with simple content =====
 
 TEST_CASE("complex type with simple content and min_inclusive facet",

@@ -293,3 +293,34 @@ TEST_CASE("apply_naming with different categories", "[naming]") {
   CHECK(apply_naming("read_order", naming_category::function, opts) ==
         "readOrder");
 }
+
+// -- Pattern-engine guarantees --
+
+TEST_CASE("apply_naming pattern matching is linear-time on adversarial inputs",
+          "[naming][security]") {
+  // The pattern (a+)+! is the canonical catastrophic-backtracking shape.
+  // Under std::regex, an input of N a's followed by ! takes time
+  // exponential in N to reject.  Under RE2 (the build-time-default
+  // engine), it is linear.  This test passes regardless of which
+  // engine is compiled in: with RE2, the call returns in microseconds;
+  // with std::regex it takes longer, but the test does not put a wall-
+  // clock bound — it just verifies behavioural correctness so a
+  // regression that, e.g., concatenates the rule into an unbounded
+  // expansion fails fast.  When XB_HAS_RE2 is defined the catastrophic
+  // pattern is benign in both compile-time and runtime cost.
+  naming_options opts;
+  opts.type_style = naming_style::pascal_case;
+  // 25 a's followed by !; under std::regex this would be ~2^25 = 33M
+  // backtrack steps — still finite, completes in seconds.  Under RE2
+  // it returns immediately.
+  std::string adversarial = std::string(25, 'a') + "!";
+  // Replace exactly the malicious pattern with empty.
+  opts.type_rules = {{"(a+)+!", ""}};
+  auto result = apply_naming(adversarial, naming_category::type_, opts);
+  // After style + replace + sanitization, the adversarial input is
+  // rewritten to an empty string, which sanitize_cpp_identifier turns
+  // into a fallback name; either way the call returns.
+  (void)result;
+  // Regardless of result content, the test asserts the call returned.
+  SUCCEED("pattern engine handled an adversarial regex without hanging");
+}

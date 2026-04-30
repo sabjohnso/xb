@@ -100,7 +100,21 @@ if(OPENSSL_FOUND)
   list(APPEND xb_public_defs XB_HAS_OPENSSL)
 endif()
 
+if(xb_HAVE_RE2)
+  list(APPEND xb_public_defs XB_HAS_RE2)
+endif()
+
 target_compile_definitions(xb_objects PUBLIC ${xb_public_defs})
+
+if(xb_HAVE_RE2)
+  # naming.cpp is in xb_objects, so xb_objects' INTERFACE carries the
+  # build-time link to RE2.  But because xb_library consumes xb_objects'
+  # object files via $<TARGET_OBJECTS:>, the INTERFACE properties do
+  # NOT propagate — we have to declare the link on xb_library
+  # explicitly.  BUILD_INTERFACE-only here; downstream installs route
+  # through xb-config.cmake's find_dependency(re2).
+  target_link_libraries(xb_objects PUBLIC $<BUILD_INTERFACE:re2::re2>)
+endif()
 
 # xb_library: the publicly-linked STATIC archive. It embeds xb_objects'
 # object files and is the target that carries the xb::header dependency
@@ -122,6 +136,15 @@ target_sources(xb_library PRIVATE wss_validate.cpp)
 if(OPENSSL_FOUND)
   target_sources(xb_library PRIVATE wss_crypto.cpp)
   target_link_libraries(xb_library PRIVATE $<BUILD_INTERFACE:OpenSSL::Crypto>)
+endif()
+
+if(xb_HAVE_RE2)
+  # naming.cpp's RE2 symbols are bundled into xb_library via xb_objects'
+  # object files; consumers of xb_library must therefore link RE2.
+  # PUBLIC because the symbols are pulled into the consumer's link.
+  # BUILD_INTERFACE-only — downstream installed consumers resolve RE2
+  # via xb-config.cmake's find_dependency(re2).
+  target_link_libraries(xb_library PUBLIC $<BUILD_INTERFACE:re2::re2>)
 endif()
 
 target_include_directories(xb_library PUBLIC
