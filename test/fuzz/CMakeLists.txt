@@ -27,13 +27,14 @@ set(xb_fuzz_flags -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer)
 
 function(xb_add_fuzz_target name)
   set(one_value SOURCE)
-  cmake_parse_arguments(FZ "" "${one_value}" "" ${ARGN})
+  set(multi_value EXTRA_LIBS)
+  cmake_parse_arguments(FZ "" "${one_value}" "${multi_value}" ${ARGN})
   if(NOT FZ_SOURCE)
     message(FATAL_ERROR "xb_add_fuzz_target(${name}): missing SOURCE keyword")
   endif()
 
   add_executable(${name} ${FZ_SOURCE})
-  target_link_libraries(${name} PRIVATE xb::library)
+  target_link_libraries(${name} PRIVATE xb::library ${FZ_EXTRA_LIBS})
   target_compile_features(${name} PRIVATE cxx_std_${xb_CXX_STANDARD})
   target_compile_options(${name} PRIVATE ${xb_fuzz_flags})
   target_link_options(${name} PRIVATE ${xb_fuzz_flags})
@@ -56,3 +57,14 @@ xb_add_fuzz_target(xb_schema_parser_fuzz
 
 xb_add_fuzz_target(xb_mime_multipart_fuzz
   SOURCE mime_multipart_fuzz.cpp)
+
+# BES dispatch fuzzer.  Reuses the xb_choice_types library generated
+# at build time from test/feature/choice/choice.bes.xml — that schema
+# has both variable-size (TaggedMessage, dispatched on a 1-byte tag
+# discriminant) and fixed-size (FixedChoice) message variants, so the
+# harness exercises Phase 2.4's wire/bits.hpp bounds check on both
+# from_trusted (validation-bypassing) and the validating constructor
+# paths.
+xb_add_fuzz_target(xb_bes_choice_fuzz
+  SOURCE bes_choice_fuzz.cpp
+  EXTRA_LIBS xb_choice_types)

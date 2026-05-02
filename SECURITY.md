@@ -212,6 +212,7 @@ are exercised under ASan + UBSan simultaneously.
 | `xb_rng_parser_fuzz` | `xb::rng_xml_parser` (RELAX NG XML form) |
 | `xb_schema_parser_fuzz` | `xb::schema_parser` (XSD 1.1) |
 | `xb_mime_multipart_fuzz` | `xb::mime::parse_multipart` plus the `xb::xop::from_multipart` / `xb::xop::deoptimize` cid-resolution path |
+| `xb_bes_choice_fuzz` | `xb::wire::*_view` dispatch over the `choice` test schema. Exercises both the validating constructor and `from_trusted` against the Phase 2.4 `wire/bits.hpp` bounds-check, in both fixed-layout and variable-layout (discriminated) shapes. Inputs are padded to ≥ 16 bytes so the fuzzer drives accessor logic rather than re-discovering the documented `require_buffer_size` abort. |
 
 Seed corpora live under `test/fuzz/corpus/<harness>/`; see the
 README in that directory for suggested seeds drawn from the
