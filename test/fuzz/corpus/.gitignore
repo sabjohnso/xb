@@ -1,0 +1,12 @@
+# libFuzzer writes discovered inputs back to the corpus directory at
+# runtime.  We keep the directory structure tracked (each subdirectory
+# carries a .gitkeep marker) but not the contents — operators with a
+# curated seed corpus to commit can override per their own conventions
+# (negate the entries they want to track).
+
+*
+!.gitignore
+!README.md
+!*/
+*/*
+!*/.gitkeep

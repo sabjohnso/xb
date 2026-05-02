@@ -198,22 +198,43 @@ are tracked in `PLAN.org`.
 
 ## Fuzzing
 
-A libFuzzer harness for `xb::expat_reader` is included as a
-proof-of-concept under `test/fuzz/`. It is built only when
-`-Dxb_BUILD_FUZZERS=ON` and the compiler is Clang, and is intended to
-be run manually rather than in CI. Additional parser harnesses
-(`dtd_parser`, `rng_parser`, `schema_parser`, `mime_multipart`, BES
-dispatch) are tracked as follow-up work in `PLAN.org`.
+libFuzzer harnesses for the major parsers ship under `test/fuzz/`.
+They build only when `-Dxb_BUILD_FUZZERS=ON` and the compiler is
+Clang, and are intended to be run manually rather than in CI.  Each
+links `-fsanitize=fuzzer,address,undefined` so coverage-driven inputs
+are exercised under ASan + UBSan simultaneously.
+
+| Target | Parser exercised |
+|---|---|
+| `xb_expat_reader_fuzz` | `xb::expat_reader` (XML, with the Phase 1 hardening) |
+| `xb_dtd_parser_fuzz` | `xb::dtd_parser` |
+| `xb_rng_compact_parser_fuzz` | `xb::rng_compact_parser` (RELAX NG Compact) |
+| `xb_rng_parser_fuzz` | `xb::rng_xml_parser` (RELAX NG XML form) |
+| `xb_schema_parser_fuzz` | `xb::schema_parser` (XSD 1.1) |
+| `xb_mime_multipart_fuzz` | `xb::mime::parse_multipart` plus the `xb::xop::from_multipart` / `xb::xop::deoptimize` cid-resolution path |
+
+Seed corpora live under `test/fuzz/corpus/<harness>/`; see the
+README in that directory for suggested seeds drawn from the
+integration test fixtures.
 
 To run a fuzz session:
 
 ```sh
 cmake --preset clang-20 -Dxb_BUILD_FUZZERS=ON
-cmake --build build-clang-20 --config Release --target xb_expat_reader_fuzz
-mkdir -p test/fuzz/corpus/expat_reader
-build-clang-20/test/fuzz/Release/xb_expat_reader_fuzz \
-    test/fuzz/corpus/expat_reader -max_total_time=300
+cmake --build build-clang-20 --config Release \
+      --target xb_<parser>_fuzz
+build-clang-20/test/fuzz/Release/xb_<parser>_fuzz \
+    test/fuzz/corpus/<parser> -max_total_time=300
 ```
+
+Outstanding fuzz coverage tracked in `PLAN.org`:
+
+- A BES (Binary Encoding Specification) dispatch harness — the
+  binary-format parser xb generates from `xb::wire`.  Requires a
+  committed BES test schema for the harness to dispatch into; not
+  yet wired up.
+- Differential fuzzing against `xmlsec1` once Phase 3b lands an
+  XML-Signature verifier.
 
 Findings should be reported via the GHSA process above, not as a
 public PR / issue.

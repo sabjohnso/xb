@@ -41,3 +41,18 @@ endfunction()
 
 xb_add_fuzz_target(xb_expat_reader_fuzz
   SOURCE expat_reader_fuzz.cpp)
+
+xb_add_fuzz_target(xb_dtd_parser_fuzz
+  SOURCE dtd_parser_fuzz.cpp)
+
+xb_add_fuzz_target(xb_rng_compact_parser_fuzz
+  SOURCE rng_compact_parser_fuzz.cpp)
+
+xb_add_fuzz_target(xb_rng_parser_fuzz
+  SOURCE rng_parser_fuzz.cpp)
+
+xb_add_fuzz_target(xb_schema_parser_fuzz
+  SOURCE schema_parser_fuzz.cpp)
+
+xb_add_fuzz_target(xb_mime_multipart_fuzz
+  SOURCE mime_multipart_fuzz.cpp)
