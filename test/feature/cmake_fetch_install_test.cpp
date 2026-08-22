@@ -82,11 +82,22 @@ TEST_CASE("install and find_package with xb_fetch_schemas",
                  "target_link_libraries(test_exe PRIVATE gen xb::library)\n"
                  "target_compile_features(test_exe PRIVATE cxx_std_20)\n");
 
-  write_file(project / "main.cpp", "#include \"typemap.hpp\"\n"
-                                   "int main() {\n"
-                                   "  typemap::typemap_type val;\n"
-                                   "  return val.mapping.empty() ? 0 : 1;\n"
-                                   "}\n");
+  // main.cpp also calls xb::apply_naming, whose implementation uses RE2
+  // when xb was built with it.  That pulls naming.cpp's objects out of
+  // the installed archive, so the link only succeeds if the exported
+  // xb::library propagates its RE2 dependency to consumers.
+  write_file(
+      project / "main.cpp",
+      "#include \"typemap.hpp\"\n"
+      "#include <xb/naming.hpp>\n"
+      "int main() {\n"
+      "  typemap::typemap_type val;\n"
+      "  xb::naming_options opts;\n"
+      "  opts.type_rules.push_back({\"^foo\", \"bar\"});\n"
+      "  auto renamed =\n"
+      "      xb::apply_naming(\"FooType\", xb::naming_category::type_, opts);\n"
+      "  return (val.mapping.empty() && renamed == \"bar_type\") ? 0 : 1;\n"
+      "}\n");
 
   // Step 3: Configure the mini-project
   rc = run_cmd("cmake -S " + project.string() + " -B " + bld.string() +

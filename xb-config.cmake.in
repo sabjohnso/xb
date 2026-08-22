@@ -4,18 +4,32 @@ find_dependency(EXPAT)
 # When xb was built with RE2 support, downstream consumers of
 # xb::library must also be able to resolve it.  Mirror the same
 # fallback chain used in cmake/xb_deps.cmake at build time.
+#
+# find_package, not find_dependency: find_dependency inherits REQUIRED
+# from the outer find_package(xb REQUIRED) and so aborts configuration
+# on a config-mode miss, making the pkg-config fallback below
+# unreachable for distributions that ship re2.pc but no re2Config.cmake.
 set(xb_BUILT_WITH_RE2 @xb_HAVE_RE2@)
-if(xb_BUILT_WITH_RE2)
-  find_dependency(re2 CONFIG QUIET)
-  if(NOT re2_FOUND)
-    find_dependency(PkgConfig QUIET)
+if(xb_BUILT_WITH_RE2 AND NOT TARGET re2::re2)
+  find_package(re2 CONFIG QUIET)
+  if(NOT TARGET re2::re2)
+    find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
       pkg_check_modules(xb_re2_pc IMPORTED_TARGET QUIET re2)
-      if(xb_re2_pc_FOUND AND NOT TARGET re2::re2)
+      if(xb_re2_pc_FOUND)
         add_library(re2::re2 INTERFACE IMPORTED)
         target_link_libraries(re2::re2 INTERFACE PkgConfig::xb_re2_pc)
       endif()
     endif()
+  endif()
+  if(NOT TARGET re2::re2)
+    set(${CMAKE_FIND_PACKAGE_NAME}_NOT_FOUND_MESSAGE
+        "xb was built with RE2 support, but RE2 was not found via \
+find_package(re2 CONFIG) or pkg-config.  Install libre2-dev \
+(Debian/Ubuntu), re2 (Homebrew), or build RE2 from source; or rebuild \
+xb with -Dxb_USE_RE2=OFF.")
+    set(${CMAKE_FIND_PACKAGE_NAME}_FOUND FALSE)
+    return()
   endif()
 endif()
 

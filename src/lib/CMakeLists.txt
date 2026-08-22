@@ -141,10 +141,12 @@ endif()
 if(xb_HAVE_RE2)
   # naming.cpp's RE2 symbols are bundled into xb_library via xb_objects'
   # object files; consumers of xb_library must therefore link RE2.
-  # PUBLIC because the symbols are pulled into the consumer's link.
-  # BUILD_INTERFACE-only — downstream installed consumers resolve RE2
-  # via xb-config.cmake's find_dependency(re2).
-  target_link_libraries(xb_library PUBLIC $<BUILD_INTERFACE:re2::re2>)
+  # PUBLIC because the symbols are pulled into the consumer's link, and
+  # unguarded by BUILD_INTERFACE so the requirement survives into the
+  # exported target: xb-config.cmake defines the re2::re2 imported
+  # target (config mode or pkg-config) before including xb-exports.cmake,
+  # so installed consumers resolve the same name we record here.
+  target_link_libraries(xb_library PUBLIC re2::re2)
 endif()
 
 target_include_directories(xb_library PUBLIC
