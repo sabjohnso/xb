@@ -19,7 +19,7 @@ xb is a C++20 library and CLI tool for:
 3. **SOAP/WSDL** — SOAP 1.1/1.2 runtime, WSDL 1.1 and 2.0 parsing, service
    client/server code generation, WS-Addressing, WS-Security, MTOM/XOP.
 
-Current version: **0.16.0**
+Current version: **0.17.1**
 
 ## Key Design Decisions
 
