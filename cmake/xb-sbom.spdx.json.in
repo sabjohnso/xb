@@ -101,6 +101,28 @@
       "comment": "Runtime dependency.  Optional — present only when @xb_SBOM_HAS_CURL@.  Consumed via system package."
     },
     {
+      "SPDXID": "SPDXRef-Package-re2",
+      "name": "re2",
+      "versionInfo": "@xb_SBOM_RE2_VERSION@",
+      "downloadLocation": "https://github.com/google/re2",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "comment": "Runtime dependency.  Present only when @xb_SBOM_HAS_RE2@.  @xb_SBOM_RE2_PROVENANCE@"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-abseil-cpp",
+      "name": "abseil-cpp",
+      "versionInfo": "@xb_SBOM_ABSL_VERSION@",
+      "downloadLocation": "https://github.com/abseil/abseil-cpp",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "comment": "Required by RE2.  Present only when @xb_SBOM_HAS_ABSL@, which is the case when RE2 was built from source rather than taken from a system package."
+    },
+    {
       "SPDXID": "SPDXRef-Package-openssl",
       "name": "openssl",
       "versionInfo": "@xb_SBOM_OPENSSL_VERSION@",
@@ -157,6 +179,16 @@
       "spdxElementId": "SPDXRef-Package-xb",
       "relationshipType": "OPTIONAL_DEPENDENCY_OF",
       "relatedSpdxElement": "SPDXRef-Package-openssl"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-xb",
+      "relationshipType": "OPTIONAL_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Package-re2"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-re2",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-abseil-cpp"
     }
   ]
 }

@@ -308,6 +308,23 @@ target_link_libraries(xb_fxt_test
 target_compile_features(xb_fxt_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 ctest_deps_add_test(NAME xb_fxt_test TARGET xb_fxt_test)
 
+# The RE2 source-fetch fallback is exercised by a full out-of-tree configure
+# of xb itself, which clones Abseil and RE2.  That is too slow and too
+# network-dependent for the default suite, so it is opt-in.
+option(xb_TEST_RE2_FETCH
+  "Enable the test that configures xb with no system RE2 (clones RE2/Abseil)"
+  OFF)
+if(xb_TEST_RE2_FETCH)
+  add_executable(xb_cmake_re2_fetch_test cmake_re2_fetch_test.cpp)
+  target_link_libraries(xb_cmake_re2_fetch_test PRIVATE Catch2::Catch2WithMain)
+  target_compile_features(xb_cmake_re2_fetch_test
+    PRIVATE cxx_std_${xb_CXX_STANDARD})
+  target_compile_definitions(xb_cmake_re2_fetch_test PRIVATE
+    XB_SOURCE_DIR=${PROJECT_SOURCE_DIR})
+  ctest_deps_add_test(NAME xb_cmake_re2_fetch_test
+    TARGET xb_cmake_re2_fetch_test)
+endif()
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})

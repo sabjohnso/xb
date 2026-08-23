@@ -67,6 +67,40 @@ else()
   set(xb_SBOM_HAS_CURL "false")
 endif()
 
+# RE2 and its Abseil dependency.  Which of the two provenance routes was
+# taken matters to a consumer auditing the binary: a system package is
+# whatever the distribution shipped, while the source fallback is the
+# revision pinned in cmake/xb_deps.cmake.
+if(xb_HAVE_RE2)
+  set(xb_SBOM_HAS_RE2 "true")
+  if(xb_RE2_FROM_SOURCE)
+    set(xb_SBOM_RE2_VERSION "${re2_GIT_TAG}")
+    set(xb_SBOM_RE2_PROVENANCE
+        "Built from pinned upstream sources by cmake/xb_fetch_re2.cmake.")
+    set(xb_SBOM_ABSL_VERSION "${absl_GIT_TAG}")
+    set(xb_SBOM_HAS_ABSL "true")
+  else()
+    set(xb_SBOM_RE2_VERSION "${re2_VERSION}")
+    if(NOT xb_SBOM_RE2_VERSION)
+      set(xb_SBOM_RE2_VERSION "${xb_re2_pc_VERSION}")
+    endif()
+    if(NOT xb_SBOM_RE2_VERSION)
+      set(xb_SBOM_RE2_VERSION "unknown")
+    endif()
+    set(xb_SBOM_RE2_PROVENANCE
+        "Consumed via system package; Abseil comes with it and is not \
+recorded separately.")
+    set(xb_SBOM_ABSL_VERSION "not-detected")
+    set(xb_SBOM_HAS_ABSL "false")
+  endif()
+else()
+  set(xb_SBOM_HAS_RE2 "false")
+  set(xb_SBOM_RE2_VERSION "not-detected")
+  set(xb_SBOM_RE2_PROVENANCE "Not used; xb was built with std::regex.")
+  set(xb_SBOM_ABSL_VERSION "not-detected")
+  set(xb_SBOM_HAS_ABSL "false")
+endif()
+
 if(OPENSSL_FOUND)
   set(xb_SBOM_OPENSSL_VERSION "${OPENSSL_VERSION}")
   set(xb_SBOM_HAS_OPENSSL "true")

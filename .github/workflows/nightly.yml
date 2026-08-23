@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libexpat1-dev libcurl4-openssl-dev ninja-build
+          sudo apt-get install -y libexpat1-dev libcurl4-openssl-dev libre2-dev ninja-build
 
       - name: Configure
         run: cmake --preset ci -Dxb_BUILD_INTEGRATION_TESTS=ON

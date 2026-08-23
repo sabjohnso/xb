@@ -34,6 +34,10 @@ set(catch2_GIT_TAG "v3.7.1"
     CACHE STRING "Pinned Catch2 release tag" FORCE)
 set(nlohmann_json_schema_validator_GIT_TAG "2.4.0"
     CACHE STRING "Pinned json-schema-validator release tag" FORCE)
+set(re2_GIT_TAG "2025-11-05"
+    CACHE STRING "Pinned RE2 release tag" FORCE)
+set(absl_GIT_TAG "20250814.2"
+    CACHE STRING "Pinned Abseil release tag (RE2's only dependency)" FORCE)
 
 find_package(CMakeUtilities)
 find_package(CTestDeps REQUIRED)
@@ -95,12 +99,27 @@ if(xb_USE_RE2)
       endif()
     endif()
   endif()
+  # Neither discovery route found RE2.  Rather than fail the configure (or,
+  # worse, drop back to std::regex without the operator asking), build RE2
+  # from the pinned sources.  xb_FETCH_RE2=OFF turns the fallback off for
+  # builds that must not reach the network.
+  if(NOT xb_HAVE_RE2 AND xb_FETCH_RE2)
+    message(STATUS
+      "RE2 not found; building it from source (pinned ${re2_GIT_TAG})")
+    include(${CMAKE_CURRENT_LIST_DIR}/xb_fetch_re2.cmake)
+    xb_fetch_re2()
+    if(TARGET re2::re2)
+      set(xb_HAVE_RE2 TRUE)
+      set(xb_RE2_FROM_SOURCE TRUE)
+    endif()
+  endif()
   if(NOT xb_HAVE_RE2)
     message(FATAL_ERROR
       "xb_USE_RE2 is ON but RE2 was not found via find_package(re2 CONFIG) "
-      "or pkg-config.  Install libre2-dev (Debian/Ubuntu), re2 (Homebrew), "
-      "or build RE2 from source; or pass -Dxb_USE_RE2=OFF to fall back to "
-      "std::regex.")
+      "or pkg-config, and the source fallback did not provide it "
+      "(xb_FETCH_RE2 is ${xb_FETCH_RE2}).  Install libre2-dev "
+      "(Debian/Ubuntu), re2 (Homebrew), or pass -Dxb_USE_RE2=OFF to fall "
+      "back to std::regex.")
   endif()
 endif()
 # Validator 2.4.0 bug: the option is JSON_VALIDATOR_SHARED_LIBS but the code

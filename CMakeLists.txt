@@ -10,8 +10,13 @@ option(xb_BUILD_FUZZERS "Build the libFuzzer-based fuzz harnesses" OFF)
 option(xb_USE_RE2
   "Use RE2 for pattern matching that would otherwise use std::regex.\
  Provides linear-time matching and avoids catastrophic backtracking on\
- hostile patterns or inputs.  Requires re2 (system package or built\
- from source) to be available via find_package or pkg-config."
+ hostile patterns or inputs.  RE2 is taken from find_package or\
+ pkg-config when present, and built from pinned sources otherwise."
+  ON)
+option(xb_FETCH_RE2
+  "Build RE2 and Abseil from pinned sources when no system RE2 is found.\
+ Turn OFF for builds that must not reach the network; the configure then\
+ fails instead, and -Dxb_USE_RE2=OFF selects the std::regex fallback."
   ON)
 set(xb_CXX_STANDARD 20 CACHE STRING "C++ standard for xb")
 

@@ -96,8 +96,14 @@ window — see `xb::wss::verify_username_token` and
 xb defaults to **RE2** for pattern matching wherever the engine
 choice is xb's to make.  RE2 guarantees linear-time matching and is
 not vulnerable to catastrophic backtracking even on hostile patterns
-or inputs.  The fallback to `std::regex` is gated on `xb_USE_RE2`
-(default `ON`) so consumers without RE2 still build.
+or inputs.  A host without RE2 does not silently lose that guarantee:
+the configure step takes RE2 from `find_package(re2 CONFIG)` or
+pkg-config when either finds it, and otherwise builds RE2 and Abseil
+from the revisions pinned in `cmake/xb_deps.cmake`.  Selecting
+`std::regex` instead is an explicit decision, made by configuring with
+`-Dxb_USE_RE2=OFF`.  A build that must not reach the network can set
+`-Dxb_FETCH_RE2=OFF`, which turns the source fallback into a configure
+error rather than a silent downgrade.
 
 - `src/lib/naming.cpp` — applies regex rewrite rules from the
   naming-config file using `re2::RE2::GlobalReplace` when xb is
@@ -141,10 +147,15 @@ commit hashes in `cmake/xb_deps.cmake`. The pins are revisited:
 Build-only dependencies (`Catch2`, `json-schema-validator`,
 `json-commander`, `CTestDeps`) have a lower urgency than would-be
 runtime dependencies, since their compromise affects xb's developer
-machines and CI rather than xb's runtime users. Currently xb has no
-runtime third-party dependencies fetched by CMake — `expat`, `libcurl`,
-and `OpenSSL` are consumed via system packages, which carry their own
-upstream security policy.
+machines and CI rather than xb's runtime users. `expat`, `libcurl`, and
+`OpenSSL` are consumed via system packages, which carry their own
+upstream security policy. `RE2` and the `Abseil` it requires are the
+one runtime pair CMake will fetch, and only when the host provides
+neither: that build links code from the pinned revisions rather than
+from a distribution that patches and advertises its own advisories, so
+it carries the same urgency as any other pinned runtime dependency.
+Configuring with `-Dxb_FETCH_RE2=OFF` turns the source
+build into a configure error instead.
 
 The pins are **enforced** via `CACHE STRING ... FORCE` so a stale
 build cache cannot silently downgrade them. Intentional override (e.g.
