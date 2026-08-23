@@ -99,9 +99,16 @@ TEST_CASE("install and find_package with xb_fetch_schemas",
       "  return (val.mapping.empty() && renamed == \"bar_type\") ? 0 : 1;\n"
       "}\n");
 
-  // Step 3: Configure the mini-project
+  // Step 3: Configure the mini-project.  XB_SANITIZER_FLAGS carries the
+  // sanitizer flags this configuration built xb with; the consumer must
+  // compile and link with the same set to resolve the instrumentation
+  // symbols in the installed objects.
+  std::string sanitizer_flags = XB_SANITIZER_FLAGS;
+  std::string flags_arg = sanitizer_flags.empty() ? std::string()
+                                                  : " -DCMAKE_CXX_FLAGS=\"" +
+                                                        sanitizer_flags + "\"";
   rc = run_cmd("cmake -S " + project.string() + " -B " + bld.string() +
-                   " -DCMAKE_PREFIX_PATH=" + prefix.string(),
+                   " -DCMAKE_PREFIX_PATH=" + prefix.string() + flags_arg,
                output);
   INFO("configure output:\n" << output);
   REQUIRE(rc == 0);

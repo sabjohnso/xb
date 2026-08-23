@@ -325,13 +325,33 @@ if(xb_TEST_RE2_FETCH)
     TARGET xb_cmake_re2_fetch_test)
 endif()
 
+# Objects in the installed archive carry whatever sanitizer instrumentation
+# the configuration was built with, and the __asan_*/__ubsan_* symbols they
+# reference are resolved by the runtime the sanitizer flags pull in.  A
+# consumer compiled without those flags cannot link them, so the test's
+# mini-project has to be configured with the same set.  Collect them per
+# configuration; the genex picks the right one at build time.
+set(xb_test_configs ${CMAKE_CONFIGURATION_TYPES})
+if(NOT xb_test_configs)
+  set(xb_test_configs ${CMAKE_BUILD_TYPE})
+endif()
+set(xb_test_sanitizer_flags "")
+foreach(cfg IN LISTS xb_test_configs)
+  string(TOUPPER ${cfg} cfg_upper)
+  string(REGEX MATCHALL "-fsanitize=[^ ;]+"
+    cfg_flags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${cfg_upper}}")
+  string(REPLACE ";" " " cfg_flags "${cfg_flags}")
+  string(APPEND xb_test_sanitizer_flags "$<$<CONFIG:${cfg}>:${cfg_flags}>")
+endforeach()
+
 add_executable(xb_cmake_fetch_install_test cmake_fetch_install_test.cpp)
 target_link_libraries(xb_cmake_fetch_install_test PRIVATE Catch2::Catch2WithMain)
 target_compile_features(xb_cmake_fetch_install_test PRIVATE cxx_std_${xb_CXX_STANDARD})
 target_compile_definitions(xb_cmake_fetch_install_test PRIVATE
   XB_BUILD_DIR=${CMAKE_BINARY_DIR}
   XB_SCHEMA_DIR=${PROJECT_SOURCE_DIR}/schema
-  XB_BUILD_CONFIG=$<CONFIG>)
+  XB_BUILD_CONFIG=$<CONFIG>
+  XB_SANITIZER_FLAGS="${xb_test_sanitizer_flags}")
 # The test runs cmake --install which needs all targets (including the xb
 # CLI) to be built before the install step can rewrite RPATHs.
 add_dependencies(xb_cmake_fetch_install_test xb xb_library)
